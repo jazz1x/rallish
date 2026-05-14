@@ -93,6 +93,41 @@ func TestRouter_Next_BlockedNoReviewer(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestRouter_Next_HandoffThenRoundRobin(t *testing.T) {
+	ctx := context.Background()
+	preset := contract.Preset{
+		Routing: "handoff_then_round_robin",
+		Roles: []contract.Role{
+			{ID: "planner", Runtime: "x"},
+			{ID: "executor", Runtime: "y"},
+			{ID: "reviewer", Runtime: "z"},
+		},
+	}
+	r := NewRouter(preset)
+
+	// (c) No prior response starts round_robin at roles[0].
+	got, err := r.Next(ctx, nil, 1)
+	require.NoError(t, err)
+	require.Equal(t, "planner", got)
+
+	// (a) Valid handoff wins over round_robin.
+	prev := &contract.TurnResponse{HandoffTo: "reviewer"}
+	got, err = r.Next(ctx, prev, 2)
+	require.NoError(t, err)
+	require.Equal(t, "reviewer", got)
+
+	// After handoff, next turn resumes round_robin from the handoff target's position.
+	got, err = r.Next(ctx, nil, 3)
+	require.NoError(t, err)
+	require.Equal(t, "reviewer", got)
+
+	// (b) Handoff to unknown role falls back to round_robin.
+	prev = &contract.TurnResponse{HandoffTo: "unknown"}
+	got, err = r.Next(ctx, prev, 2)
+	require.NoError(t, err)
+	require.Equal(t, "executor", got)
+}
+
 func TestRouter_Next_UnsupportedRouting(t *testing.T) {
 	ctx := context.Background()
 	preset := contract.Preset{

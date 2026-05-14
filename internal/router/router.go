@@ -42,7 +42,7 @@ func (r *Router) Next(ctx context.Context, prev *contract.TurnResponse, turn int
 
 	// 3. Apply routing rule.
 	switch r.preset.Routing {
-	case "round_robin":
+	case "round_robin", "handoff_then_round_robin":
 		return r.roundRobin(turn), nil
 	default:
 		return "", fmt.Errorf("routing rule %q not supported in phase 1", r.preset.Routing)
