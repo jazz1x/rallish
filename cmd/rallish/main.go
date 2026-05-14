@@ -40,6 +40,7 @@ func main() {
 		},
 		daemonCmd(),
 		startCmd(),
+		cli.AddCmd(),
 	)
 
 	if err := fang.Execute(context.Background(), root, fang.WithoutVersion()); err != nil {
