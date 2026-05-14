@@ -1,6 +1,6 @@
 module github.com/jazz1x/hocketty
 
-go 1.25.0
+go 1.23
 
 require (
 	github.com/charmbracelet/fang v1.0.0
