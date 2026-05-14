@@ -53,6 +53,26 @@ When modifying A2A-related code:
 - Table-driven tests preferred.
 - Use `fake.NewPingPong` for turn-taking integration tests.
 
+## CI / Tooling Rules
+
+### golangci-lint
+
+This repo uses **golangci-lint v2**. The following rules are non-obvious and cost hours if violated:
+
+1. **v2 minors have breaking schema changes.** `v2.1.6` and `v2.12.2` are NOT compatible in `.golangci.yml`.
+   - `run.exclude-dirs` → `linters.exclusions.paths`
+   - `linters-settings` → `linters.settings`
+   - `forbidigo.forbid[].p` → `forbidigo.forbid[].pattern`
+2. **CI action version matters.** `golangci-lint-action@v6` does NOT support v2. Use **v7**.
+3. **Go build version matters.** A golangci-lint binary built with Go 1.24 cannot lint a Go 1.25 project. When this happens, upgrade the linter binary (not the action).
+4. **Never use `install-mode: goinstall` in CI.** It tries the v1 module path and fails for v2. Use binary mode (default).
+5. **Keep `.golangci.yml` minimal.** Avoid linter-specific settings when possible; they drift across minors.
+
+Current working combination (validated):
+- Action: `golangci/golangci-lint-action@v7`
+- Version: `latest` (tracks newest v2)
+- Install mode: `binary` (default)
+
 ## Commit Messages
 
 Follow conventional commits:
