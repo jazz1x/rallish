@@ -52,16 +52,28 @@ func (a *Adapter) Check() error {
 	return nil
 }
 
-// Run executes a single turn via the Kimi CLI.
-func (a *Adapter) Run(ctx context.Context, req contract.TurnRequest) (contract.TurnResponse, error) {
+// buildCmd constructs the exec.Cmd for a turn without running it.
+func (a *Adapter) buildCmd(ctx context.Context, req contract.TurnRequest) (*exec.Cmd, error) {
 	prompt, err := adapter.BuildPrompt(req)
 	if err != nil {
-		return contract.TurnResponse{}, fmt.Errorf("building prompt: %w", err)
+		return nil, fmt.Errorf("building prompt: %w", err)
 	}
 
-	// #nosec G204
+	//nolint:gosec // G204 — args are built from controlled inputs
 	cmd := exec.CommandContext(ctx, a.binary, "-p", prompt)
 	cmd.Env = adapter.BuildEnv("PATH", "HOME", "LANG", "TERM", "USER", "LOGNAME", "SHELL", "TMPDIR", "XDG_CONFIG_HOME", "KIMI_")
+	if req.Task.RepoRoot != "" {
+		cmd.Dir = req.Task.RepoRoot
+	}
+	return cmd, nil
+}
+
+// Run executes a single turn via the Kimi CLI.
+func (a *Adapter) Run(ctx context.Context, req contract.TurnRequest) (contract.TurnResponse, error) {
+	cmd, err := a.buildCmd(ctx, req)
+	if err != nil {
+		return contract.TurnResponse{}, err
+	}
 
 	out, err := cmd.Output()
 	if err != nil {

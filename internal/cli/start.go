@@ -28,10 +28,31 @@ type StartOptions struct {
 	SessionID      string
 	AllowShellExit bool
 	HomeDir        string
+	Repo           string
 }
 
 // RunStart loads a preset, ensures the daemon is running, creates a session, and starts runners.
 func RunStart(ctx context.Context, opts StartOptions) error {
+	repoRoot := opts.Repo
+	if repoRoot == "" {
+		var err error
+		repoRoot, err = os.Getwd()
+		if err != nil {
+			return fmt.Errorf("get working directory: %w", err)
+		}
+	}
+	repoRoot, err := filepath.Abs(repoRoot)
+	if err != nil {
+		return fmt.Errorf("resolve repo path: %w", err)
+	}
+	info, err := os.Stat(repoRoot)
+	if err != nil {
+		return fmt.Errorf("repo path does not exist: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("repo path is not a directory: %s", repoRoot)
+	}
+
 	presets, err := preset.LoadEmbedded()
 	if err != nil {
 		return fmt.Errorf("load embedded presets: %w", err)
@@ -81,7 +102,7 @@ func RunStart(ctx context.Context, opts StartOptions) error {
 		Task: contract.Task{
 			Title:    opts.Task,
 			Body:     opts.Task,
-			RepoRoot: opts.HomeDir,
+			RepoRoot: repoRoot,
 		},
 	}
 	bodyJSON, err := json.Marshal(createBody)
@@ -143,7 +164,7 @@ func RunStart(ctx context.Context, opts StartOptions) error {
 	}
 
 	logPath := filepath.Join(opts.HomeDir, ".hocketty", "sessions", sessionID, "log.jsonl")
-	fmt.Printf("Session %s completed successfully. Log: %s\n", sessionID, logPath)
+	fmt.Printf("Session %s in %s completed successfully. Log: %s\n", sessionID, repoRoot, logPath)
 	return nil
 }
 

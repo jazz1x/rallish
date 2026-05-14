@@ -82,5 +82,6 @@ func startCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.Task, "task", "", "Task description")
 	cmd.Flags().StringVar(&opts.SessionID, "session-id", "", "Optional session ID")
 	cmd.Flags().BoolVar(&opts.AllowShellExit, "allow-shell-exit", false, "Allow shell exit predicates")
+	cmd.Flags().StringVar(&opts.Repo, "repo", "", "Repository root for the session. Defaults to current working directory.")
 	return cmd
 }
