@@ -84,6 +84,13 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 
+	logger.InfoContext(ctx, "session_created",
+		"session_id", sess.ID,
+		"preset_name", req.Preset.Name,
+		"role_count", len(req.Preset.Roles),
+		"repo_root", req.Task.RepoRoot,
+	)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(sess); err != nil {
@@ -98,7 +105,7 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	sess, err := s.store.Get(ctx, id)
 	if err != nil {
-		logger.ErrorContext(ctx, "get session", "error", err)
+		logger.InfoContext(ctx, "session not found", "session_id", id)
 		http.Error(w, fmt.Sprintf("session not found: %v", err), http.StatusNotFound)
 		return
 	}
@@ -165,6 +172,13 @@ func (s *Server) handleNextTurn(w http.ResponseWriter, r *http.Request) {
 	s.pendingReqs[id] = req
 	s.mu.Unlock()
 
+	logger.InfoContext(ctx, "next_turn",
+		"session_id", id,
+		"turn", turn,
+		"role", roleID,
+		"runtime_hint", role.Runtime,
+	)
+
 	select {
 	case <-ctx.Done():
 		logger.InfoContext(ctx, "client disconnected", "session", id)
@@ -214,6 +228,7 @@ func (s *Server) handlePostTurn(w http.ResponseWriter, r *http.Request) {
 	req, ok := s.pendingReqs[id]
 	if !ok {
 		s.mu.Unlock()
+		logger.InfoContext(ctx, "no pending turn for session", "session_id", id)
 		http.Error(w, "no pending turn for session", http.StatusBadRequest)
 		return
 	}
@@ -242,6 +257,15 @@ func (s *Server) handlePostTurn(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("append turn: %v", err), http.StatusInternalServerError)
 		return
 	}
+
+	logger.InfoContext(ctx, "turn_recorded",
+		"session_id", id,
+		"turn", req.Turn,
+		"role", req.Role,
+		"done", resp.Done,
+		"handoff_to", resp.HandoffTo,
+		"self_eval", resp.SelfEval,
+	)
 
 	sess, err := s.store.Get(ctx, id)
 	if err != nil {
