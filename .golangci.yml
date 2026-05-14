@@ -1,5 +1,3 @@
-version: "2"
-
 run:
   timeout: 5m
   tests: true
@@ -16,21 +14,21 @@ linters:
     - revive
     - gocritic
 
-  settings:
-    forbidigo:
-      forbid:
-        - pattern: "^os\\.Environ\\(\\)$"
-          msg: "do not use os.Environ(); construct a minimal allowlist instead"
-        - pattern: 'exec\.Command\("sh"'
-          msg: "do not use exec.Command with sh; use literal arg slices instead"
-        - pattern: 'exec\.Command\("bash"'
-          msg: "do not use exec.Command with bash; use literal arg slices instead"
-        - pattern: 'exec\.Command\("zsh"'
-          msg: "do not use exec.Command with zsh; use literal arg slices instead"
+linters-settings:
+  forbidigo:
+    forbid:
+      - p: "^os\\.Environ\\(\\)$"
+        msg: "do not use os.Environ(); construct a minimal allowlist instead"
+      - p: 'exec\.Command\("sh"'
+        msg: "do not use exec.Command with sh; use literal arg slices instead"
+      - p: 'exec\.Command\("bash"'
+        msg: "do not use exec.Command with bash; use literal arg slices instead"
+      - p: 'exec\.Command\("zsh"'
+        msg: "do not use exec.Command with zsh; use literal arg slices instead"
 
-formatters:
-  enable:
-    - gofmt
+output:
+  formats:
+    - format: colored-line-number
 
 issues:
   max-issues-per-linter: 0
