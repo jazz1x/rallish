@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/fang"
 	"github.com/jazz1x/hocketty/internal/buildinfo"
+	"github.com/jazz1x/hocketty/internal/doctor"
 	"github.com/spf13/cobra"
 )
 
@@ -33,8 +34,7 @@ func main() {
 			Use:   "doctor",
 			Short: "Check adapters, paths, and permissions",
 			RunE: func(cmd *cobra.Command, _ []string) error {
-				_, err := fmt.Fprintln(cmd.OutOrStdout(), "doctor: not fully implemented in phase 0")
-				return err
+				return doctor.Run(cmd.Context())
 			},
 		},
 	)
