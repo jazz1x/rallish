@@ -9,15 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- SSE long-poll on `/next` gated by `?as=<role>` to eliminate race conditions between concurrent runners.
-- `fake.NewPingPong(maxTurns, delay)` for realistic turn-taking simulation in demo presets.
-- Release workflow (`.github/workflows/release.yml`) with cosign keyless signing and syft SBOM generation.
-- Homebrew tap automation via GoReleaser.
-- `RELEASING.md` with versioning policy and release checklist.
+- A2A Protocol layer: `GET /.well-known/agent.json`, `POST /a2a` (JSON-RPC 2.0)
+  - `tasks/send`, `tasks/get`, `tasks/cancel`, `tasks/sendSubscribe` (SSE)
+- `pkg/contract/a2a.go` with AgentCard, TaskState, JSON-RPC envelopes
+- Token budget hard enforcement in broker (`handleNextTurn`)
+- `internal/scratch/scratch.go` with automatic compaction when `max_kb` exceeded
+- Model hint injection into adapter prompts
 
 ### Changed
 
-- `fake` adapter in the CLI registry now simulates 1-second work per turn so the hocket flow is visible during demos.
+- Removed all "hocket" terminology; replaced with "turn-taking" / "relay"
+- Updated `lefthook.yml` to scan staged Go files only
+- Upgraded `.golangci.yml` to v2 format with `.toolchain` exclusion
+- Fixed `internal/cli/start.go` forbidigo and errcheck violations
 
 ### Fixed
 

@@ -1,6 +1,6 @@
 .PHONY: build test check run lint tidy bench setup-hooks
 
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+VERSION ?= $(shell cat VERSION 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
@@ -31,5 +31,13 @@ bench:
 	go test -bench=. -benchmem ./...
 
 setup-hooks:
-	@which lefthook > /dev/null 2>&1 || go install github.com/evilmartians/lefthook@latest
-	lefthook install
+	@if [ -f "$(PWD)/.toolchain/bin/lefthook" ]; then \
+		"$(PWD)/.toolchain/bin/lefthook" install; \
+	else \
+		which lefthook > /dev/null 2>&1 || go install github.com/evilmartians/lefthook@latest; \
+		lefthook install; \
+	fi
+	@bash scripts/patch-lefthook.sh
+
+update-version:
+	@bash scripts/update-version.sh

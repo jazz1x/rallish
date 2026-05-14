@@ -182,7 +182,7 @@ func RunStart(ctx context.Context, opts StartOptions) error {
 		sessionID = sess.ID
 	}
 
-	fmt.Println(sessionID)
+	_, _ = fmt.Fprintln(os.Stdout, sessionID)
 
 	reg, err := BuildRegistry()
 	if err != nil {
@@ -211,7 +211,7 @@ func RunStart(ctx context.Context, opts StartOptions) error {
 	}
 
 	logPath := filepath.Join(opts.HomeDir, ".rallish", "sessions", sessionID, "log.jsonl")
-	fmt.Printf("Session %s in %s completed successfully. Log: %s\n", sessionID, repoRoot, logPath)
+	_, _ = fmt.Fprintf(os.Stdout, "Session %s in %s completed successfully. Log: %s\n", sessionID, repoRoot, logPath)
 	return nil
 }
 

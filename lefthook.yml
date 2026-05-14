@@ -2,8 +2,9 @@ pre-commit:
   parallel: true
   commands:
     go-fmt:
-      run: gofmt -l .
-      fail_text: "Go files are not formatted. Run 'gofmt -w .' to fix."
+      glob: "*.go"
+      run: gofmt -l {staged_files}
+      fail_text: "Go files are not formatted. Run 'gofmt -w {staged_files}' to fix."
     go-vet:
       run: go vet ./...
       fail_text: "go vet found issues. Please fix them before committing."

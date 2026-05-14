@@ -1,7 +1,7 @@
 # rallish — Design
 
 > *"Two agents, one melody."*
-> A local broker that lets multiple coding-agent CLIs (Claude Code, Kimi Code, …) hocket — alternate turns — on a single task.
+> A local broker that lets multiple coding-agent CLIs (Claude Code, Kimi Code, …) turn-taking — alternate turns — on a single task.
 
 ---
 
@@ -483,6 +483,6 @@ Each phase is a runnable cut. Do not bundle.
 - The binary: `rallish` (alias `htty` is optional)
 - A "session" = one task, however many turns
 - A "turn" = one (request, response) pair
-- A "hocket" = one alternating exchange between two voices
+- A "relay" = one alternating exchange between two agents
 
 Anything new follows this vocabulary. No `agent.go` / `manager.go` / `executor.go` boilerplate — use the domain terms.

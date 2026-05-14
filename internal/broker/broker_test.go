@@ -375,3 +375,45 @@ func TestNext_AsRoleTerminalDuringWait(t *testing.T) {
 		t.Fatal("beta did not receive 410 after session became terminal")
 	}
 }
+
+
+func TestBroker_BudgetExhaustion_410Gone(t *testing.T) {
+	dir := t.TempDir()
+	clock := &fakeClock{t: time.Now()}
+
+	store, err := session.NewStore(dir, clock)
+	require.NoError(t, err)
+
+	budgeter := budget.NewBudgeter(clock)
+	srv := NewServer(store, budgeter)
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	// Session with tiny token budget.
+	body := `{"preset": {"name":"test","routing":"round_robin","roles":[{"id":"planner","runtime":"claude"}],"budget":{"tokens_left":10,"turns_left":10}}, "task": {"title":"t","body":"b","repo_root":"/tmp"}}`
+	resp, err := http.Post(ts.URL+"/sessions", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	var sess session.Session
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&sess))
+	_ = resp.Body.Close()
+
+	// Get first turn.
+	resp, err = http.Get(ts.URL + "/sessions/" + sess.ID + "/next")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	_ = resp.Body.Close()
+
+	// Post turn with usage that exceeds token budget.
+	turnBody := `{"done":false,"summary":"did work","usage":{"tokens_in":20,"tokens_out":20}}`
+	resp, err = http.Post(ts.URL+"/sessions/"+sess.ID+"/turn", "application/json", strings.NewReader(turnBody))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	_ = resp.Body.Close()
+
+	// Next /next should return 410 Gone because budget is exhausted.
+	resp, err = http.Get(ts.URL + "/sessions/" + sess.ID + "/next")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusGone, resp.StatusCode)
+	_ = resp.Body.Close()
+}
