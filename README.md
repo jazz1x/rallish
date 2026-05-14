@@ -3,7 +3,7 @@
 > *Two agents, one melody.*
 
 A local broker that lets multiple coding-agent CLIs (Claude Code, Kimi Code, …)
-**hocket** — alternate turns — on a single task.
+**turn-taking** — alternate turns — on a single task.
 
 See [`DESIGN.md`](./DESIGN.md) for the full spec.
 
@@ -11,7 +11,7 @@ See [`DESIGN.md`](./DESIGN.md) for the full spec.
 
 Pre-Phase-0. Design only.
 
-## What "hocket" means
+## What "turn-taking" means
 
-A medieval music technique where two voices take turns playing single notes
-to weave one melody. That's what we want two coding agents to do.
+An execution pattern where multiple agents alternate turns to collaborate
+on a single task, passing state through a shared broker.

@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `fake` adapter in the CLI registry now simulates 1-second work per turn so the hocket flow is visible during demos.
+- `fake` adapter in the CLI registry now simulates 1-second work per turn so the turn-taking flow is visible during demos.
 
 ### Fixed
 
