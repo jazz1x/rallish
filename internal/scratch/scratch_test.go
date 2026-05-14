@@ -59,3 +59,15 @@ func TestManagerCompaction(t *testing.T) {
 		t.Fatalf("expected compaction marker in scratch")
 	}
 }
+
+func BenchmarkManagerAppend(b *testing.B) {
+	dir := b.TempDir()
+	m := NewManager(filepath.Join(dir, "scratch.md"), 64)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := m.Append("line of scratch content\n"); err != nil {
+			b.Fatalf("append: %v", err)
+		}
+	}
+}

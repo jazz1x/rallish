@@ -188,8 +188,6 @@ func (s *Server) handleNextTurn(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			remaining = s.budgeter.Remaining(state.preset.Budget, state.totalUsage, state.turnCount)
-
 			req := contract.TurnRequest{
 				Session:     id,
 				Turn:        turn,

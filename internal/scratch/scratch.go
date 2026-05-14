@@ -61,7 +61,10 @@ func (m *Manager) compactIfNeeded() error {
 		return err
 	}
 	limit := m.maxKB * 1024
-	if info.Size() <= limit {
+	// Trigger compaction at 80 % of the limit so we leave headroom for
+	// future appends without immediately re-compacting.
+	threshold := limit * 8 / 10
+	if info.Size() <= threshold {
 		return nil
 	}
 

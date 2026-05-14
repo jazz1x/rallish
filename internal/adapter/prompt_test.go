@@ -44,3 +44,31 @@ func TestParseLastJSONBlock_NoJSON(t *testing.T) {
 	var resp contract.TurnResponse
 	require.Error(t, ParseLastJSONBlock(out, &resp))
 }
+
+func BenchmarkBuildPrompt(b *testing.B) {
+	req := contract.TurnRequest{
+		Session:     "sess-123",
+		Turn:        5,
+		Role:        "planner",
+		RuntimeHint: "claude",
+		ModelHint:   "claude-3-5-sonnet",
+		Budget:      contract.Budget{TokensLeft: 8000, TurnsLeft: 10},
+		LastTurn: &contract.LastTurn{
+			From:    "executor",
+			Summary: "implemented feature X",
+			Artifacts: []string{"feat.go"},
+			SelfEval:  contract.SelfEvalConfident,
+		},
+		Task: contract.Task{
+			Title:    "Add auth",
+			Body:     "Implement OAuth2 flow",
+			RepoRoot: "/tmp/repo",
+		},
+		ExitWhen: []contract.ExitCondition{contract.ExitTestsPass},
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, err := BuildPrompt(req)
+		require.NoError(b, err)
+	}
+}

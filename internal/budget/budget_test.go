@@ -50,3 +50,14 @@ func TestBudgeter_IsDeadlinePassed(t *testing.T) {
 	// Zero deadline means no deadline
 	require.False(t, b.IsDeadlinePassed(start, 0))
 }
+
+func BenchmarkBudgeter_Remaining(b *testing.B) {
+	clock := &fakeClock{t: time.Now()}
+	budgeter := NewBudgeter(clock)
+	initial := contract.Budget{TokensLeft: 100000, TurnsLeft: 1000, DeadlineMS: 60000}
+	used := contract.Usage{TokensIn: 50000, TokensOut: 25000, Ms: 10000}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = budgeter.Remaining(initial, used, 500)
+	}
+}
