@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/jazz1x/hocketty/internal/adapter"
 	"github.com/jazz1x/hocketty/internal/adapter/claude"
@@ -23,7 +24,7 @@ func BuildRegistry() (*adapter.Registry, error) {
 			return nil, fmt.Errorf("register kimi: %w", err)
 		}
 	}
-	if err := reg.Register("fake", fake.New(nil)); err != nil {
+	if err := reg.Register("fake", fake.NewPingPong(5, 1*time.Second)); err != nil {
 		return nil, fmt.Errorf("register fake: %w", err)
 	}
 

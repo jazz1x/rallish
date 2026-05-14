@@ -32,3 +32,21 @@ func TestFakeAdapterNoCallback(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp.Done)
 }
+
+func TestFakeAdapterPingPong(t *testing.T) {
+	a := NewPingPong(4, 0)
+
+	// Turns 1-3: not done.
+	for turn := 1; turn <= 3; turn++ {
+		resp, err := a.Run(context.Background(), contract.TurnRequest{Turn: turn})
+		require.NoError(t, err)
+		require.False(t, resp.Done)
+		require.Contains(t, resp.Summary, "completed")
+	}
+
+	// Turn 4+: done.
+	resp, err := a.Run(context.Background(), contract.TurnRequest{Turn: 4})
+	require.NoError(t, err)
+	require.True(t, resp.Done)
+	require.Equal(t, "all done", resp.Summary)
+}
