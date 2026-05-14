@@ -4,8 +4,6 @@ run:
   timeout: 5m
   tests: true
   go: "1.25"
-  exclude-dirs:
-    - .toolchain
 
 linters:
   enable:
@@ -17,6 +15,10 @@ linters:
     - gosec
     - revive
     - gocritic
+  exclusions:
+    paths:
+      - .toolchain
+
 output:
   formats:
     text:
