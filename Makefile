@@ -1,4 +1,4 @@
-.PHONY: build test check run lint tidy bench
+.PHONY: build test check run lint tidy bench setup-hooks
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -29,3 +29,7 @@ tidy:
 
 bench:
 	go test -bench=. -benchmem ./...
+
+setup-hooks:
+	@which lefthook > /dev/null 2>&1 || go install github.com/evilmartians/lefthook@latest
+	lefthook install
