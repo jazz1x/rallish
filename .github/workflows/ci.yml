@@ -27,15 +27,10 @@ jobs:
       - name: Download modules
         run: go mod download
 
-      - name: Install golangci-lint
-        run: |
-          mkdir -p "$HOME/bin"
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$HOME/bin"
-
       - name: Run golangci-lint
         run: |
-          export PATH="$HOME/bin:$PATH"
-          golangci-lint run
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+          PATH="$PATH:$(go env GOPATH)/bin" golangci-lint run
 
   test:
     name: Test
