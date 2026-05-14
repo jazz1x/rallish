@@ -39,6 +39,7 @@ type sessionState struct {
 	terminal       bool
 	terminalReason string
 	notify         chan struct{}
+	a2aSubs        []chan contract.A2ATaskUpdateEvent
 }
 
 // NewServer creates a new broker Server.
@@ -55,6 +56,7 @@ func NewServer(store *session.Store, budgeter *budget.Budgeter) *Server {
 	s.mux.HandleFunc("GET /sessions/{id}", s.handleGetSession)
 	s.mux.HandleFunc("GET /sessions/{id}/next", s.handleNextTurn)
 	s.mux.HandleFunc("POST /sessions/{id}/turn", s.handlePostTurn)
+	s.registerA2ARoutes()
 	return s
 }
 
@@ -334,6 +336,29 @@ func (s *Server) handlePostTurn(w http.ResponseWriter, r *http.Request) {
 	state.notify = make(chan struct{})
 	s.sessionStates[id] = state
 	s.mu.Unlock()
+
+	// Notify A2A subscribers
+	if len(state.a2aSubs) > 0 {
+		event := contract.A2ATaskUpdateEvent{
+			ID: id,
+			Status: contract.A2ATaskStatus{
+				State:  terminalReasonToTaskState(state.terminal, state.terminalReason),
+				Reason: state.terminalReason,
+			},
+			Final: state.terminal,
+		}
+		for _, ch := range state.a2aSubs {
+			select {
+			case ch <- event:
+			default:
+			}
+		}
+		if state.terminal {
+			for _, ch := range state.a2aSubs {
+				close(ch)
+			}
+		}
+	}
 
 	if oldNotify != nil {
 		close(oldNotify)
