@@ -107,3 +107,40 @@ func TestLoop_SessionGone_ReturnsNil(t *testing.T) {
 	require.Equal(t, 1, callCount)
 	require.True(t, turnPosted)
 }
+
+func TestLoop_204_RePolls(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var nextCount int
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /sessions/{id}/turn", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": r.PathValue("id")})
+	})
+	mux.HandleFunc("GET /sessions/{id}/next", func(w http.ResponseWriter, r *http.Request) {
+		nextCount++
+		if nextCount <= 2 {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		//nolint:gosec // test-only mock server with fully controlled input
+		_, _ = w.Write([]byte("data: {\"session\":\"" + r.PathValue("id") + "\",\"turn\":1,\"role\":\"ralph\"}\n\n"))
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	callCount := 0
+	fa := fake.New(func(_ int) contract.TurnResponse {
+		callCount++
+		return contract.TurnResponse{Done: true, Summary: "turn"}
+	})
+
+	loop := NewLoop(fa, "ralph", ts.URL, "test-session")
+	err := loop.Run(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, callCount)
+	require.Equal(t, 3, nextCount)
+}

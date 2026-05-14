@@ -21,6 +21,9 @@ import (
 // ErrSessionGone is returned when the broker signals the session has terminated.
 var ErrSessionGone = errors.New("session gone")
 
+// errNoTurnYet is returned when the broker has no turn for this role yet.
+var errNoTurnYet = errors.New("no turn yet")
+
 // Loop polls the broker for turns and delegates to an adapter.
 type Loop struct {
 	adapter   adapter.Adapter
@@ -38,7 +41,7 @@ func NewLoop(adapter adapter.Adapter, role, brokerURL, sessionID string) *Loop {
 		brokerURL: strings.TrimSuffix(brokerURL, "/"),
 		sessionID: sessionID,
 		client: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 45 * time.Second,
 		},
 	}
 }
@@ -54,6 +57,9 @@ func (l *Loop) Run(ctx context.Context) error {
 		if err != nil {
 			if errors.Is(err, ErrSessionGone) {
 				return nil
+			}
+			if errors.Is(err, errNoTurnYet) {
+				continue
 			}
 			if isTransient(err) {
 				slog.WarnContext(ctx, "transient error polling next turn", "error", err)
@@ -97,6 +103,9 @@ func (l *Loop) pollNext(ctx context.Context) (contract.TurnRequest, error) {
 
 	if resp.StatusCode == http.StatusGone {
 		return contract.TurnRequest{}, ErrSessionGone
+	}
+	if resp.StatusCode == http.StatusNoContent {
+		return contract.TurnRequest{}, errNoTurnYet
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

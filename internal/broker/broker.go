@@ -18,9 +18,10 @@ import (
 
 // Server is the HTTP/SSE broker.
 type Server struct {
-	mux      *http.ServeMux
-	store    *session.Store
-	budgeter *budget.Budgeter
+	mux         *http.ServeMux
+	store       *session.Store
+	budgeter    *budget.Budgeter
+	pollTimeout time.Duration
 
 	mu            sync.Mutex
 	pendingReqs   map[string]contract.TurnRequest
@@ -37,6 +38,7 @@ type sessionState struct {
 	createdAt      time.Time
 	terminal       bool
 	terminalReason string
+	notify         chan struct{}
 }
 
 // NewServer creates a new broker Server.
@@ -45,6 +47,7 @@ func NewServer(store *session.Store, budgeter *budget.Budgeter) *Server {
 		mux:           http.NewServeMux(),
 		store:         store,
 		budgeter:      budgeter,
+		pollTimeout:   30 * time.Second,
 		pendingReqs:   make(map[string]contract.TurnRequest),
 		sessionStates: make(map[string]sessionState),
 	}
@@ -87,6 +90,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		preset:    req.Preset,
 		router:    router.NewRouter(req.Preset),
 		createdAt: sess.CreatedAt,
+		notify:    make(chan struct{}),
 	}
 	s.mu.Unlock()
 
@@ -127,98 +131,129 @@ func (s *Server) handleNextTurn(w http.ResponseWriter, r *http.Request) {
 	logger := slog.With("handler", "next_turn")
 
 	id := r.PathValue("id")
+	as := r.URL.Query().Get("as")
 
-	s.mu.Lock()
-	state, ok := s.sessionStates[id]
-	if !ok {
-		s.mu.Unlock()
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
-	if state.terminal {
-		s.mu.Unlock()
-		http.Error(w, fmt.Sprintf("session terminated: %s", state.terminalReason), http.StatusGone)
-		return
-	}
+	timer := time.NewTimer(s.pollTimeout)
+	defer timer.Stop()
 
-	sess, err := s.store.Get(ctx, id)
-	if err != nil {
-		s.mu.Unlock()
-		logger.ErrorContext(ctx, "get session", "error", err)
-		http.Error(w, fmt.Sprintf("get session: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	turn := state.turnCount + 1
-	roleID, err := state.router.Next(ctx, state.lastResp, turn)
-	if err != nil {
-		s.mu.Unlock()
-		logger.ErrorContext(ctx, "router next", "error", err)
-		http.Error(w, fmt.Sprintf("router error: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	var role contract.Role
-	for _, rl := range state.preset.Roles {
-		if rl.ID == roleID {
-			role = rl
-			break
+	for {
+		s.mu.Lock()
+		state, ok := s.sessionStates[id]
+		if !ok {
+			s.mu.Unlock()
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
 		}
-	}
+		if state.terminal {
+			s.mu.Unlock()
+			http.Error(w, fmt.Sprintf("session terminated: %s", state.terminalReason), http.StatusGone)
+			return
+		}
 
-	remaining := s.budgeter.Remaining(state.preset.Budget, state.totalUsage, state.turnCount)
+		sess, err := s.store.Get(ctx, id)
+		if err != nil {
+			s.mu.Unlock()
+			logger.ErrorContext(ctx, "get session", "error", err)
+			http.Error(w, fmt.Sprintf("get session: %v", err), http.StatusInternalServerError)
+			return
+		}
 
-	req := contract.TurnRequest{
-		Session:     id,
-		Turn:        turn,
-		Role:        roleID,
-		RuntimeHint: role.Runtime,
-		ModelHint:   role.Model,
-		Budget:      remaining,
-		LastTurn:    state.lastTurn,
-		Task:        sess.Task,
-		ExitWhen:    state.preset.ExitWhen,
-	}
+		turn := state.turnCount + 1
+		roleID, err := state.router.Next(ctx, state.lastResp, turn)
+		if err != nil {
+			s.mu.Unlock()
+			logger.ErrorContext(ctx, "router next", "error", err)
+			http.Error(w, fmt.Sprintf("router error: %v", err), http.StatusInternalServerError)
+			return
+		}
 
-	s.pendingReqs[id] = req
-	s.mu.Unlock()
+		if as == "" || as == roleID {
+			var role contract.Role
+			for _, rl := range state.preset.Roles {
+				if rl.ID == roleID {
+					role = rl
+					break
+				}
+			}
 
-	logger.InfoContext(ctx, "next_turn",
-		"session_id", id,
-		"turn", turn,
-		"role", roleID,
-		"runtime_hint", role.Runtime,
-	)
+			remaining := s.budgeter.Remaining(state.preset.Budget, state.totalUsage, state.turnCount)
 
-	select {
-	case <-ctx.Done():
-		logger.InfoContext(ctx, "client disconnected", "session", id)
-		return
-	default:
-	}
+			req := contract.TurnRequest{
+				Session:     id,
+				Turn:        turn,
+				Role:        roleID,
+				RuntimeHint: role.Runtime,
+				ModelHint:   role.Model,
+				Budget:      remaining,
+				LastTurn:    state.lastTurn,
+				Task:        sess.Task,
+				ExitWhen:    state.preset.ExitWhen,
+			}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.WriteHeader(http.StatusOK)
+			s.pendingReqs[id] = req
+			s.mu.Unlock()
 
-	if flusher, ok := w.(http.Flusher); ok {
-		flusher.Flush()
-	}
+			if !timer.Stop() {
+				<-timer.C
+			}
 
-	data, err := json.Marshal(req)
-	if err != nil {
-		logger.ErrorContext(ctx, "marshal turn request", "error", err)
-		return
-	}
+			logger.InfoContext(ctx, "next_turn",
+				"session_id", id,
+				"turn", turn,
+				"role", roleID,
+				"runtime_hint", role.Runtime,
+			)
 
-	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
-		logger.ErrorContext(ctx, "write sse", "error", err)
-		return
-	}
+			select {
+			case <-ctx.Done():
+				logger.InfoContext(ctx, "client disconnected", "session", id)
+				return
+			default:
+			}
 
-	if flusher, ok := w.(http.Flusher); ok {
-		flusher.Flush()
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			w.WriteHeader(http.StatusOK)
+
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+
+			data, err := json.Marshal(req)
+			if err != nil {
+				logger.ErrorContext(ctx, "marshal turn request", "error", err)
+				return
+			}
+
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+				logger.ErrorContext(ctx, "write sse", "error", err)
+				return
+			}
+
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			return
+		}
+
+		// as does not match — long-poll.
+		notify := state.notify
+		s.mu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			logger.InfoContext(ctx, "client disconnected", "session", id)
+			return
+		case <-notify:
+			// State changed (turn posted or terminal set). Re-check.
+		case <-timer.C:
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 	}
 }
 
@@ -291,15 +326,24 @@ func (s *Server) handlePostTurn(w http.ResponseWriter, r *http.Request) {
 		DeadlineMS:   state.preset.Budget.DeadlineMS,
 	}
 	matched, reason, evalErr := exit.NewEvaluator(false).Evaluate(ctx, evalState, state.preset.ExitWhen)
+	if matched {
+		state.terminal = true
+		state.terminalReason = reason
+	}
+	oldNotify := state.notify
+	state.notify = make(chan struct{})
+	s.sessionStates[id] = state
+	s.mu.Unlock()
+
+	if oldNotify != nil {
+		close(oldNotify)
+	}
+
 	if evalErr != nil {
 		logger.InfoContext(ctx, "exit_predicate_shell_skipped", "session_id", id, "error", evalErr)
 	} else if matched {
-		state.terminal = true
-		state.terminalReason = reason
-		s.sessionStates[id] = state
 		logger.InfoContext(ctx, "session_terminal", "session_id", id, "reason", reason, "turn", state.turnCount)
 	}
-	s.mu.Unlock()
 
 	sess, err := s.store.Get(ctx, id)
 	if err != nil {
