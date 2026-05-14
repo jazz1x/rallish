@@ -60,7 +60,8 @@ func (m *Manager) compactIfNeeded() error {
 	if err != nil {
 		return err
 	}
-	if info.Size() <= m.maxKB*1024 {
+	limit := m.maxKB * 1024
+	if info.Size() <= limit {
 		return nil
 	}
 
@@ -69,16 +70,35 @@ func (m *Manager) compactIfNeeded() error {
 		return err
 	}
 
-	// Truncate to the second half, preserving line boundaries.
+	summary := []byte("<!-- Scratchpad auto-compacted; older content truncated -->\n\n")
+
+	// We need len(summary) + len(data) - half <= limit,
+	// so half must be at least len(data) + len(summary) - limit.
+	minHalf := len(data) + len(summary) - int(limit)
+	if minHalf < 0 {
+		minHalf = 0
+	}
+
+	// Truncate to the second half (or more if needed), preserving line boundaries.
 	half := len(data) / 2
+	if half < minHalf {
+		half = minHalf
+	}
+	origHalf := half
 	for half < len(data) && data[half] != '\n' {
 		half++
 	}
-	if half < len(data) {
+	if half >= len(data) {
+		// No newline found in second half; keep from original midpoint.
+		half = origHalf
+	} else {
 		half++ // skip the newline
 	}
 
-	summary := []byte("<!-- Scratchpad auto-compacted; older content truncated -->\n\n")
+	if half > len(data) {
+		half = len(data)
+	}
+
 	newData := make([]byte, 0, len(summary)+len(data)-half)
 	newData = append(newData, summary...)
 	newData = append(newData, data[half:]...)

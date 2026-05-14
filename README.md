@@ -1,6 +1,6 @@
 # rallish
 
-[![version](https://img.shields.io/badge/version-0.2.0-blue)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.0.1-blue)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![go](https://img.shields.io/badge/go-1.25+-blue)](go.mod)
 
