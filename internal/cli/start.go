@@ -64,6 +64,7 @@ func RunStart(ctx context.Context, opts StartOptions) error {
 			if err == nil {
 				break
 			}
+			time.Sleep(250 * time.Millisecond)
 		}
 		if err != nil {
 			return fmt.Errorf("daemon did not write port file: %w", err)
