@@ -31,8 +31,13 @@ bench:
 	go test -bench=. -benchmem ./...
 
 setup-hooks:
-	@which lefthook > /dev/null 2>&1 || go install github.com/evilmartians/lefthook@latest
-	lefthook install
+	@if [ -f "$(PWD)/.toolchain/bin/lefthook" ]; then \
+		"$(PWD)/.toolchain/bin/lefthook" install; \
+	else \
+		which lefthook > /dev/null 2>&1 || go install github.com/evilmartians/lefthook@latest; \
+		lefthook install; \
+	fi
+	@bash scripts/patch-lefthook.sh
 
 update-version:
 	@bash scripts/update-version.sh
