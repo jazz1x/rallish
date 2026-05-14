@@ -17,7 +17,11 @@ func BuildPrompt(req contract.TurnRequest) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf(`You are a turn-taking agent in a multi-agent system.
+	modelHint := ""
+	if req.ModelHint != "" {
+		modelHint = fmt.Sprintf("\nModel hint: use model %q for this turn.\n", req.ModelHint)
+	}
+	return fmt.Sprintf(`You are a turn-taking agent in a multi-agent system.%s
 
 The following JSON is your TurnRequest:
 
@@ -34,7 +38,7 @@ TurnResponse fields:
 - notes_for_human (string, optional)
 - usage (object with tokens_in, tokens_out, ms, optional)
 
-Do not include any text outside the fenced JSON block.`, string(data)), nil
+Do not include any text outside the fenced JSON block.`, modelHint, string(data)), nil
 }
 
 // ParseLastJSONBlock extracts a TurnResponse from CLI output. It prefers the

@@ -152,6 +152,16 @@ func (s *Server) handleNextTurn(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		remaining := s.budgeter.Remaining(state.preset.Budget, state.totalUsage, state.turnCount)
+		if s.budgeter.IsExhausted(remaining) {
+			state.terminal = true
+			state.terminalReason = "budget exhausted"
+			s.sessionStates[id] = state
+			s.mu.Unlock()
+			http.Error(w, "session terminated: budget exhausted", http.StatusGone)
+			return
+		}
+
 		sess, err := s.store.Get(ctx, id)
 		if err != nil {
 			s.mu.Unlock()
@@ -178,7 +188,7 @@ func (s *Server) handleNextTurn(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			remaining := s.budgeter.Remaining(state.preset.Budget, state.totalUsage, state.turnCount)
+			remaining = s.budgeter.Remaining(state.preset.Budget, state.totalUsage, state.turnCount)
 
 			req := contract.TurnRequest{
 				Session:     id,
