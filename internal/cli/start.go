@@ -13,13 +13,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/jazz1x/hocketty/internal/adapter"
 	"github.com/jazz1x/hocketty/internal/preset"
 	"github.com/jazz1x/hocketty/internal/runner"
 	"github.com/jazz1x/hocketty/pkg/contract"
+	"golang.org/x/sync/errgroup"
 )
 
 // StartOptions holds flags for the start command.
@@ -61,7 +60,6 @@ func RunStart(ctx context.Context, opts StartOptions) error {
 			return fmt.Errorf("start daemon: %w", err)
 		}
 		for i := 0; i < 20; i++ {
-			time.Sleep(250 * time.Millisecond)
 			port, err = readPortFile(portFile)
 			if err == nil {
 				break
@@ -122,53 +120,30 @@ func RunStart(ctx context.Context, opts StartOptions) error {
 		return fmt.Errorf("build registry: %w", err)
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	var wg sync.WaitGroup
+	g, ctx := errgroup.WithContext(ctx)
 	for _, role := range p.Roles {
 		a, ok := reg.Get(role.Runtime)
 		if !ok {
 			return fmt.Errorf("unknown runtime %q for role %q", role.Runtime, role.ID)
 		}
-		wg.Add(1)
-		go func(roleID string, adp adapter.Adapter) {
-			defer wg.Done()
-			defer cancel()
-			if err := runner.NewLoop(adp, roleID, brokerURL, sessionID).Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				slog.Error("runner loop exited", "role", roleID, "error", err)
+		r := role
+		g.Go(func() error {
+			err := runner.NewLoop(a, r.ID, brokerURL, sessionID).Run(ctx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				slog.Error("runner loop exited", "role", r.ID, "error", err)
+				return err
 			}
-		}(role.ID, a)
-	}
-
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-done:
 			return nil
-		case <-ticker.C:
-			//nolint:gosec // local broker URL
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, brokerURL+"/sessions/"+sessionID, nil)
-			if err != nil {
-				continue
-			}
-			res, err := client.Do(req)
-			if err != nil {
-				continue
-			}
-			_ = res.Body.Close()
-		}
+		})
 	}
+
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
+	logPath := filepath.Join(opts.HomeDir, ".hocketty", "sessions", sessionID, "log.jsonl")
+	fmt.Printf("Session %s completed successfully. Log: %s\n", sessionID, logPath)
+	return nil
 }
 
 func readPortFile(path string) (string, error) {
