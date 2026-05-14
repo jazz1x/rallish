@@ -2,6 +2,11 @@
 // These are the only types that third-party adapters need to import.
 package contract
 
+import (
+	"fmt"
+	"strings"
+)
+
 // ExitCondition defines when a session should terminate.
 type ExitCondition string
 
@@ -110,6 +115,41 @@ type TurnResponse struct {
 	NotesForHuman string `json:"notes_for_human,omitempty"`
 	// Usage reports token and timing consumption for this turn.
 	Usage *Usage `json:"usage,omitempty"`
+}
+
+// Compact returns a one-line summary of the turn suitable for scratchpad
+// compaction. It omits empty fields to keep the output short.
+func (r TurnResponse) Compact() string {
+	var b strings.Builder
+	if r.Done {
+		b.WriteString("[done] ")
+	}
+	if r.HandoffTo != "" {
+		b.WriteString("→ ")
+		b.WriteString(r.HandoffTo)
+		b.WriteString(" ")
+	}
+	b.WriteString("eval=")
+	b.WriteString(string(r.SelfEval))
+	if r.Summary != "" {
+		b.WriteString(" summary=\"")
+		b.WriteString(r.Summary)
+		b.WriteString("\"")
+	}
+	if len(r.Artifacts) > 0 {
+		b.WriteString(" artifacts=[")
+		for i, a := range r.Artifacts {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(a)
+		}
+		b.WriteString("]")
+	}
+	if r.Usage != nil {
+		fmt.Fprintf(&b, " usage=%d/%d", r.Usage.TokensIn, r.Usage.TokensOut)
+	}
+	return b.String()
 }
 
 // Role defines a single participant in a preset.

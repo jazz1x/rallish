@@ -13,6 +13,12 @@ import (
 //go:embed all:presets
 var presetsFS embed.FS
 
+// ReadRaw returns the raw YAML bytes for a named embedded preset.
+func ReadRaw(name string) ([]byte, error) {
+	path := "presets/" + name + ".yaml"
+	return presetsFS.ReadFile(path)
+}
+
 // LoadEmbedded reads all shipped YAML presets from the embedded FS.
 func LoadEmbedded() (map[string]contract.Preset, error) {
 	subFS, err := fs.Sub(presetsFS, "presets")

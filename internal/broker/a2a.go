@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/jazz1x/rallish/internal/buildinfo"
 	"github.com/jazz1x/rallish/internal/preset"
@@ -190,10 +191,35 @@ func (s *Server) handleA2ACancel(w http.ResponseWriter, r *http.Request, req con
 		writeJSONRPCError(w, req.ID, -32602, "Task not found", nil)
 		return
 	}
+	if state.terminal {
+		s.mu.Unlock()
+		writeJSONRPCError(w, req.ID, -32602, "Task already terminated", nil)
+		return
+	}
 	state.terminal = true
 	state.terminalReason = "canceled"
 	oldNotify := state.notify
 	state.notify = make(chan struct{})
+
+	// Notify A2A subscribers of cancellation under lock to avoid races.
+	if len(state.a2aSubs) > 0 {
+		event := contract.A2ATaskUpdateEvent{
+			ID: taskID,
+			Status: contract.A2ATaskStatus{
+				State:  contract.TaskStateCanceled,
+				Reason: "canceled",
+			},
+			Final: true,
+		}
+		for _, ch := range state.a2aSubs {
+			select {
+			case ch <- event:
+			default:
+			}
+			close(ch)
+		}
+		state.a2aSubs = nil
+	}
 	s.sessionStates[taskID] = state
 	s.mu.Unlock()
 
@@ -227,6 +253,31 @@ func (s *Server) handleA2ASendSubscribe(w http.ResponseWriter, r *http.Request, 
 		writeJSONRPCError(w, req.ID, -32602, "Task not found", nil)
 		return
 	}
+	if state.terminal {
+		s.mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		flusher, ok := w.(http.Flusher)
+		if ok {
+			w.WriteHeader(http.StatusOK)
+			flusher.Flush()
+		}
+		event := contract.A2ATaskUpdateEvent{
+			ID: taskID,
+			Status: contract.A2ATaskStatus{
+				State:  terminalReasonToTaskState(state.terminal, state.terminalReason),
+				Reason: state.terminalReason,
+			},
+			Final: true,
+		}
+		data, _ := json.Marshal(event)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+		if ok {
+			flusher.Flush()
+		}
+		return
+	}
 
 	ch := make(chan contract.A2ATaskUpdateEvent, 4)
 	state.a2aSubs = append(state.a2aSubs, ch)
@@ -256,10 +307,6 @@ func (s *Server) handleA2ASendSubscribe(w http.ResponseWriter, r *http.Request, 
 		flusher.Flush()
 	}
 
-	if state.terminal {
-		return
-	}
-
 	for {
 		select {
 		case evt, more := <-ch:
@@ -286,6 +333,7 @@ func (s *Server) handleA2ASendSubscribe(w http.ResponseWriter, r *http.Request, 
 			state.a2aSubs = filtered
 			s.sessionStates[taskID] = state
 			s.mu.Unlock()
+			close(ch)
 			return
 		}
 	}
@@ -300,12 +348,22 @@ func extractTextFromParts(params map[string]any, key string) (string, bool) {
 	if !ok || len(parts) == 0 {
 		return "", false
 	}
-	part0, ok := parts[0].(map[string]any)
-	if !ok {
+	var texts []string
+	for _, p := range parts {
+		part, ok := p.(map[string]any)
+		if !ok {
+			continue
+		}
+		text, ok := part["text"].(string)
+		if !ok {
+			continue
+		}
+		texts = append(texts, text)
+	}
+	if len(texts) == 0 {
 		return "", false
 	}
-	text, ok := part0["text"].(string)
-	return text, ok
+	return strings.Join(texts, " "), true
 }
 
 func mapSessionToA2ATask(sess session.Session) contract.A2ATask {

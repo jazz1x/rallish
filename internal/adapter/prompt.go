@@ -5,40 +5,49 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/jazz1x/rallish/pkg/contract"
 )
 
 var jsonBlockRegex = regexp.MustCompile("(?s)```(?:json)?\\s*(.*?)```")
 
+// promptRequest is a slimmed-down view of TurnRequest containing only the
+// fields the model needs to reason about its turn.
+type promptRequest struct {
+	Turn        int                `json:"turn"`
+	Role        string             `json:"role"`
+	RuntimeHint string             `json:"runtime_hint"`
+	Budget      contract.Budget    `json:"budget"`
+	LastTurn    *contract.LastTurn `json:"last_turn,omitempty"`
+	Task        contract.Task      `json:"task"`
+}
+
 // BuildPrompt creates a deterministic prompt embedding the TurnRequest.
 func BuildPrompt(req contract.TurnRequest) (string, error) {
-	data, err := json.Marshal(req)
+	pr := promptRequest{
+		Turn:        req.Turn,
+		Role:        req.Role,
+		RuntimeHint: req.RuntimeHint,
+		Budget:      req.Budget,
+		LastTurn:    req.LastTurn,
+		Task:        req.Task,
+	}
+	data, err := json.Marshal(pr)
 	if err != nil {
 		return "", err
 	}
-	modelHint := ""
+
+	var b strings.Builder
+	b.Grow(512 + len(data))
+	b.WriteString("You are a turn-taking agent in a multi-agent system.")
 	if req.ModelHint != "" {
-		modelHint = fmt.Sprintf("\nModel hint: use model %q for this turn.\n", req.ModelHint)
+		fmt.Fprintf(&b, "\nModel hint: use model %q for this turn.\n", req.ModelHint)
 	}
-	return fmt.Sprintf(`You are a turn-taking agent in a multi-agent system.%s
-
-The following JSON is your TurnRequest:
-
-`+"```json\n%s\n```"+`
-
-Respond with a JSON object conforming to the TurnResponse schema, wrapped in a fenced code block.
-
-TurnResponse fields:
-- done (bool)
-- handoff_to (string, optional)
-- summary (string)
-- artifacts (array of strings, optional)
-- self_eval (string: confident, uncertain, blocked)
-- notes_for_human (string, optional)
-- usage (object with tokens_in, tokens_out, ms, optional)
-
-Do not include any text outside the fenced JSON block.`, modelHint, string(data)), nil
+	b.WriteString("\n\nThe following JSON is your TurnRequest:\n\n```json\n")
+	b.Write(data)
+	b.WriteString("\n```\n\nRespond with a JSON object conforming to the TurnResponse schema, wrapped in a fenced code block.\n\nTurnResponse fields:\n- done (bool)\n- handoff_to (string, optional)\n- summary (string)\n- artifacts (array of strings, optional)\n- self_eval (string: confident, uncertain, blocked)\n- notes_for_human (string, optional)\n- usage (object with tokens_in, tokens_out, ms, optional)\n\nDo not include any text outside the fenced JSON block.")
+	return b.String(), nil
 }
 
 // ParseLastJSONBlock extracts a TurnResponse from CLI output. It prefers the

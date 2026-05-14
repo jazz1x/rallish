@@ -188,8 +188,6 @@ func (s *Server) handleNextTurn(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			remaining = s.budgeter.Remaining(state.preset.Budget, state.totalUsage, state.turnCount)
-
 			req := contract.TurnRequest{
 				Session:     id,
 				Turn:        turn,
@@ -344,10 +342,8 @@ func (s *Server) handlePostTurn(w http.ResponseWriter, r *http.Request) {
 	}
 	oldNotify := state.notify
 	state.notify = make(chan struct{})
-	s.sessionStates[id] = state
-	s.mu.Unlock()
 
-	// Notify A2A subscribers
+	// Notify A2A subscribers under lock to prevent races and double-close.
 	if len(state.a2aSubs) > 0 {
 		event := contract.A2ATaskUpdateEvent{
 			ID: id,
@@ -367,8 +363,11 @@ func (s *Server) handlePostTurn(w http.ResponseWriter, r *http.Request) {
 			for _, ch := range state.a2aSubs {
 				close(ch)
 			}
+			state.a2aSubs = nil
 		}
 	}
+	s.sessionStates[id] = state
+	s.mu.Unlock()
 
 	if oldNotify != nil {
 		close(oldNotify)
