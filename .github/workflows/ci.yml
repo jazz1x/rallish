@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   lint:
     name: Lint
@@ -15,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, ubuntu-24.04]
+        os: [macos-latest, ubuntu-latest]
         go-version: ["1.23", "1.24"]
     steps:
       - name: Checkout
@@ -43,7 +47,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, ubuntu-24.04]
+        os: [macos-latest, ubuntu-latest]
         go-version: ["1.23", "1.24"]
     steps:
       - name: Checkout
@@ -94,7 +98,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, ubuntu-24.04]
+        os: [macos-latest, ubuntu-latest]
         go-version: ["1.23", "1.24"]
     steps:
       - name: Checkout
