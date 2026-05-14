@@ -37,8 +37,8 @@ func TestEvaluator_DeadlinePassed(t *testing.T) {
 	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	e := NewEvaluator(false).WithClock(&fakeClock{t: now})
 	state := State{
-		StartTime:       now.Add(-30 * time.Minute),
-		DeadlineMinutes: 20,
+		StartTime:  now.Add(-30 * time.Minute),
+		DeadlineMS: 20 * 60 * 1000,
 	}
 	matched, reason, err := e.Evaluate(context.Background(), state, []contract.ExitCondition{contract.ExitDeadlinePassed})
 	require.NoError(t, err)
@@ -50,8 +50,8 @@ func TestEvaluator_DeadlineNotPassed(t *testing.T) {
 	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	e := NewEvaluator(false).WithClock(&fakeClock{t: now})
 	state := State{
-		StartTime:       now.Add(-10 * time.Minute),
-		DeadlineMinutes: 20,
+		StartTime:  now.Add(-10 * time.Minute),
+		DeadlineMS: 20 * 60 * 1000,
 	}
 	matched, _, err := e.Evaluate(context.Background(), state, []contract.ExitCondition{contract.ExitDeadlinePassed})
 	require.NoError(t, err)

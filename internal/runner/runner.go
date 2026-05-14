@@ -18,6 +18,9 @@ import (
 	"github.com/jazz1x/hocketty/pkg/contract"
 )
 
+// ErrSessionGone is returned when the broker signals the session has terminated.
+var ErrSessionGone = errors.New("session gone")
+
 // Loop polls the broker for turns and delegates to an adapter.
 type Loop struct {
 	adapter   adapter.Adapter
@@ -49,6 +52,9 @@ func (l *Loop) Run(ctx context.Context) error {
 
 		req, err := l.pollNext(ctx)
 		if err != nil {
+			if errors.Is(err, ErrSessionGone) {
+				return nil
+			}
 			if isTransient(err) {
 				slog.WarnContext(ctx, "transient error polling next turn", "error", err)
 				continue
@@ -89,6 +95,9 @@ func (l *Loop) pollNext(ctx context.Context) (contract.TurnRequest, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if resp.StatusCode == http.StatusGone {
+		return contract.TurnRequest{}, ErrSessionGone
+	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return contract.TurnRequest{}, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))

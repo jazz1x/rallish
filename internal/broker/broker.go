@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/jazz1x/hocketty/internal/budget"
+	"github.com/jazz1x/hocketty/internal/exit"
 	"github.com/jazz1x/hocketty/internal/router"
 	"github.com/jazz1x/hocketty/internal/session"
 	"github.com/jazz1x/hocketty/pkg/contract"
@@ -26,12 +28,15 @@ type Server struct {
 }
 
 type sessionState struct {
-	turnCount  int
-	totalUsage contract.Usage
-	lastTurn   *contract.LastTurn
-	lastResp   *contract.TurnResponse
-	preset     contract.Preset
-	router     *router.Router
+	turnCount      int
+	totalUsage     contract.Usage
+	lastTurn       *contract.LastTurn
+	lastResp       *contract.TurnResponse
+	preset         contract.Preset
+	router         *router.Router
+	createdAt      time.Time
+	terminal       bool
+	terminalReason string
 }
 
 // NewServer creates a new broker Server.
@@ -81,6 +86,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		turnCount: 0,
 		preset:    req.Preset,
 		router:    router.NewRouter(req.Preset),
+		createdAt: sess.CreatedAt,
 	}
 	s.mu.Unlock()
 
@@ -127,6 +133,11 @@ func (s *Server) handleNextTurn(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		s.mu.Unlock()
 		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	if state.terminal {
+		s.mu.Unlock()
+		http.Error(w, fmt.Sprintf("session terminated: %s", state.terminalReason), http.StatusGone)
 		return
 	}
 
@@ -266,6 +277,29 @@ func (s *Server) handlePostTurn(w http.ResponseWriter, r *http.Request) {
 		"handoff_to", resp.HandoffTo,
 		"self_eval", resp.SelfEval,
 	)
+
+	// Evaluate non-shell exit predicates.
+	s.mu.Lock()
+	state = s.sessionStates[id]
+	remaining := s.budgeter.Remaining(state.preset.Budget, state.totalUsage, state.turnCount)
+	evalState := exit.State{
+		TurnCount:    state.turnCount,
+		Usage:        state.totalUsage,
+		Budget:       remaining,
+		StartTime:    state.createdAt,
+		LastResponse: state.lastResp,
+		DeadlineMS:   state.preset.Budget.DeadlineMS,
+	}
+	matched, reason, evalErr := exit.NewEvaluator(false).Evaluate(ctx, evalState, state.preset.ExitWhen)
+	if evalErr != nil {
+		logger.InfoContext(ctx, "exit_predicate_shell_skipped", "session_id", id, "error", evalErr)
+	} else if matched {
+		state.terminal = true
+		state.terminalReason = reason
+		s.sessionStates[id] = state
+		logger.InfoContext(ctx, "session_terminal", "session_id", id, "reason", reason, "turn", state.turnCount)
+	}
+	s.mu.Unlock()
 
 	sess, err := s.store.Get(ctx, id)
 	if err != nil {

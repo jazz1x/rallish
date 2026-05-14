@@ -46,12 +46,12 @@ func (r *realClock) Now() time.Time { return time.Now() }
 
 // State holds the current session state for evaluation.
 type State struct {
-	TurnCount       int
-	Usage           contract.Usage
-	Budget          contract.Budget
-	StartTime       time.Time
-	LastResponse    *contract.TurnResponse
-	DeadlineMinutes int
+	TurnCount    int
+	Usage        contract.Usage
+	Budget       contract.Budget
+	StartTime    time.Time
+	LastResponse *contract.TurnResponse
+	DeadlineMS   int64
 }
 
 // Evaluate iterates conditions in order and returns true if any match.
@@ -82,7 +82,7 @@ func (e *Evaluator) evaluateOne(ctx context.Context, state State, cond contract.
 			return true, "tokens exhausted", nil
 		}
 	case contract.ExitDeadlinePassed:
-		deadline := state.StartTime.Add(time.Duration(state.DeadlineMinutes) * time.Minute)
+		deadline := state.StartTime.Add(time.Duration(state.DeadlineMS) * time.Millisecond)
 		if e.clock.Now().After(deadline) {
 			return true, "deadline passed", nil
 		}

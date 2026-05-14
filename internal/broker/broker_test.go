@@ -131,3 +131,42 @@ func TestBroker_PostTurn(t *testing.T) {
 	_ = resp.Body.Close()
 	require.Equal(t, 1, got.TurnCount)
 }
+
+func TestBroker_TerminalSession_410Gone(t *testing.T) {
+	dir := t.TempDir()
+	clock := &fakeClock{t: time.Now()}
+
+	store, err := session.NewStore(dir, clock)
+	require.NoError(t, err)
+
+	budgeter := budget.NewBudgeter(clock)
+	srv := NewServer(store, budgeter)
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	// Create session with only 1 turn budget
+	body := `{"preset": {"name":"test","routing":"round_robin","roles":[{"id":"planner","runtime":"claude"}],"budget":{"tokens_left":100,"turns_left":1},"exit_when":["turns_exhausted"]}, "task": {"title":"t","body":"b","repo_root":"/tmp"}}`
+	resp, err := http.Post(ts.URL+"/sessions", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	var sess session.Session
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&sess))
+	_ = resp.Body.Close()
+
+	// First get next turn to establish pending request
+	_, err = http.Get(ts.URL + "/sessions/" + sess.ID + "/next")
+	require.NoError(t, err)
+
+	// Post turn — this exhausts the turn budget
+	turnBody := `{"done":false,"summary":"did work"}`
+	resp, err = http.Post(ts.URL+"/sessions/"+sess.ID+"/turn", "application/json", strings.NewReader(turnBody))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	_ = resp.Body.Close()
+
+	// Next /next should return 410 Gone
+	resp, err = http.Get(ts.URL + "/sessions/" + sess.ID + "/next")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusGone, resp.StatusCode)
+	_ = resp.Body.Close()
+}
