@@ -1,0 +1,82 @@
+version: 2
+
+project_name: hocketty
+
+gomod:
+  proxy: true
+
+builds:
+  - id: hocketty
+    main: ./cmd/hocketty
+    binary: hocketty
+    ldflags:
+      - -X github.com/jazz1x/hocketty/internal/buildinfo.version={{.Version}}
+      - -X github.com/jazz1x/hocketty/internal/buildinfo.commit={{.Commit}}
+      - -X github.com/jazz1x/hocketty/internal/buildinfo.date={{.Date}}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    env:
+      - CGO_ENABLED=0
+
+archives:
+  - id: hocketty
+    builds:
+      - hocketty
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    files:
+      - LICENSE*
+      - README*
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+sboms:
+  - id: hocketty
+    artifacts: archive
+    cmd: syft
+    args:
+      - "$artifact"
+      - "--output"
+      - "spdx-json=$document"
+
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    args:
+      - "sign-blob"
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+    artifacts: all
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^refactor:"
+      - "^style:"
+      - "Merge pull request"
+      - "Merge branch"
