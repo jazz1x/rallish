@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/jazz1x/hocketty/pkg/contract"
+	"github.com/jazz1x/rallish/pkg/contract"
 )
 
 var jsonBlockRegex = regexp.MustCompile("(?s)```(?:json)?\\s*(.*?)```")

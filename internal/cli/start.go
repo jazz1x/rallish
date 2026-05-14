@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jazz1x/hocketty/internal/preset"
-	"github.com/jazz1x/hocketty/internal/runner"
-	"github.com/jazz1x/hocketty/internal/session"
-	"github.com/jazz1x/hocketty/pkg/contract"
+	"github.com/jazz1x/rallish/internal/preset"
+	"github.com/jazz1x/rallish/internal/runner"
+	"github.com/jazz1x/rallish/internal/session"
+	"github.com/jazz1x/rallish/pkg/contract"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -54,7 +54,7 @@ func RunStart(ctx context.Context, opts StartOptions) error {
 		return fmt.Errorf("repo path is not a directory: %s", repoRoot)
 	}
 
-	sockDir := filepath.Join(opts.HomeDir, ".hocketty")
+	sockDir := filepath.Join(opts.HomeDir, ".rallish")
 	portFile := filepath.Join(sockDir, "port")
 	port, err := readPortFile(portFile)
 	if err != nil {
@@ -110,7 +110,7 @@ func RunStart(ctx context.Context, opts StartOptions) error {
 		var ok bool
 		p, ok = presets[sess.PresetName]
 		if !ok {
-			path := filepath.Join(opts.HomeDir, ".hocketty", "presets", sess.PresetName+".yaml")
+			path := filepath.Join(opts.HomeDir, ".rallish", "presets", sess.PresetName+".yaml")
 			f, err := os.Open(path) //nolint:gosec // path under user home
 			if err != nil {
 				return fmt.Errorf("preset %q not found: %w", sess.PresetName, err)
@@ -134,7 +134,7 @@ func RunStart(ctx context.Context, opts StartOptions) error {
 		var ok bool
 		p, ok = presets[opts.PresetName]
 		if !ok {
-			path := filepath.Join(opts.HomeDir, ".hocketty", "presets", opts.PresetName+".yaml")
+			path := filepath.Join(opts.HomeDir, ".rallish", "presets", opts.PresetName+".yaml")
 			f, err := os.Open(path) //nolint:gosec // path under user home
 			if err != nil {
 				return fmt.Errorf("preset %q not found: %w", opts.PresetName, err)
@@ -210,7 +210,7 @@ func RunStart(ctx context.Context, opts StartOptions) error {
 		return err
 	}
 
-	logPath := filepath.Join(opts.HomeDir, ".hocketty", "sessions", sessionID, "log.jsonl")
+	logPath := filepath.Join(opts.HomeDir, ".rallish", "sessions", sessionID, "log.jsonl")
 	fmt.Printf("Session %s in %s completed successfully. Log: %s\n", sessionID, repoRoot, logPath)
 	return nil
 }

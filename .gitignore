@@ -219,5 +219,5 @@ __marimo__/
 
 # Go binaries / test artifacts
 *.test
-.hocketty/
+.rallish/
 coverage.out

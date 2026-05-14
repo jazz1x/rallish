@@ -1,10 +1,10 @@
-// Package budget tracks token, turn, and wall-clock budgets for hocketty sessions.
+// Package budget tracks token, turn, and wall-clock budgets for rallish sessions.
 package budget
 
 import (
 	"time"
 
-	"github.com/jazz1x/hocketty/pkg/contract"
+	"github.com/jazz1x/rallish/pkg/contract"
 )
 
 // Clock abstracts time for testability.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jazz1x/hocketty/pkg/contract"
+	"github.com/jazz1x/rallish/pkg/contract"
 	"github.com/stretchr/testify/require"
 )
 

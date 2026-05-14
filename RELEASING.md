@@ -1,6 +1,6 @@
 # Releasing
 
-This document describes how to release `hocketty`.
+This document describes how to release `rallish`.
 
 ## Versioning policy
 
@@ -14,7 +14,7 @@ Version numbers are Git tags. There is no `VERSION` file in the repo.
 ## Prerequisites
 
 - You must have push access to this repository.
-- A Homebrew tap repository must exist at `jazz1x/homebrew-hocketty`.
+- A Homebrew tap repository must exist at `jazz1x/homebrew-rallish`.
 - A `TAP_GITHUB_TOKEN` secret must be configured in this repository with **contents:write** permission to the tap repo.
 
 ## Release steps
@@ -48,11 +48,11 @@ Version numbers are Git tags. There is no `VERSION` file in the repo.
    - Verify cosign signatures:
      ```bash
      cosign verify-blob \
-       --certificate hocketty_v0.1.0_darwin_arm64.tar.gz.pem \
-       --signature hocketty_v0.1.0_darwin_arm64.tar.gz.sig \
-       --certificate-identity-regexp='^https://github.com/jazz1x/hocketty/.github/workflows/release.yml@refs/tags/v0.1.0$' \
+       --certificate rallish_v0.1.0_darwin_arm64.tar.gz.pem \
+       --signature rallish_v0.1.0_darwin_arm64.tar.gz.sig \
+       --certificate-identity-regexp='^https://github.com/jazz1x/rallish/.github/workflows/release.yml@refs/tags/v0.1.0$' \
        --certificate-oidc-issuer='https://token.actions.githubusercontent.com' \
-       hocketty_v0.1.0_darwin_arm64.tar.gz
+       rallish_v0.1.0_darwin_arm64.tar.gz
      ```
 
 ## Snapshot builds (local testing)

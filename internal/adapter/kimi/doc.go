@@ -1,2 +1,2 @@
-// Package kimi implements the hocketty adapter for the Kimi CLI runtime.
+// Package kimi implements the rallish adapter for the Kimi CLI runtime.
 package kimi

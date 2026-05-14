@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/jazz1x/hocketty/pkg/contract"
+	"github.com/jazz1x/rallish/pkg/contract"
 )
 
 // Clock abstracts time for testability.

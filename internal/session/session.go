@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jazz1x/hocketty/pkg/contract"
+	"github.com/jazz1x/rallish/pkg/contract"
 )
 
 // Clock abstracts time for testability.
@@ -22,7 +22,7 @@ type Clock interface {
 	Now() time.Time
 }
 
-// Session represents the in-memory state of a hocketty session.
+// Session represents the in-memory state of a rallish session.
 type Session struct {
 	ID         string        `json:"id"`
 	PresetName string        `json:"preset_name"`

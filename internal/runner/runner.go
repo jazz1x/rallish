@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jazz1x/hocketty/internal/adapter"
-	"github.com/jazz1x/hocketty/pkg/contract"
+	"github.com/jazz1x/rallish/internal/adapter"
+	"github.com/jazz1x/rallish/pkg/contract"
 )
 
 // ErrSessionGone is returned when the broker signals the session has terminated.

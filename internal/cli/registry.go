@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jazz1x/hocketty/internal/adapter"
-	"github.com/jazz1x/hocketty/internal/adapter/claude"
-	"github.com/jazz1x/hocketty/internal/adapter/fake"
-	"github.com/jazz1x/hocketty/internal/adapter/kimi"
+	"github.com/jazz1x/rallish/internal/adapter"
+	"github.com/jazz1x/rallish/internal/adapter/claude"
+	"github.com/jazz1x/rallish/internal/adapter/fake"
+	"github.com/jazz1x/rallish/internal/adapter/kimi"
 )
 
 // BuildRegistry creates a registry with all available adapters.

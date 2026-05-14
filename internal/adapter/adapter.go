@@ -7,7 +7,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/jazz1x/hocketty/pkg/contract"
+	"github.com/jazz1x/rallish/pkg/contract"
 )
 
 // Adapter is the common interface for agent runtimes.

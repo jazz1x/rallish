@@ -1,4 +1,4 @@
-// Package broker provides the HTTP/SSE server and route handlers for the hocketty broker.
+// Package broker provides the HTTP/SSE server and route handlers for the rallish broker.
 package broker
 
 import (
@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jazz1x/hocketty/internal/budget"
-	"github.com/jazz1x/hocketty/internal/exit"
-	"github.com/jazz1x/hocketty/internal/router"
-	"github.com/jazz1x/hocketty/internal/session"
-	"github.com/jazz1x/hocketty/pkg/contract"
+	"github.com/jazz1x/rallish/internal/budget"
+	"github.com/jazz1x/rallish/internal/exit"
+	"github.com/jazz1x/rallish/internal/router"
+	"github.com/jazz1x/rallish/internal/session"
+	"github.com/jazz1x/rallish/pkg/contract"
 )
 
 // Server is the HTTP/SSE broker.

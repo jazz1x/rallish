@@ -7,9 +7,9 @@ import (
 	"os"
 
 	"github.com/charmbracelet/fang"
-	"github.com/jazz1x/hocketty/internal/buildinfo"
-	"github.com/jazz1x/hocketty/internal/cli"
-	"github.com/jazz1x/hocketty/internal/doctor"
+	"github.com/jazz1x/rallish/internal/buildinfo"
+	"github.com/jazz1x/rallish/internal/cli"
+	"github.com/jazz1x/rallish/internal/doctor"
 	"github.com/spf13/cobra"
 )
 
@@ -18,7 +18,7 @@ func main() {
 	slog.SetDefault(logger)
 
 	root := &cobra.Command{
-		Use:   "hocketty",
+		Use:   "rallish",
 		Short: "A local broker for multi-agent turn-taking",
 	}
 
@@ -50,7 +50,7 @@ func main() {
 func daemonCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "daemon",
-		Short: "Run the hocketty broker daemon",
+		Short: "Run the rallish broker daemon",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			home, err := os.UserHomeDir()
 			if err != nil {
@@ -65,7 +65,7 @@ func startCmd() *cobra.Command {
 	var opts cli.StartOptions
 	cmd := &cobra.Command{
 		Use:   "start",
-		Short: "Start a new hocketty session",
+		Short: "Start a new rallish session",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			home, err := os.UserHomeDir()
 			if err != nil {

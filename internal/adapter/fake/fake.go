@@ -1,4 +1,4 @@
-// Package fake provides a deterministic test adapter for hocketty.
+// Package fake provides a deterministic test adapter for rallish.
 package fake
 
 import (
@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/jazz1x/hocketty/pkg/contract"
+	"github.com/jazz1x/rallish/pkg/contract"
 )
 
 // Adapter is a test double that returns canned responses.

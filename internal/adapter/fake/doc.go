@@ -1,2 +1,2 @@
-// Package fake provides a deterministic test adapter for hocketty.
+// Package fake provides a deterministic test adapter for rallish.
 package fake

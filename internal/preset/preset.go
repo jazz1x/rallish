@@ -1,4 +1,4 @@
-// Package preset loads and validates hocketty preset YAML with strict schema checking.
+// Package preset loads and validates rallish preset YAML with strict schema checking.
 package preset
 
 import (
@@ -6,7 +6,7 @@ import (
 	"io"
 
 	"github.com/goccy/go-yaml"
-	"github.com/jazz1x/hocketty/pkg/contract"
+	"github.com/jazz1x/rallish/pkg/contract"
 )
 
 var validRouting = map[string]bool{

@@ -1,4 +1,4 @@
-// Package contract defines the public wire types for hocketty.
+// Package contract defines the public wire types for rallish.
 // These are the only types that third-party adapters need to import.
 package contract
 

@@ -1,2 +1,2 @@
-// Package safepath provides path-traversal-safe filepath helpers for hocketty.
+// Package safepath provides path-traversal-safe filepath helpers for rallish.
 package safepath

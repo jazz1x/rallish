@@ -1,2 +1,2 @@
-// Package ipc implements Unix-socket transport for hocketty CLI commands.
+// Package ipc implements Unix-socket transport for rallish CLI commands.
 package ipc

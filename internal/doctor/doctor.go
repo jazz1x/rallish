@@ -5,8 +5,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/jazz1x/hocketty/internal/adapter/claude"
-	"github.com/jazz1x/hocketty/internal/adapter/kimi"
+	"github.com/jazz1x/rallish/internal/adapter/claude"
+	"github.com/jazz1x/rallish/internal/adapter/kimi"
 )
 
 type pathReporter interface {

@@ -1,4 +1,4 @@
-// Package router decides which role receives the next turn in a hocketty session.
+// Package router decides which role receives the next turn in a rallish session.
 package router
 
 import (
@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jazz1x/hocketty/pkg/contract"
+	"github.com/jazz1x/rallish/pkg/contract"
 )
 
 // Router decides which role receives the next turn.

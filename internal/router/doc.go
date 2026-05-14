@@ -1,2 +1,2 @@
-// Package router decides which role receives the next turn in a hocketty session.
+// Package router decides which role receives the next turn in a rallish session.
 package router

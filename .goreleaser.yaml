@@ -1,18 +1,18 @@
 version: 2
 
-project_name: hocketty
+project_name: rallish
 
 gomod:
   proxy: true
 
 builds:
-  - id: hocketty
-    main: ./cmd/hocketty
-    binary: hocketty
+  - id: rallish
+    main: ./cmd/rallish
+    binary: rallish
     ldflags:
-      - -X github.com/jazz1x/hocketty/internal/buildinfo.version={{.Version}}
-      - -X github.com/jazz1x/hocketty/internal/buildinfo.commit={{.Commit}}
-      - -X github.com/jazz1x/hocketty/internal/buildinfo.date={{.Date}}
+      - -X github.com/jazz1x/rallish/internal/buildinfo.version={{.Version}}
+      - -X github.com/jazz1x/rallish/internal/buildinfo.commit={{.Commit}}
+      - -X github.com/jazz1x/rallish/internal/buildinfo.date={{.Date}}
     goos:
       - darwin
       - linux
@@ -27,9 +27,9 @@ builds:
       - CGO_ENABLED=0
 
 archives:
-  - id: hocketty
+  - id: rallish
     builds:
-      - hocketty
+      - rallish
     format: tar.gz
     format_overrides:
       - goos: windows
@@ -48,7 +48,7 @@ checksum:
   algorithm: sha256
 
 sboms:
-  - id: hocketty
+  - id: rallish
     artifacts: archive
     cmd: syft
     args:
@@ -71,19 +71,19 @@ snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
 brews:
-  - name: hocketty
+  - name: rallish
     repository:
       owner: jazz1x
-      name: homebrew-hocketty
+      name: homebrew-rallish
       token: "{{ .Env.TAP_GITHUB_TOKEN }}"
     folder: Formula
     goarm: ""
     commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
-    homepage: https://github.com/jazz1x/hocketty
+    homepage: https://github.com/jazz1x/rallish
     description: A local broker for multi-agent turn-taking
     license: MIT
     test: |
-      system "#{bin}/hocketty version"
+      system "#{bin}/rallish version"
     dependencies:
       - name: go
         type: optional

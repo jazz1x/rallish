@@ -10,14 +10,14 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jazz1x/hocketty/internal/broker"
-	"github.com/jazz1x/hocketty/internal/budget"
-	"github.com/jazz1x/hocketty/internal/session"
+	"github.com/jazz1x/rallish/internal/broker"
+	"github.com/jazz1x/rallish/internal/budget"
+	"github.com/jazz1x/rallish/internal/session"
 )
 
 // RunDaemon starts the broker daemon.
 func RunDaemon(ctx context.Context, homeDir string) error {
-	sockDir := filepath.Join(homeDir, ".hocketty")
+	sockDir := filepath.Join(homeDir, ".rallish")
 	if err := os.MkdirAll(sockDir, 0o700); err != nil {
 		return fmt.Errorf("create socket dir: %w", err)
 	}

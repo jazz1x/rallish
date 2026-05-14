@@ -39,5 +39,5 @@ func String() string {
 	if v == "" {
 		v = "unknown"
 	}
-	return fmt.Sprintf("hocketty %s (commit: %s, built: %s)", v, Commit(), Date())
+	return fmt.Sprintf("rallish %s (commit: %s, built: %s)", v, Commit(), Date())
 }

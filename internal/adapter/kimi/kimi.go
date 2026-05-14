@@ -1,4 +1,4 @@
-// Package kimi implements the hocketty adapter for the Kimi CLI runtime.
+// Package kimi implements the rallish adapter for the Kimi CLI runtime.
 package kimi
 
 import (
@@ -9,8 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/jazz1x/hocketty/internal/adapter"
-	"github.com/jazz1x/hocketty/pkg/contract"
+	"github.com/jazz1x/rallish/internal/adapter"
+	"github.com/jazz1x/rallish/pkg/contract"
 )
 
 // Adapter executes turns via the Kimi CLI.

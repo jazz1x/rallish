@@ -141,4 +141,4 @@ jobs:
         run: go mod download
 
       - name: Build binary
-        run: go build -ldflags "-X github.com/jazz1x/hocketty/internal/buildinfo.version=ci -X github.com/jazz1x/hocketty/internal/buildinfo.commit=${{ github.sha }} -X github.com/jazz1x/hocketty/internal/buildinfo.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o dist/hocketty ./cmd/hocketty
+        run: go build -ldflags "-X github.com/jazz1x/rallish/internal/buildinfo.version=ci -X github.com/jazz1x/rallish/internal/buildinfo.commit=${{ github.sha }} -X github.com/jazz1x/rallish/internal/buildinfo.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o dist/rallish ./cmd/rallish

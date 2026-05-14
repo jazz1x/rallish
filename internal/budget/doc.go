@@ -1,2 +1,2 @@
-// Package budget tracks token, turn, and wall-clock budgets for hocketty sessions.
+// Package budget tracks token, turn, and wall-clock budgets for rallish sessions.
 package budget

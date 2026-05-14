@@ -1,4 +1,4 @@
-module github.com/jazz1x/hocketty
+module github.com/jazz1x/rallish
 
 go 1.25.0
 
