@@ -60,8 +60,8 @@ func (a *Adapter) Run(ctx context.Context, req contract.TurnRequest) (contract.T
 	}
 
 	// #nosec G204
-	cmd := exec.CommandContext(ctx, a.binary, "-p", prompt, "--output-format=stream-json", "--max-turns=1")
-	cmd.Env = adapter.BuildEnv("PATH", "HOME", "LANG", "TERM", "ANTHROPIC_")
+	cmd := exec.CommandContext(ctx, a.binary, "-p", prompt, "--max-turns=1")
+	cmd.Env = adapter.BuildEnv("PATH", "HOME", "LANG", "TERM", "USER", "LOGNAME", "SHELL", "TMPDIR", "XDG_CONFIG_HOME", "ANTHROPIC_")
 
 	out, err := cmd.Output()
 	if err != nil {

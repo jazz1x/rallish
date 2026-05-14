@@ -37,15 +37,70 @@ TurnResponse fields:
 Do not include any text outside the fenced JSON block.`, string(data)), nil
 }
 
-// ParseLastJSONBlock extracts the last fenced JSON block from output and unmarshals it into resp.
+// ParseLastJSONBlock extracts a TurnResponse from CLI output. It prefers the
+// last fenced JSON block; if no fence is present (some CLIs strip them), it
+// falls back to scanning for the last balanced {...} object that decodes into
+// the response schema.
 func ParseLastJSONBlock(out []byte, resp *contract.TurnResponse) error {
-	matches := jsonBlockRegex.FindAllSubmatch(out, -1)
-	if len(matches) == 0 {
-		return errors.New("no fenced JSON block found in output")
+	if matches := jsonBlockRegex.FindAllSubmatch(out, -1); len(matches) > 0 {
+		last := matches[len(matches)-1][1]
+		if err := json.Unmarshal(last, resp); err != nil {
+			return fmt.Errorf("unmarshaling TurnResponse: %w", err)
+		}
+		return nil
 	}
-	last := matches[len(matches)-1][1]
-	if err := json.Unmarshal(last, resp); err != nil {
-		return fmt.Errorf("unmarshaling TurnResponse: %w", err)
+	if obj, ok := lastBalancedObject(out); ok {
+		if err := json.Unmarshal(obj, resp); err == nil {
+			return nil
+		}
 	}
-	return nil
+	return errors.New("no JSON TurnResponse found in output")
+}
+
+// lastBalancedObject scans for the last brace-balanced JSON object in s. It
+// only counts braces outside of string literals so embedded "{" inside strings
+// don't confuse the depth counter.
+func lastBalancedObject(s []byte) ([]byte, bool) {
+	var best []byte
+	for i := 0; i < len(s); i++ {
+		if s[i] != '{' {
+			continue
+		}
+		depth := 0
+		inStr := false
+		esc := false
+		for j := i; j < len(s); j++ {
+			c := s[j]
+			if inStr {
+				if esc {
+					esc = false
+					continue
+				}
+				if c == '\\' {
+					esc = true
+					continue
+				}
+				if c == '"' {
+					inStr = false
+				}
+				continue
+			}
+			switch c {
+			case '"':
+				inStr = true
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					best = s[i : j+1]
+					i = j
+				}
+			}
+			if depth == 0 && c == '}' {
+				break
+			}
+		}
+	}
+	return best, best != nil
 }
