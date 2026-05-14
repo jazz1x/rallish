@@ -1,0 +1,30 @@
+{
+  "name": "pair-review",
+  "description": "Claude plans, Kimi executes, Claude reviews.",
+  "roles": [
+    {
+      "id": "planner",
+      "runtime": "claude",
+      "model": "opus"
+    },
+    {
+      "id": "executor",
+      "runtime": "kimi",
+      "model": "kimi-k2"
+    }
+  ],
+  "routing": "handoff_then_round_robin",
+  "budget": {
+    "tokens_left": 400000,
+    "turns_left": 20,
+    "deadline_ms": 3600000
+  },
+  "exit_when": [
+    "tests_pass",
+    "reviewer_approved"
+  ],
+  "scratch": {
+    "max_kb": 64,
+    "summarize_with": "claude-haiku"
+  }
+}

@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Go binaries / test artifacts
+*.test
+.rallish/
+coverage.out

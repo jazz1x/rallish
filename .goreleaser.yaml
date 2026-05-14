@@ -1,0 +1,101 @@
+version: 2
+
+project_name: rallish
+
+gomod:
+  proxy: true
+
+builds:
+  - id: rallish
+    main: ./cmd/rallish
+    binary: rallish
+    ldflags:
+      - -X github.com/jazz1x/rallish/internal/buildinfo.version={{.Version}}
+      - -X github.com/jazz1x/rallish/internal/buildinfo.commit={{.Commit}}
+      - -X github.com/jazz1x/rallish/internal/buildinfo.date={{.Date}}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    env:
+      - CGO_ENABLED=0
+
+archives:
+  - id: rallish
+    builds:
+      - rallish
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    files:
+      - LICENSE*
+      - README*
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+sboms:
+  - id: rallish
+    artifacts: archive
+    cmd: syft
+    args:
+      - "$artifact"
+      - "--output"
+      - "spdx-json=$document"
+
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    args:
+      - "sign-blob"
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: all
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+brews:
+  - name: rallish
+    repository:
+      owner: jazz1x
+      name: homebrew-rallish
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    folder: Formula
+    goarm: ""
+    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+    homepage: https://github.com/jazz1x/rallish
+    description: A local broker for multi-agent turn-taking
+    license: MIT
+    test: |
+      system "#{bin}/rallish version"
+    dependencies:
+      - name: go
+        type: optional
+
+changelog:
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^refactor:"
+      - "^style:"
+      - "Merge pull request"
+      - "Merge branch"

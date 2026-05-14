@@ -1,0 +1,23 @@
+name: solo-ralph
+description: Single runtime running the ralph loop with budget and exit guards.
+
+roles:
+  - id: ralph
+    runtime: claude
+    model: sonnet
+
+routing: round_robin
+
+budget:
+  max_turns: 30
+  max_tokens: 600000
+  deadline_minutes: 90
+
+exit_when:
+  - tests_pass
+  - turns_exhausted
+  - deadline_passed
+
+scratch:
+  max_kb: 64
+  summarize_with: claude-haiku
