@@ -116,7 +116,8 @@ func TestRouter_Next_HandoffThenRoundRobin(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "reviewer", got)
 
-	// After handoff, next turn resumes round_robin from the handoff target's position.
+	// Without a prior handoff, the next turn falls through to plain turn-indexed
+	// round_robin: (turn-1) % len(roles). For turn=3 with 3 roles that is index 2.
 	got, err = r.Next(ctx, nil, 3)
 	require.NoError(t, err)
 	require.Equal(t, "reviewer", got)
