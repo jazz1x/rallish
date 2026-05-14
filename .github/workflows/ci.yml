@@ -28,9 +28,11 @@ jobs:
         run: go mod download
 
       - name: Run golangci-lint
-        run: |
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-          PATH="$PATH:$(go env GOPATH)/bin" golangci-lint run --timeout=10m
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.0.2
+          install-mode: goinstall
+          args: run --timeout=10m
 
   test:
     name: Test
