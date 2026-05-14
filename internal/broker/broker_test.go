@@ -11,9 +11,7 @@ import (
 	"time"
 
 	"github.com/jazz1x/hocketty/internal/budget"
-	"github.com/jazz1x/hocketty/internal/router"
 	"github.com/jazz1x/hocketty/internal/session"
-	"github.com/jazz1x/hocketty/pkg/contract"
 	"github.com/stretchr/testify/require"
 )
 
@@ -30,15 +28,8 @@ func TestBroker_CreateAndGetSession(t *testing.T) {
 	store, err := session.NewStore(dir, clock)
 	require.NoError(t, err)
 
-	preset := contract.Preset{
-		Name:    "test",
-		Routing: "round_robin",
-		Roles:   []contract.Role{{ID: "a", Runtime: "x"}},
-		Budget:  contract.Budget{TokensLeft: 100, TurnsLeft: 10},
-	}
-	rt := router.NewRouter(preset)
 	budgeter := budget.NewBudgeter(clock)
-	srv := NewServer(store, rt, budgeter)
+	srv := NewServer(store, budgeter)
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
@@ -72,15 +63,8 @@ func TestBroker_NextTurnSSE(t *testing.T) {
 	store, err := session.NewStore(dir, clock)
 	require.NoError(t, err)
 
-	preset := contract.Preset{
-		Name:    "test",
-		Routing: "round_robin",
-		Roles:   []contract.Role{{ID: "planner", Runtime: "claude"}},
-		Budget:  contract.Budget{TokensLeft: 100, TurnsLeft: 10},
-	}
-	rt := router.NewRouter(preset)
 	budgeter := budget.NewBudgeter(clock)
-	srv := NewServer(store, rt, budgeter)
+	srv := NewServer(store, budgeter)
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
@@ -118,15 +102,8 @@ func TestBroker_PostTurn(t *testing.T) {
 	store, err := session.NewStore(dir, clock)
 	require.NoError(t, err)
 
-	preset := contract.Preset{
-		Name:    "test",
-		Routing: "round_robin",
-		Roles:   []contract.Role{{ID: "planner", Runtime: "claude"}},
-		Budget:  contract.Budget{TokensLeft: 100, TurnsLeft: 10},
-	}
-	rt := router.NewRouter(preset)
 	budgeter := budget.NewBudgeter(clock)
-	srv := NewServer(store, rt, budgeter)
+	srv := NewServer(store, budgeter)
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()

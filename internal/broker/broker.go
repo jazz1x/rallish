@@ -18,7 +18,6 @@ import (
 type Server struct {
 	mux      *http.ServeMux
 	store    *session.Store
-	router   *router.Router
 	budgeter *budget.Budgeter
 
 	mu            sync.Mutex
@@ -30,15 +29,16 @@ type sessionState struct {
 	turnCount  int
 	totalUsage contract.Usage
 	lastTurn   *contract.LastTurn
+	lastResp   *contract.TurnResponse
 	preset     contract.Preset
+	router     *router.Router
 }
 
 // NewServer creates a new broker Server.
-func NewServer(store *session.Store, router *router.Router, budgeter *budget.Budgeter) *Server {
+func NewServer(store *session.Store, budgeter *budget.Budgeter) *Server {
 	s := &Server{
 		mux:           http.NewServeMux(),
 		store:         store,
-		router:        router,
 		budgeter:      budgeter,
 		pendingReqs:   make(map[string]contract.TurnRequest),
 		sessionStates: make(map[string]sessionState),
@@ -80,6 +80,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	s.sessionStates[sess.ID] = sessionState{
 		turnCount: 0,
 		preset:    req.Preset,
+		router:    router.NewRouter(req.Preset),
 	}
 	s.mu.Unlock()
 
@@ -116,22 +117,24 @@ func (s *Server) handleNextTurn(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	state, ok := s.sessionStates[id]
-	s.mu.Unlock()
 	if !ok {
+		s.mu.Unlock()
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
 
 	sess, err := s.store.Get(ctx, id)
 	if err != nil {
+		s.mu.Unlock()
 		logger.ErrorContext(ctx, "get session", "error", err)
 		http.Error(w, fmt.Sprintf("get session: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	turn := state.turnCount + 1
-	roleID, err := s.router.Next(ctx, nil, turn)
+	roleID, err := state.router.Next(ctx, state.lastResp, turn)
 	if err != nil {
+		s.mu.Unlock()
 		logger.ErrorContext(ctx, "router next", "error", err)
 		http.Error(w, fmt.Sprintf("router error: %v", err), http.StatusInternalServerError)
 		return
@@ -159,7 +162,6 @@ func (s *Server) handleNextTurn(w http.ResponseWriter, r *http.Request) {
 		ExitWhen:    state.preset.ExitWhen,
 	}
 
-	s.mu.Lock()
 	s.pendingReqs[id] = req
 	s.mu.Unlock()
 
@@ -231,6 +233,7 @@ func (s *Server) handlePostTurn(w http.ResponseWriter, r *http.Request) {
 		Artifacts: resp.Artifacts,
 		SelfEval:  resp.SelfEval,
 	}
+	state.lastResp = &resp
 	s.sessionStates[id] = state
 	s.mu.Unlock()
 

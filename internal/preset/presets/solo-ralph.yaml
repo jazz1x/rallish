@@ -6,7 +6,7 @@ roles:
     runtime: claude
     model: sonnet
 
-routing: strict_round_robin
+routing: round_robin
 
 budget:
   max_turns: 30

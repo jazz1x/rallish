@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/fang"
 	"github.com/jazz1x/hocketty/internal/buildinfo"
+	"github.com/jazz1x/hocketty/internal/cli"
 	"github.com/jazz1x/hocketty/internal/doctor"
 	"github.com/spf13/cobra"
 )
@@ -37,9 +38,49 @@ func main() {
 				return doctor.Run(cmd.Context())
 			},
 		},
+		daemonCmd(),
+		startCmd(),
 	)
 
 	if err := fang.Execute(context.Background(), root, fang.WithoutVersion()); err != nil {
 		os.Exit(1)
 	}
+}
+
+func daemonCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "daemon",
+		Short: "Run the hocketty broker daemon",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("get home dir: %w", err)
+			}
+			return cli.RunDaemon(cmd.Context(), home)
+		},
+	}
+}
+
+func startCmd() *cobra.Command {
+	var opts cli.StartOptions
+	cmd := &cobra.Command{
+		Use:   "start",
+		Short: "Start a new hocketty session",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("get home dir: %w", err)
+			}
+			opts.HomeDir = home
+			if opts.Task == "" {
+				return fmt.Errorf("--task is required")
+			}
+			return cli.RunStart(cmd.Context(), opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.PresetName, "preset", "solo-ralph", "Preset to use")
+	cmd.Flags().StringVar(&opts.Task, "task", "", "Task description")
+	cmd.Flags().StringVar(&opts.SessionID, "session-id", "", "Optional session ID")
+	cmd.Flags().BoolVar(&opts.AllowShellExit, "allow-shell-exit", false, "Allow shell exit predicates")
+	return cmd
 }
