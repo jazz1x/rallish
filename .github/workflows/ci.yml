@@ -62,7 +62,7 @@ jobs:
 
   govulncheck:
     name: govulncheck
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       security-events: write
