@@ -17,6 +17,7 @@ import (
 
 	"github.com/jazz1x/hocketty/internal/preset"
 	"github.com/jazz1x/hocketty/internal/runner"
+	"github.com/jazz1x/hocketty/internal/session"
 	"github.com/jazz1x/hocketty/pkg/contract"
 	"golang.org/x/sync/errgroup"
 )
@@ -53,25 +54,6 @@ func RunStart(ctx context.Context, opts StartOptions) error {
 		return fmt.Errorf("repo path is not a directory: %s", repoRoot)
 	}
 
-	presets, err := preset.LoadEmbedded()
-	if err != nil {
-		return fmt.Errorf("load embedded presets: %w", err)
-	}
-
-	p, ok := presets[opts.PresetName]
-	if !ok {
-		path := filepath.Join(opts.HomeDir, ".hocketty", "presets", opts.PresetName+".yaml")
-		f, err := os.Open(path) //nolint:gosec // path under user home
-		if err != nil {
-			return fmt.Errorf("preset %q not found: %w", opts.PresetName, err)
-		}
-		defer func() { _ = f.Close() }()
-		p, err = preset.Load(f)
-		if err != nil {
-			return fmt.Errorf("load preset file: %w", err)
-		}
-	}
-
 	sockDir := filepath.Join(opts.HomeDir, ".hocketty")
 	portFile := filepath.Join(sockDir, "port")
 	port, err := readPortFile(portFile)
@@ -93,46 +75,111 @@ func RunStart(ctx context.Context, opts StartOptions) error {
 	}
 
 	brokerURL := fmt.Sprintf("http://127.0.0.1:%s", strings.TrimSpace(port))
-
-	createBody := struct {
-		Preset contract.Preset `json:"preset"`
-		Task   contract.Task   `json:"task"`
-	}{
-		Preset: p,
-		Task: contract.Task{
-			Title:    opts.Task,
-			Body:     opts.Task,
-			RepoRoot: repoRoot,
-		},
-	}
-	bodyJSON, err := json.Marshal(createBody)
-	if err != nil {
-		return fmt.Errorf("marshal create body: %w", err)
-	}
-
 	client := &http.Client{Timeout: 30 * time.Second}
-	//nolint:gosec // local broker URL
-	resp, err := client.Post(brokerURL+"/sessions", "application/json", bytes.NewReader(bodyJSON))
-	if err != nil {
-		return fmt.Errorf("create session: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusCreated {
-		data, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("create session failed: %d %s", resp.StatusCode, string(data))
-	}
 
-	var sess struct {
-		ID string `json:"id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&sess); err != nil {
-		return fmt.Errorf("decode session: %w", err)
-	}
+	var sessionID string
+	var p contract.Preset
 
-	sessionID := sess.ID
 	if opts.SessionID != "" {
-		// Phase 3 MVP ignores custom session IDs because the broker generates them.
-		_ = opts.SessionID
+		// Resume existing session.
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, brokerURL+"/sessions/"+opts.SessionID, nil)
+		if err != nil {
+			return fmt.Errorf("build resume request: %w", err)
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("resume session: %w", err)
+		}
+		defer func() { _ = res.Body.Close() }()
+		if res.StatusCode == http.StatusNotFound {
+			return fmt.Errorf("session %q not found on broker", opts.SessionID)
+		}
+		if res.StatusCode != http.StatusOK {
+			return fmt.Errorf("resume session: status %d", res.StatusCode)
+		}
+		var sess session.Session
+		if err := json.NewDecoder(res.Body).Decode(&sess); err != nil {
+			return fmt.Errorf("decode session: %w", err)
+		}
+		sessionID = sess.ID
+
+		presets, err := preset.LoadEmbedded()
+		if err != nil {
+			return fmt.Errorf("load embedded presets: %w", err)
+		}
+		var ok bool
+		p, ok = presets[sess.PresetName]
+		if !ok {
+			path := filepath.Join(opts.HomeDir, ".hocketty", "presets", sess.PresetName+".yaml")
+			f, err := os.Open(path) //nolint:gosec // path under user home
+			if err != nil {
+				return fmt.Errorf("preset %q not found: %w", sess.PresetName, err)
+			}
+			defer func() { _ = f.Close() }()
+			p, err = preset.Load(f)
+			if err != nil {
+				return fmt.Errorf("load preset %q: %w", sess.PresetName, err)
+			}
+		}
+	} else {
+		// Create new session.
+		if opts.Task == "" {
+			return fmt.Errorf("--task is required")
+		}
+
+		presets, err := preset.LoadEmbedded()
+		if err != nil {
+			return fmt.Errorf("load embedded presets: %w", err)
+		}
+		var ok bool
+		p, ok = presets[opts.PresetName]
+		if !ok {
+			path := filepath.Join(opts.HomeDir, ".hocketty", "presets", opts.PresetName+".yaml")
+			f, err := os.Open(path) //nolint:gosec // path under user home
+			if err != nil {
+				return fmt.Errorf("preset %q not found: %w", opts.PresetName, err)
+			}
+			defer func() { _ = f.Close() }()
+			p, err = preset.Load(f)
+			if err != nil {
+				return fmt.Errorf("load preset file: %w", err)
+			}
+		}
+
+		createBody := struct {
+			Preset contract.Preset `json:"preset"`
+			Task   contract.Task   `json:"task"`
+		}{
+			Preset: p,
+			Task: contract.Task{
+				Title:    opts.Task,
+				Body:     opts.Task,
+				RepoRoot: repoRoot,
+			},
+		}
+		bodyJSON, err := json.Marshal(createBody)
+		if err != nil {
+			return fmt.Errorf("marshal create body: %w", err)
+		}
+
+		//nolint:gosec // local broker URL
+		resp, err := client.Post(brokerURL+"/sessions", "application/json", bytes.NewReader(bodyJSON))
+		if err != nil {
+			return fmt.Errorf("create session: %w", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusCreated {
+			data, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("create session failed: %d %s", resp.StatusCode, string(data))
+		}
+
+		var sess struct {
+			ID string `json:"id"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&sess); err != nil {
+			return fmt.Errorf("decode session: %w", err)
+		}
+		sessionID = sess.ID
 	}
 
 	fmt.Println(sessionID)

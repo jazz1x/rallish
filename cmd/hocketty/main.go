@@ -72,9 +72,6 @@ func startCmd() *cobra.Command {
 				return fmt.Errorf("get home dir: %w", err)
 			}
 			opts.HomeDir = home
-			if opts.Task == "" {
-				return fmt.Errorf("--task is required")
-			}
 			return cli.RunStart(cmd.Context(), opts)
 		},
 	}
