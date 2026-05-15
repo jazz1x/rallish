@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+# Unix domain sockets accidentally created at repo root
+*.sock
+
 # Distribution / packaging
 .Python
 build/

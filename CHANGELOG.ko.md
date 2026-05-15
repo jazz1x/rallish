@@ -9,6 +9,11 @@
 
 ### 추가됨
 
+- CLI ↔ 데몬 기본 전송 채널로 Unix 도메인 소켓(`~/.rallish/rallish.sock`) 추가.
+  TCP 루프백은 폴백 및 A2A 클라이언트용으로 유지. 데몬은 소켓 권한을 `0600`으로
+  강제하고, CLI는 소켓 포인터 변조를 차단. Windows 빌드는 빌드태그 스텁을 통해
+  TCP로 폴백.
+- `rallish doctor`가 소켓 경유 데몬 도달 가능 여부를 보고.
 - A2A 프로토콜 레이어: `GET /.well-known/agent.json`, `POST /a2a` (JSON-RPC 2.0)
   - `tasks/send`, `tasks/get`, `tasks/cancel`, `tasks/sendSubscribe` (SSE)
 - AgentCard, TaskState, JSON-RPC 봉투를 포함한 `pkg/contract/a2a.go`

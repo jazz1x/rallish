@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Unix domain socket IPC at `~/.rallish/rallish.sock` as the primary CLI↔Daemon
+  transport. TCP loopback is retained for fallback and A2A clients. Daemon
+  enforces `0600` socket permissions; CLI guards against socket-pointer
+  tampering. Windows builds fall back to TCP via a build-tagged stub.
+- `rallish doctor` now reports daemon reachability over the socket.
 - A2A Protocol layer: `GET /.well-known/agent.json`, `POST /a2a` (JSON-RPC 2.0)
   - `tasks/send`, `tasks/get`, `tasks/cancel`, `tasks/sendSubscribe` (SSE)
 - `pkg/contract/a2a.go` with AgentCard, TaskState, JSON-RPC envelopes

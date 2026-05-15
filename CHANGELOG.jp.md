@@ -9,6 +9,12 @@
 
 ### 追加
 
+- CLI ↔ デーモンの主要トランスポートとして Unix ドメインソケット
+  (`~/.rallish/rallish.sock`) を追加。TCP ループバックはフォールバックおよび
+  A2A クライアント用に保持。デーモンはソケット権限を `0600` に強制し、CLI は
+  ソケットポインタの改竄を防止。Windows ビルドはビルドタグスタブで TCP に
+  フォールバック。
+- `rallish doctor` がソケット経由のデーモン到達性を報告。
 - A2A プロトコル レイヤー: `GET /.well-known/agent.json`, `POST /a2a` (JSON-RPC 2.0)
   - `tasks/send`, `tasks/get`, `tasks/cancel`, `tasks/sendSubscribe` (SSE)
 - AgentCard, TaskState, JSON-RPC エンベロープを含む `pkg/contract/a2a.go`

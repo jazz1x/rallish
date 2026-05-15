@@ -7,7 +7,7 @@
 
 ## 0. Implementation
 
-**Language: Go 1.22+** (locked in)
+**Language: Go 1.25+** (locked in)
 
 Why Go:
 - We are a CLI orchestrator that spawns other CLIs over OS pipes and serves a local HTTP/SSE broker. This is the exact category Go was built for: `gh`, `kubectl`, `terraform`, `docker`, `lazygit`, `claude-squad` all live here.
@@ -19,7 +19,7 @@ Toolchain:
 
 | Tool | Purpose |
 |---|---|
-| Go 1.22+ | language; pin minor in `go.mod` |
+| Go 1.25+ | language; pin minor in `go.mod` |
 | `golangci-lint` | lint aggregator (config in `.golangci.yml`) |
 | `goreleaser` | cross-platform release builds + Homebrew tap |
 | `make` | developer entrypoint (`make test`, `make build`, `make check`) |
@@ -410,7 +410,7 @@ Each phase is a runnable cut. Do not bundle.
 
 ### Phase 0 — Draft + scaffold
 - [x] `DESIGN.md` (this file)
-- [ ] `go.mod` (`module github.com/<owner>/rallish`, `go 1.22`)
+- [ ] `go.mod` (`module github.com/<owner>/rallish`, `go 1.25`)
 - [ ] Directory skeleton per §4 with `doc.go` stubs
 - [ ] `Makefile` (`build`, `test`, `check`, `run`, `lint`, `tidy`)
 - [ ] `.golangci.yml` — enable: `gofmt, govet, errcheck, staticcheck, ineffassign, gosimple, unused, forbidigo, gosec, revive, gocritic`
