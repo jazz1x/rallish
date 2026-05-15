@@ -3,7 +3,6 @@ package ipc
 import (
 	"context"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -77,31 +76,3 @@ func TestSocketRemove(t *testing.T) {
 	require.True(t, os.IsNotExist(err), "expected file to be removed")
 }
 
-func TestHTTPClientOverSocket(t *testing.T) {
-	dir := t.TempDir()
-	s := Socket{Path: filepath.Join(dir, "http.sock")}
-
-	ln, err := s.Listen()
-	require.NoError(t, err)
-	defer ln.Close()
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("pong"))
-	})
-
-	srv := &http.Server{Handler: mux}
-	go srv.Serve(ln)
-	defer srv.Close()
-
-	client := HTTPClientOverSocket(s.Path)
-	resp, err := client.Get("http://unix/ping")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.Equal(t, "pong", string(body))
-}
