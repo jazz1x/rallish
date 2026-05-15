@@ -27,8 +27,9 @@ func main() {
 			_, err := fmt.Fprintln(cmd.OutOrStdout(), buildinfo.String())
 			return err
 		}},
-		&cobra.Command{Use: "doctor", RunE: func(cmd *cobra.Command, _ []string) error {
-			return doctor.Run(cmd.Context())
+		&cobra.Command{Use: "doctor", Short: "Diagnose adapters and daemon reachability", RunE: func(cmd *cobra.Command, _ []string) error {
+			home, _ := os.UserHomeDir()
+			return doctor.Run(cmd.Context(), home)
 		}},
 		daemonCmd(shutdown, &isDaemon),
 		startCmd(),
@@ -56,7 +57,8 @@ func main() {
 
 func daemonCmd(shutdown chan struct{}, isDaemon *bool) *cobra.Command {
 	return &cobra.Command{
-		Use: "daemon",
+		Use:   "daemon",
+		Short: "Run the rallish broker daemon",
 		PreRunE: func(_ *cobra.Command, _ []string) error {
 			*isDaemon = true
 			return nil
