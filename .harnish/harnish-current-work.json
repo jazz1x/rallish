@@ -1,0 +1,213 @@
+{
+  "metadata": {
+    "project": "rallish",
+    "branch": "feat/ipc-unix-socket",
+    "prd": "docs/prd-ipc-unix-socket.md",
+    "status": "ready",
+    "ceremony_done": true
+  },
+  "todo": {
+    "phases": [
+      {
+        "id": "P1",
+        "title": "IPC Core",
+        "tasks": [
+          {
+            "id": "T1",
+            "title": "internal/ipc/socket.go — Socket type, Listen, Dial, Remove",
+            "files": ["internal/ipc/socket.go"],
+            "acceptance_criteria": ["go build ./internal/ipc passes", "no new deps"],
+            "depends_on": []
+          },
+          {
+            "id": "T2",
+            "title": "internal/ipc/socket_test.go — TestSocketListenDial, TestSocketRemove",
+            "files": ["internal/ipc/socket_test.go"],
+            "acceptance_criteria": ["go test -race ./internal/ipc passes", "coverage ≥70% for socket.go"],
+            "depends_on": ["T1"]
+          },
+          {
+            "id": "T3",
+            "title": "internal/ipc/client.go — HTTPClientOverSocket",
+            "files": ["internal/ipc/client.go"],
+            "acceptance_criteria": ["go build ./internal/ipc passes", "stdlib only"],
+            "depends_on": ["T1"]
+          },
+          {
+            "id": "T4",
+            "title": "internal/ipc/client_test.go — TestHTTPClientOverSocket",
+            "files": ["internal/ipc/client_test.go"],
+            "acceptance_criteria": ["go test -race ./internal/ipc passes"],
+            "depends_on": ["T3"]
+          }
+        ]
+      },
+      {
+        "id": "P2",
+        "title": "Daemon Integration",
+        "tasks": [
+          {
+            "id": "T5",
+            "title": "cli/daemon.go — Unix socket listen + fallback TCP + cleanup",
+            "files": ["internal/cli/daemon.go"],
+            "acceptance_criteria": ["daemon starts", "socket file created", "socket removed on shutdown"],
+            "depends_on": ["T1"]
+          },
+          {
+            "id": "T6",
+            "title": "cli/daemon.go — Write socket path file alongside port file",
+            "files": ["internal/cli/daemon.go"],
+            "acceptance_criteria": ["~/.rallish/socket file written with socket path"],
+            "depends_on": ["T5"]
+          }
+        ]
+      },
+      {
+        "id": "P3",
+        "title": "CLI Integration",
+        "tasks": [
+          {
+            "id": "T7",
+            "title": "cli/start.go — Try Unix socket dial before HTTP port lookup",
+            "files": ["internal/cli/start.go"],
+            "acceptance_criteria": ["start detects running daemon via socket"],
+            "depends_on": ["T6"]
+          },
+          {
+            "id": "T8",
+            "title": "cli/start.go — Use HTTPClientOverSocket when socket available",
+            "files": ["internal/cli/start.go"],
+            "acceptance_criteria": ["HTTP requests route through Unix socket"],
+            "depends_on": ["T7", "T3"]
+          }
+        ]
+      },
+      {
+        "id": "P4",
+        "title": "Validation",
+        "tasks": [
+          {
+            "id": "T9",
+            "title": "make check + lefthook pre-commit + coverage ≥70%",
+            "files": [],
+            "acceptance_criteria": ["make check passes", "lefthook run pre-commit passes", "go test -cover ./internal/ipc ≥70%"],
+            "depends_on": ["T4", "T6", "T8"]
+          },
+          {
+            "id": "T10",
+            "title": "Git commit & push",
+            "files": [],
+            "acceptance_criteria": ["committed", "pushed to origin/feat/ipc-unix-socket"],
+            "depends_on": ["T9"]
+          }
+        ]
+      }
+    ]
+  },
+  "doing": {
+    "task": null
+  },
+  "done": {
+    "phases": [
+      {
+        "id": "P1",
+        "title": "IPC Core",
+        "tasks": [
+          {
+            "id": "T1",
+            "title": "internal/ipc/socket.go — Socket type, Listen, Dial, Remove",
+            "result": "Socket type with Listen/Dial/Remove implemented and built",
+            "files_changed": ["internal/ipc/socket.go"],
+            "verification": "go build ./internal/ipc passed",
+            "duration": "1m"
+          },
+          {
+            "id": "T2",
+            "title": "internal/ipc/socket_test.go — TestSocketListenDial, TestSocketRemove",
+            "result": "Tests pass, coverage 82.4%",
+            "files_changed": ["internal/ipc/socket_test.go"],
+            "verification": "go test -race -cover ./internal/ipc >=70%",
+            "duration": "2m"
+          },
+          {
+            "id": "T3",
+            "title": "internal/ipc/client.go — HTTPClientOverSocket",
+            "result": "HTTPClientOverSocket implemented",
+            "files_changed": ["internal/ipc/client.go"],
+            "verification": "go build ./internal/ipc passed",
+            "duration": "1m"
+          },
+          {
+            "id": "T4",
+            "title": "internal/ipc/client_test.go — TestHTTPClientOverSocket",
+            "result": "Test passes, coverage maintained",
+            "files_changed": ["internal/ipc/client_test.go"],
+            "verification": "go test -race ./internal/ipc passed",
+            "duration": "1m"
+          }
+        ]
+      },
+      {
+        "id": "P2",
+        "title": "Daemon Integration",
+        "tasks": [
+          {
+            "id": "T5",
+            "title": "cli/daemon.go — Unix socket listen + fallback TCP + cleanup",
+            "result": "Daemon serves on both Unix socket and TCP",
+            "files_changed": ["internal/cli/daemon.go"],
+            "verification": "go build ./cmd/rallish && go test -race ./internal/cli passed",
+            "duration": "2m"
+          },
+          {
+            "id": "T6",
+            "title": "cli/daemon.go — Write socket path file alongside port file",
+            "result": "~/.rallish/socket file written with socket path",
+            "files_changed": ["internal/cli/daemon.go"],
+            "verification": "daemon writes socket file on startup",
+            "duration": "1m"
+          }
+        ]
+      },
+      {
+        "id": "P3",
+        "title": "CLI Integration",
+        "tasks": [
+          {
+            "id": "T7",
+            "title": "cli/start.go — Try Unix socket dial before HTTP port lookup",
+            "result": "start detects running daemon via socket",
+            "files_changed": ["internal/cli/start.go"],
+            "verification": "go test -race ./internal/cli passed",
+            "duration": "2m"
+          },
+          {
+            "id": "T8",
+            "title": "cli/start.go — Use HTTPClientOverSocket when socket available",
+            "result": "HTTP requests route through Unix socket",
+            "files_changed": ["internal/cli/start.go"],
+            "verification": "go test -race ./internal/cli passed",
+            "duration": "1m"
+          }
+        ]
+      },
+      {
+        "id": "P4",
+        "title": "Validation",
+        "tasks": [
+          {
+            "id": "T9",
+            "title": "make check + lefthook pre-commit + coverage >=70%",
+            "result": "All checks passed, coverage 82.4%. Also fixed SIGTERM graceful shutdown: moved signal.Notify to main.go with shutdown channel; root cause was bash $! pointing to subshell PID during E2E testing.",
+            "files_changed": ["cmd/rallish/main.go", "internal/cli/daemon.go", "go.mod", "go.sum"],
+            "verification": "make check passed, E2E SIGTERM test: Exit 0, socket/port files removed",
+            "duration": "3m"
+          }
+        ]
+      }
+    ]
+  },
+  "stats": {
+    "completed_tasks": 1
+  }
+}

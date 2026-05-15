@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jazz1x/rallish/internal/ipc"
 	"github.com/jazz1x/rallish/internal/preset"
 	"github.com/jazz1x/rallish/internal/runner"
 	"github.com/jazz1x/rallish/internal/session"
@@ -55,27 +56,38 @@ func RunStart(ctx context.Context, opts StartOptions) error {
 	}
 
 	sockDir := filepath.Join(opts.HomeDir, ".rallish")
-	portFile := filepath.Join(sockDir, "port")
-	port, err := readPortFile(portFile)
-	if err != nil {
-		slog.Info("broker not running, starting daemon")
-		if err := startDaemon(opts.HomeDir); err != nil {
-			return fmt.Errorf("start daemon: %w", err)
-		}
-		for i := 0; i < 20; i++ {
-			port, err = readPortFile(portFile)
-			if err == nil {
-				break
-			}
-			time.Sleep(250 * time.Millisecond)
-		}
-		if err != nil {
-			return fmt.Errorf("daemon did not write port file: %w", err)
-		}
-	}
 
-	brokerURL := fmt.Sprintf("http://127.0.0.1:%s", strings.TrimSpace(port))
-	client := &http.Client{Timeout: 30 * time.Second}
+	var brokerURL string
+	var client *http.Client
+
+	socketFile := filepath.Join(sockDir, "socket")
+	if socketPath, err := os.ReadFile(socketFile); err == nil && len(socketPath) > 0 { //nolint:gosec // well-known path
+		brokerURL = "http://rallish.local"
+		client = ipc.HTTPClientOverSocket(strings.TrimSpace(string(socketPath)))
+		client.Timeout = 30 * time.Second
+	} else {
+		portFile := filepath.Join(sockDir, "port")
+		port, err := readPortFile(portFile)
+		if err != nil {
+			slog.Info("broker not running, starting daemon")
+			if err := startDaemon(opts.HomeDir); err != nil {
+				return fmt.Errorf("start daemon: %w", err)
+			}
+			for i := 0; i < 20; i++ {
+				port, err = readPortFile(portFile)
+				if err == nil {
+					break
+				}
+				time.Sleep(250 * time.Millisecond)
+			}
+			if err != nil {
+				return fmt.Errorf("daemon did not write port file: %w", err)
+			}
+		}
+
+		brokerURL = fmt.Sprintf("http://127.0.0.1:%s", strings.TrimSpace(port))
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
 
 	var sessionID string
 	var p contract.Preset
