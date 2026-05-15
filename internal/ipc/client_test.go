@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -16,23 +17,23 @@ func TestHTTPClientOverSocket(t *testing.T) {
 
 	ln, err := s.Listen()
 	require.NoError(t, err)
-	defer ln.Close()
+	t.Cleanup(func() { _ = ln.Close() })
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
 
-	srv := &http.Server{Handler: mux}
-	go srv.Serve(ln)
-	defer srv.Close()
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
 
 	client := HTTPClientOverSocket(s.Path)
 	resp, err := client.Get("http://rallish.local/")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	t.Cleanup(func() { _ = resp.Body.Close() })
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 

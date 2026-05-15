@@ -25,7 +25,7 @@ func TestSocketListenDial(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		buf := make([]byte, 5)
 		n, err := conn.Read(buf)
