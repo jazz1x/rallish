@@ -219,7 +219,7 @@ __marimo__/
 
 # Go binaries / test artifacts
 *.test
-rallish
+/rallish
 .rallish/
 coverage.out
 

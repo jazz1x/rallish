@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 
-	"github.com/charmbracelet/fang"
 	"github.com/jazz1x/rallish/internal/buildinfo"
 	"github.com/jazz1x/rallish/internal/cli"
 	"github.com/jazz1x/rallish/internal/doctor"
@@ -17,47 +18,55 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	slog.SetDefault(logger)
 
-	root := &cobra.Command{
-		Use:   "rallish",
-		Short: "A local broker for multi-agent turn-taking",
-	}
+	shutdown := make(chan struct{})
+	isDaemon := false
 
+	root := &cobra.Command{Use: "rallish", SilenceUsage: true, SilenceErrors: true}
 	root.AddCommand(
-		&cobra.Command{
-			Use:   "version",
-			Short: "Print version information",
-			RunE: func(cmd *cobra.Command, _ []string) error {
-				_, err := fmt.Fprintln(cmd.OutOrStdout(), buildinfo.String())
-				return err
-			},
-		},
-		&cobra.Command{
-			Use:   "doctor",
-			Short: "Check adapters, paths, and permissions",
-			RunE: func(cmd *cobra.Command, _ []string) error {
-				return doctor.Run(cmd.Context())
-			},
-		},
-		daemonCmd(),
+		&cobra.Command{Use: "version", RunE: func(cmd *cobra.Command, _ []string) error {
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), buildinfo.String())
+			return err
+		}},
+		&cobra.Command{Use: "doctor", RunE: func(cmd *cobra.Command, _ []string) error {
+			return doctor.Run(cmd.Context())
+		}},
+		daemonCmd(shutdown, &isDaemon),
 		startCmd(),
 		cli.AddCmd(),
 	)
 
-	if err := fang.Execute(context.Background(), root, fang.WithoutVersion()); err != nil {
-		os.Exit(1)
+	exitCode := 0
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Reset(os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		if isDaemon {
+			close(shutdown)
+		} else {
+			exitCode = 1
+		}
+	}()
+
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		exitCode = 1
 	}
+	os.Exit(exitCode) //nolint:gocritic // defer resets signals; exit code must propagate
 }
 
-func daemonCmd() *cobra.Command {
+func daemonCmd(shutdown chan struct{}, isDaemon *bool) *cobra.Command {
 	return &cobra.Command{
-		Use:   "daemon",
-		Short: "Run the rallish broker daemon",
+		Use: "daemon",
+		PreRunE: func(_ *cobra.Command, _ []string) error {
+			*isDaemon = true
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			home, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("get home dir: %w", err)
 			}
-			return cli.RunDaemon(cmd.Context(), home)
+			return cli.RunDaemon(cmd.Context(), home, shutdown)
 		},
 	}
 }

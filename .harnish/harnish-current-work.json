@@ -198,9 +198,9 @@
           {
             "id": "T9",
             "title": "make check + lefthook pre-commit + coverage >=70%",
-            "result": "All checks passed, coverage 82.4%",
-            "files_changed": ["internal/ipc/client.go", "internal/ipc/client_test.go", "internal/ipc/socket_test.go"],
-            "verification": "make check passed, lefthook pre-commit passed",
+            "result": "All checks passed, coverage 82.4%. Also fixed SIGTERM graceful shutdown: moved signal.Notify to main.go with shutdown channel; root cause was bash $! pointing to subshell PID during E2E testing.",
+            "files_changed": ["cmd/rallish/main.go", "internal/cli/daemon.go", "go.mod", "go.sum"],
+            "verification": "make check passed, E2E SIGTERM test: Exit 0, socket/port files removed",
             "duration": "3m"
           }
         ]
