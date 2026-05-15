@@ -105,12 +105,117 @@
     ]
   },
   "doing": {
-    "task": null
+    "task": {
+      "id": "T10",
+      "title": "Git commit & push",
+      "started_at": "2026-05-15T10:20:00+09:00",
+      "current": "pushing to origin",
+      "next_action": "git push origin feat/ipc-unix-socket",
+      "retry_count": 0,
+      "context": "all checks passed"
+    }
   },
   "done": {
-    "phases": []
+    "phases": [
+      {
+        "id": "P1",
+        "title": "IPC Core",
+        "tasks": [
+          {
+            "id": "T1",
+            "title": "internal/ipc/socket.go — Socket type, Listen, Dial, Remove",
+            "result": "Socket type with Listen/Dial/Remove implemented and built",
+            "files_changed": ["internal/ipc/socket.go"],
+            "verification": "go build ./internal/ipc passed",
+            "duration": "1m"
+          },
+          {
+            "id": "T2",
+            "title": "internal/ipc/socket_test.go — TestSocketListenDial, TestSocketRemove",
+            "result": "Tests pass, coverage 82.4%",
+            "files_changed": ["internal/ipc/socket_test.go"],
+            "verification": "go test -race -cover ./internal/ipc >=70%",
+            "duration": "2m"
+          },
+          {
+            "id": "T3",
+            "title": "internal/ipc/client.go — HTTPClientOverSocket",
+            "result": "HTTPClientOverSocket implemented",
+            "files_changed": ["internal/ipc/client.go"],
+            "verification": "go build ./internal/ipc passed",
+            "duration": "1m"
+          },
+          {
+            "id": "T4",
+            "title": "internal/ipc/client_test.go — TestHTTPClientOverSocket",
+            "result": "Test passes, coverage maintained",
+            "files_changed": ["internal/ipc/client_test.go"],
+            "verification": "go test -race ./internal/ipc passed",
+            "duration": "1m"
+          }
+        ]
+      },
+      {
+        "id": "P2",
+        "title": "Daemon Integration",
+        "tasks": [
+          {
+            "id": "T5",
+            "title": "cli/daemon.go — Unix socket listen + fallback TCP + cleanup",
+            "result": "Daemon serves on both Unix socket and TCP",
+            "files_changed": ["internal/cli/daemon.go"],
+            "verification": "go build ./cmd/rallish && go test -race ./internal/cli passed",
+            "duration": "2m"
+          },
+          {
+            "id": "T6",
+            "title": "cli/daemon.go — Write socket path file alongside port file",
+            "result": "~/.rallish/socket file written with socket path",
+            "files_changed": ["internal/cli/daemon.go"],
+            "verification": "daemon writes socket file on startup",
+            "duration": "1m"
+          }
+        ]
+      },
+      {
+        "id": "P3",
+        "title": "CLI Integration",
+        "tasks": [
+          {
+            "id": "T7",
+            "title": "cli/start.go — Try Unix socket dial before HTTP port lookup",
+            "result": "start detects running daemon via socket",
+            "files_changed": ["internal/cli/start.go"],
+            "verification": "go test -race ./internal/cli passed",
+            "duration": "2m"
+          },
+          {
+            "id": "T8",
+            "title": "cli/start.go — Use HTTPClientOverSocket when socket available",
+            "result": "HTTP requests route through Unix socket",
+            "files_changed": ["internal/cli/start.go"],
+            "verification": "go test -race ./internal/cli passed",
+            "duration": "1m"
+          }
+        ]
+      },
+      {
+        "id": "P4",
+        "title": "Validation",
+        "tasks": [
+          {
+            "id": "T9",
+            "title": "make check + lefthook pre-commit + coverage >=70%",
+            "result": "All checks passed, coverage 82.4%",
+            "files_changed": ["internal/ipc/client.go", "internal/ipc/client_test.go", "internal/ipc/socket_test.go"],
+            "verification": "make check passed, lefthook pre-commit passed",
+            "duration": "3m"
+          }
+        ]
+      }
+    ]
   },
   "stats": {
-    "completed_tasks": 0
+    "completed_tasks": 1
   }
 }
