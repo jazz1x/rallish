@@ -61,11 +61,16 @@ func RunStart(ctx context.Context, opts StartOptions) error {
 	var client *http.Client
 
 	socketFile := filepath.Join(sockDir, "socket")
-	if socketPath, err := os.ReadFile(socketFile); err == nil && len(socketPath) > 0 { //nolint:gosec // well-known path
+	socketPath, readErr := os.ReadFile(socketFile) //nolint:gosec // well-known path
+	trimmed := strings.TrimSpace(string(socketPath))
+	if readErr == nil && trimmed != "" && socketUnderRoot(trimmed, sockDir) {
 		brokerURL = "http://rallish.local"
-		client = ipc.HTTPClientOverSocket(strings.TrimSpace(string(socketPath)))
+		client = ipc.HTTPClientOverSocket(trimmed)
 		client.Timeout = 30 * time.Second
 	} else {
+		if readErr == nil && trimmed != "" {
+			slog.Warn("ignoring socket pointer outside rallish home", "path", trimmed)
+		}
 		portFile := filepath.Join(sockDir, "port")
 		port, err := readPortFile(portFile)
 		if err != nil {
@@ -209,7 +214,8 @@ func RunStart(ctx context.Context, opts StartOptions) error {
 		}
 		r := role
 		g.Go(func() error {
-			err := runner.NewLoop(a, r.ID, brokerURL, sessionID).Run(ctx)
+			loop := runner.NewLoopWithClient(a, r.ID, brokerURL, sessionID, client)
+			err := loop.Run(ctx)
 			if err != nil && !errors.Is(err, context.Canceled) {
 				slog.Error("runner loop exited", "role", r.ID, "error", err)
 				return err
@@ -225,6 +231,26 @@ func RunStart(ctx context.Context, opts StartOptions) error {
 	logPath := filepath.Join(opts.HomeDir, ".rallish", "sessions", sessionID, "log.jsonl")
 	_, _ = fmt.Fprintf(os.Stdout, "Session %s in %s completed successfully. Log: %s\n", sessionID, repoRoot, logPath)
 	return nil
+}
+
+// socketUnderRoot returns true when path resolves to a location inside sockDir,
+// guarding against symlink or pointer-file tampering (PRD §6).
+func socketUnderRoot(path, sockDir string) bool {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	absDir, err := filepath.Abs(sockDir)
+	if err != nil {
+		return false
+	}
+	cleanPath := filepath.Clean(absPath)
+	cleanDir := filepath.Clean(absDir)
+	rel, err := filepath.Rel(cleanDir, cleanPath)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func readPortFile(path string) (string, error) {

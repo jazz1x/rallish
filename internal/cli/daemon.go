@@ -70,8 +70,15 @@ func RunDaemon(ctx context.Context, homeDir string, shutdown <-chan struct{}) er
 		slog.Warn("failed to remove stale unix socket", "error", err)
 	}
 
-	if unixLn, err := us.Listen(); err == nil {
+	var unixLn net.Listener
+	if ln, err := us.Listen(); err == nil {
+		unixLn = ln
 		unixOK = true
+		// Restrict to current user; net.Listen("unix") otherwise honours umask
+		// and typically produces 0755.
+		if cerr := os.Chmod(socketPath, 0o600); cerr != nil {
+			slog.Warn("failed to chmod unix socket", "error", cerr)
+		}
 		socketFile := filepath.Join(sockDir, "socket")
 		if werr := os.WriteFile(socketFile, []byte(socketPath), 0o600); werr != nil {
 			slog.Warn("failed to write socket file", "error", werr)
@@ -88,14 +95,18 @@ func RunDaemon(ctx context.Context, homeDir string, shutdown <-chan struct{}) er
 		slog.Warn("unix socket unavailable, falling back to tcp only", "error", err)
 	}
 
-	if err := httpSrv.Serve(listener); err != nil && err != http.ErrServerClosed {
-		return fmt.Errorf("serve: %w", err)
-	}
+	serveErr := httpSrv.Serve(listener)
 	if unixOK {
+		if unixLn != nil {
+			_ = unixLn.Close()
+		}
 		_ = us.Remove()
 		_ = os.Remove(filepath.Join(sockDir, "socket"))
 	}
 	_ = os.Remove(filepath.Join(sockDir, "port"))
+	if serveErr != nil && serveErr != http.ErrServerClosed {
+		return fmt.Errorf("serve: %w", serveErr)
+	}
 	return nil
 }
 

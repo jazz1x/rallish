@@ -33,16 +33,26 @@ type Loop struct {
 	client    *http.Client
 }
 
-// NewLoop creates a new runner loop.
+// NewLoop creates a new runner loop with a default HTTP client.
 func NewLoop(adapter adapter.Adapter, role, brokerURL, sessionID string) *Loop {
+	return NewLoopWithClient(adapter, role, brokerURL, sessionID, &http.Client{
+		Timeout: 45 * time.Second,
+	})
+}
+
+// NewLoopWithClient creates a new runner loop using the supplied HTTP client.
+// Use this when the broker is reachable over a Unix domain socket so the
+// poll/turn requests share the socket-aware transport.
+func NewLoopWithClient(adapter adapter.Adapter, role, brokerURL, sessionID string, client *http.Client) *Loop {
+	if client == nil {
+		client = &http.Client{Timeout: 45 * time.Second}
+	}
 	return &Loop{
 		adapter:   adapter,
 		role:      role,
 		brokerURL: strings.TrimSuffix(brokerURL, "/"),
 		sessionID: sessionID,
-		client: &http.Client{
-			Timeout: 45 * time.Second,
-		},
+		client:    client,
 	}
 }
 
