@@ -12,6 +12,7 @@ import (
 
 	"github.com/jazz1x/rallish/internal/broker"
 	"github.com/jazz1x/rallish/internal/budget"
+	"github.com/jazz1x/rallish/internal/ipc"
 	"github.com/jazz1x/rallish/internal/session"
 )
 
@@ -57,6 +58,39 @@ func RunDaemon(ctx context.Context, homeDir string) error {
 		defer cancel()
 		_ = httpSrv.Shutdown(sctx)
 	}(ctx)
+
+	// Unix domain socket for CLI↔Daemon internal control plane.
+	socketPath := filepath.Join(sockDir, "rallish.sock")
+	unixOK := false
+	us := ipc.Socket{Path: socketPath}
+
+	if err := us.Remove(); err != nil {
+		slog.Warn("failed to remove stale unix socket", "error", err)
+	}
+
+	if unixLn, err := us.Listen(); err == nil {
+		unixOK = true
+		defer func() {
+			if unixOK {
+				_ = us.Remove()
+			}
+		}()
+
+		socketFile := filepath.Join(sockDir, "socket")
+		if werr := os.WriteFile(socketFile, []byte(socketPath), 0o600); werr != nil {
+			slog.Warn("failed to write socket file", "error", werr)
+		}
+
+		go func() {
+			if serr := httpSrv.Serve(unixLn); serr != nil && serr != http.ErrServerClosed {
+				slog.Error("unix socket serve error", "error", serr)
+			}
+		}()
+
+		slog.Info("daemon listening on unix socket", "path", socketPath)
+	} else {
+		slog.Warn("unix socket unavailable, falling back to tcp only", "error", err)
+	}
 
 	if err := httpSrv.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("serve: %w", err)
