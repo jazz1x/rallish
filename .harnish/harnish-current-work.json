@@ -4,7 +4,7 @@
     "branch": "feat/ipc-unix-socket",
     "prd": "docs/prd-ipc-unix-socket.md",
     "status": "ready",
-    "ceremony_done": false
+    "ceremony_done": true
   },
   "todo": {
     "phases": [
@@ -105,15 +105,7 @@
     ]
   },
   "doing": {
-    "task": {
-      "id": "T10",
-      "title": "Git commit & push",
-      "started_at": "2026-05-15T10:20:00+09:00",
-      "current": "pushing to origin",
-      "next_action": "git push origin feat/ipc-unix-socket",
-      "retry_count": 0,
-      "context": "all checks passed"
-    }
+    "task": null
   },
   "done": {
     "phases": [
