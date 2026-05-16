@@ -1,4 +1,4 @@
-.PHONY: build test check run lint tidy bench setup-hooks
+.PHONY: build test check run lint tidy bench setup-hooks install-skill
 
 VERSION ?= $(shell cat VERSION 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -57,6 +57,15 @@ setup-hooks:
 		lefthook install; \
 	fi
 	@bash scripts/patch-lefthook.sh
+
+install-skill:
+	@if [ -z "$$(which rallish 2>/dev/null)" ]; then \
+		echo "rallish not on PATH — building first"; \
+		$(MAKE) build; \
+		./dist/rallish skill install; \
+	else \
+		rallish skill install; \
+	fi
 
 update-version:
 	@bash scripts/update-version.sh

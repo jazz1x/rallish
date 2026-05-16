@@ -6,11 +6,13 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/jazz1x/rallish/internal/buildinfo"
 	"github.com/jazz1x/rallish/internal/cli"
 	"github.com/jazz1x/rallish/internal/doctor"
+	"github.com/jazz1x/rallish/internal/skills"
 	"github.com/spf13/cobra"
 )
 
@@ -35,6 +37,8 @@ func main() {
 		squashCmd(),
 		cli.RallyCmd(),
 		cli.AddCmd(),
+		skillCmd(),
+		bootstrapCmd(),
 	)
 
 	exitCode := 0
@@ -71,6 +75,106 @@ func daemonCmd(shutdown chan struct{}, isDaemon *bool) *cobra.Command {
 				return fmt.Errorf("get home dir: %w", err)
 			}
 			return cli.RunDaemon(cmd.Context(), home, shutdown)
+		},
+	}
+}
+
+// defaultSkillTarget returns the default install directory for the
+// rallish-operator skill: ~/.claude/skills/rallish-operator.
+func defaultSkillTarget() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("get home dir: %w", err)
+	}
+	return filepath.Join(home, ".claude", "skills", "rallish-operator"), nil
+}
+
+// skillCmd returns the `skill` parent command.
+func skillCmd() *cobra.Command {
+	parent := &cobra.Command{
+		Use:   "skill",
+		Short: "Manage bundled skills",
+	}
+	parent.AddCommand(skillInstallCmd())
+	return parent
+}
+
+// skillInstallCmd returns the `skill install` subcommand.
+func skillInstallCmd() *cobra.Command {
+	var target string
+	cmd := &cobra.Command{
+		Use:   "install",
+		Short: "Install the rallish-operator skill to ~/.claude/skills/rallish-operator",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			dir := target
+			if dir == "" {
+				var err error
+				dir, err = defaultSkillTarget()
+				if err != nil {
+					return err
+				}
+			}
+			results, err := skills.Install(dir)
+			if err != nil {
+				return fmt.Errorf("install skill: %w", err)
+			}
+			out := cmd.OutOrStdout()
+			for _, r := range results {
+				_, _ = fmt.Fprintf(out, "%s %s\n", r.Action, r.Path)
+			}
+			_, _ = fmt.Fprintln(out, "Reload your coding-CLI session (or open a new chat) to pick up the skill.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&target, "target", "", "Install directory (default: ~/.claude/skills/rallish-operator)")
+	return cmd
+}
+
+// bootstrapCmd returns the `bootstrap` command.
+func bootstrapCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "bootstrap",
+		Short: "Install the rallish-operator skill and verify the daemon in one step",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			out := cmd.OutOrStdout()
+
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("get home dir: %w", err)
+			}
+
+			skillDir := filepath.Join(home, ".claude", "skills", "rallish-operator")
+
+			// 1. Install skill.
+			results, err := skills.Install(skillDir)
+			if err != nil {
+				return fmt.Errorf("install skill: %w", err)
+			}
+			for _, r := range results {
+				_, _ = fmt.Fprintf(out, "%s %s\n", r.Action, r.Path)
+			}
+
+			// 2. Run doctor.
+			if err := doctor.Run(cmd.Context(), home); err != nil {
+				// doctor surfaces issues via slog; treat non-nil as informational.
+				_, _ = fmt.Fprintf(out, "doctor: %v\n", err)
+			}
+
+			// 3. Determine daemon status for the summary block.
+			daemonStatus := "not running — will auto-spawn on next `rallish rally new`"
+			sockDir := filepath.Join(home, ".rallish")
+			pointerBytes, perr := os.ReadFile(filepath.Join(sockDir, "socket")) //nolint:gosec // well-known path
+			if perr == nil && len(pointerBytes) > 0 {
+				daemonStatus = "reachable"
+			} else if _, ferr := os.Stat(filepath.Join(sockDir, "port")); ferr == nil {
+				daemonStatus = "reachable"
+			}
+
+			_, _ = fmt.Fprintf(out, "\nBootstrap complete.\n")
+			_, _ = fmt.Fprintf(out, "- Skill installed at: %s\n", skillDir)
+			_, _ = fmt.Fprintf(out, "- Daemon: %s\n", daemonStatus)
+			_, _ = fmt.Fprintln(out, "- Next: open any project in Claude Code and say \"랠리보낼 준비해\" to start.")
+			return nil
 		},
 	}
 }

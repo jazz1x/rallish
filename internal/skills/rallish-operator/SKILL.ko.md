@@ -51,6 +51,14 @@ ssl:
 스타일 랠리를 에이전트가 직접 구동합니다. 사용자는 세 가지만 입력하면
 되고, 나머지는 에이전트가 처리합니다.
 
+## Bootstrap (스킬이 글로벌로 설치되어 있지 않을 때)
+
+코딩 CLI 에이전트가 사용자의 트리거를 감지했지만 "skill not found"를 보고할 경우:
+
+1. rallish CLI가 PATH에 있는지 확인: `command -v rallish`가 작동해야 합니다. 아니라면 설치: `go install github.com/jazz1x/rallish/cmd/rallish@latest` (또는 소스에서 빌드).
+2. `rallish skill install` 실행 — 스킬을 `~/.claude/skills/rallish-operator/`에 글로벌로 설치합니다.
+3. 코딩 CLI 세션을 재시작하고 트리거를 다시 입력하세요.
+
 ## `rallish` 바이너리 경로 먼저 해결
 어떤 rally 명령보다 먼저 실행 가능 경로를 결정:
 

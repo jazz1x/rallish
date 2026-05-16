@@ -51,6 +51,14 @@ This skill drives a live tennis-style rally between two coding-CLI sessions
 through the rallish broker. The user types three things; the agent does the
 rest.
 
+## Bootstrap (when you don't yet have this skill installed globally)
+
+If a coding-CLI agent sees the user's trigger but reports "skill not found":
+
+1. Ensure rallish CLI is on PATH: `command -v rallish` should work. If not, install: `go install github.com/jazz1x/rallish/cmd/rallish@latest` (or build from source).
+2. Run `rallish skill install` — installs the skill globally to `~/.claude/skills/rallish-operator/`.
+3. Reload the coding-CLI session and re-issue the trigger.
+
 ## Resolve the `rallish` binary first
 Before any rally command, pick the runnable path:
 
