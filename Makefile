@@ -8,6 +8,15 @@ LDFLAGS := -X github.com/jazz1x/rallish/internal/buildinfo.version=$(VERSION) \
            -X github.com/jazz1x/rallish/internal/buildinfo.commit=$(COMMIT) \
            -X github.com/jazz1x/rallish/internal/buildinfo.date=$(DATE)
 
+# Prefer the repo-pinned linter (matches lefthook + CI) and fall back to
+# whatever golangci-lint is on $PATH.
+GOLANGCI_LINT := $(shell \
+	if [ -x "$(PWD)/.toolchain/bin/golangci-lint" ]; then \
+		echo "$(PWD)/.toolchain/bin/golangci-lint"; \
+	else \
+		command -v golangci-lint 2>/dev/null || echo ""; \
+	fi)
+
 build:
 	go build -ldflags "$(LDFLAGS)" -o dist/rallish ./cmd/rallish
 
@@ -15,13 +24,23 @@ test:
 	go test ./...
 
 check:
-	go vet ./... && golangci-lint run && go test ./... -race
+	@if [ -z "$(GOLANGCI_LINT)" ]; then \
+		echo "golangci-lint not found. Install it or run via .toolchain (make setup-hooks first)."; \
+		exit 1; \
+	fi
+	go vet ./...
+	@PATH="$(PWD)/.toolchain/go/bin:$(PWD)/.toolchain/bin:$$PATH" "$(GOLANGCI_LINT)" run --timeout=5m
+	go test ./... -race
 
 run: build
 	./dist/rallish
 
 lint:
-	golangci-lint run
+	@if [ -z "$(GOLANGCI_LINT)" ]; then \
+		echo "golangci-lint not found. Install it or run via .toolchain (make setup-hooks first)."; \
+		exit 1; \
+	fi
+	@PATH="$(PWD)/.toolchain/go/bin:$(PWD)/.toolchain/bin:$$PATH" "$(GOLANGCI_LINT)" run --timeout=5m
 
 tidy:
 	go mod tidy
