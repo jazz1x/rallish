@@ -21,24 +21,31 @@ Everything runs locally. No cloud broker, no external coordination service. The 
 | **Token Budgets** | Hard caps on tokens, turns, and wall-clock time per session |
 | **Scratchpad** | Rolling shared scratch with automatic compaction |
 | **Presets** | YAML templates for roles, routing, and exit conditions |
+| **Unix socket IPC** | CLI↔Daemon over `~/.rallish/rallish.sock` (mode `0600`); TCP loopback retained for A2A clients and Windows fallback |
+| **Auto-daemon** | `rallish start` spawns the broker if none is running; `rallish doctor` reports socket reachability |
 | **Security** | Path traversal guards, secret redaction, minimal env allowlists |
 
 ## Architecture
 
 ```
 ┌──────────────────────────────────────────┐
-│  rallish broker (Go, 127.0.0.1)          │
+│  rallish broker (Go)                     │
 │  POST /sessions                          │
 │  GET  /sessions/:id/next?as=<role> (SSE) │
 │  POST /sessions/:id/turn                 │
 │  GET  /.well-known/agent.json            │
 │  POST /a2a                               │
-└────────▲─────────────────────▲───────────┘
-         │                     │
-   ┌─────┴──────┐       ┌─────┴──────┐
-   │  agent A   │       │  agent B   │
-   └────────────┘       └────────────┘
+└──┬───────────────┬───────────────────┬───┘
+   │ unix socket   │ unix socket       │ tcp loopback
+   │ ~/.rallish/   │ ~/.rallish/       │ 127.0.0.1:<port>
+   │ rallish.sock  │ rallish.sock      │ (A2A + fallback)
+┌──┴─────────┐   ┌─┴────────┐      ┌──┴───────────┐
+│  agent A   │   │ agent B  │      │ external A2A │
+│  (CLI)     │   │  (CLI)   │      │  client      │
+└────────────┘   └──────────┘      └──────────────┘
 ```
+
+Same broker serves both transports concurrently. The CLI (`rallish start`, `rallish doctor`) prefers the Unix socket; external A2A clients use TCP loopback.
 
 ## Prerequisites
 
@@ -80,16 +87,31 @@ go install github.com/jazz1x/rallish@latest
 ## Quickstart
 
 ```bash
-# Environment check
+# Environment check (reports adapter presence + daemon reachability)
 ./dist/rallish doctor
 
-# Start a turn-taking session
+# List built-in adapters and presets
+./dist/rallish add --list
+
+# Start a turn-taking session (auto-spawns the daemon)
 ./dist/rallish start \
   --preset pair-review \
   --task "Add OAuth2 support" \
   --repo ./my-project
 
-# A2A discovery
+# Smoke test without real adapters (fake/deterministic, 3 turns)
+cat > ~/.rallish/presets/fake-demo.yaml <<'EOF'
+name: fake-demo
+roles:
+  - {id: ralph, runtime: fake, model: fake-1}
+routing: round_robin
+budget: {max_turns: 3, max_tokens: 10000, deadline_minutes: 5}
+exit_when: [turns_exhausted]
+scratch: {max_kb: 16}
+EOF
+./dist/rallish start --preset fake-demo --task "smoke test" --repo /tmp
+
+# A2A discovery (external clients use TCP loopback)
 curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent.json
 
 # A2A send task
@@ -97,6 +119,8 @@ curl -X POST http://127.0.0.1:$(cat ~/.rallish/port)/a2a \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"Hello"}]}}}'
 ```
+
+Per-turn requests and responses land in `~/.rallish/sessions/<id>/log.jsonl`.
 
 ## Usage
 
@@ -127,21 +151,46 @@ You can pair two Claude instances, two Kimi instances, or any mix. The broker on
 
 Budgets (tokens, turns, deadline) are enforced per session. When exhausted, the broker returns `410 Gone` and preserves the scratchpad for resume.
 
-### 4. Custom presets
+### 5. Custom presets
 
 Drop a YAML file in `~/.rallish/presets/<name>.yaml`:
 
 ```yaml
 name: my-preset
+description: Optional one-line summary.
 roles:
-  planner:
-    adapter: claude
-    model: claude-3-5-sonnet-20241022
-routing:
-  - planner
-exit:
-  maxTurns: 10
+  - id: planner
+    runtime: claude
+    model: opus
+  - id: executor
+    runtime: kimi
+    model: kimi-k2
+routing: handoff_then_round_robin    # or round_robin
+budget:
+  max_turns: 20
+  max_tokens: 400000
+  deadline_minutes: 60
+exit_when: [tests_pass, reviewer_approved, turns_exhausted]
+scratch:
+  max_kb: 64
+  summarize_with: claude-haiku
 ```
+
+### 6. Daemon lifecycle
+
+```bash
+rallish daemon &                            # explicit start (optional — start auto-spawns)
+ls ~/.rallish/                              # rallish.sock (0600), socket, port, sessions/
+kill -TERM $(pgrep -f "rallish daemon")     # graceful shutdown removes all three files
+```
+
+`rallish doctor` confirms reachability:
+
+```
+daemon reachable via unix socket path=/Users/<you>/.rallish/rallish.sock perm=-rw-------
+```
+
+On Windows the broker falls back to TCP loopback only (Unix socket stub returns `ErrUnsupported`).
 
 ## Security
 

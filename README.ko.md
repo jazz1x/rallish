@@ -21,24 +21,31 @@
 | **토큰 예산** | 세션당 토큰, 턴 수, 시간의 상한선을 강제 |
 | **스크래치패드** | 자동 압축(compaction)이 적용된 롤링 공유 스크래치 |
 | **프리셋** | 역할, 라우팅, 종료 조건을 정의한 YAML 템플릿 |
+| **Unix 소켓 IPC** | CLI↔Daemon이 `~/.rallish/rallish.sock`(`0600`) 경유. A2A 외부 클라이언트와 Windows 폴백용으로 TCP 루프백 유지 |
+| **자동 데몬** | `rallish start`가 브로커 미실행 시 자동 스폰. `rallish doctor`가 소켓 도달성 보고 |
 | **보안** | 경로 탐색 방어, 비밀 정보 마스킹, 최소한의 환경 변수 허용 목록 |
 
 ## 아키텍처
 
 ```
 ┌──────────────────────────────────────────┐
-│  rallish 브로커 (Go, 127.0.0.1)         │
+│  rallish 브로커 (Go)                     │
 │  POST /sessions                          │
 │  GET  /sessions/:id/next?as=<role> (SSE) │
 │  POST /sessions/:id/turn                 │
 │  GET  /.well-known/agent.json            │
 │  POST /a2a                               │
-└────────▲─────────────────────▲───────────┘
-         │                     │
-   ┌─────┴──────┐       ┌─────┴──────┐
-   │  에이전트 A │       │  에이전트 B │
-   └────────────┘       └────────────┘
+└──┬───────────────┬───────────────────┬───┘
+   │ unix socket   │ unix socket       │ tcp 루프백
+   │ ~/.rallish/   │ ~/.rallish/       │ 127.0.0.1:<port>
+   │ rallish.sock  │ rallish.sock      │ (A2A + 폴백)
+┌──┴─────────┐   ┌─┴────────┐      ┌──┴───────────┐
+│ 에이전트 A │   │에이전트 B│      │ 외부 A2A     │
+│  (CLI)     │   │  (CLI)   │      │ 클라이언트    │
+└────────────┘   └──────────┘      └──────────────┘
 ```
+
+같은 브로커가 두 전송 채널을 동시에 서비스합니다. CLI(`rallish start`, `rallish doctor`)는 Unix 소켓을 우선 사용하고, 외부 A2A 클라이언트는 TCP 루프백을 사용합니다.
 
 ## 사전 요구사항
 
@@ -80,16 +87,31 @@ go install github.com/jazz1x/rallish@latest
 ## 빠른 시작
 
 ```bash
-# 환경 점검
+# 환경 점검 (어댑터 존재 + 데몬 도달성 보고)
 ./dist/rallish doctor
 
-# 순차 실행 세션 시작
+# 내장 어댑터/프리셋 목록
+./dist/rallish add --list
+
+# 순차 실행 세션 시작 (데몬 자동 스폰)
 ./dist/rallish start \
   --preset pair-review \
   --task "OAuth2 지원 추가" \
   --repo ./my-project
 
-# A2A discovery
+# 실제 어댑터 없이 스모크 테스트 (fake/결정론적, 3턴)
+cat > ~/.rallish/presets/fake-demo.yaml <<'EOF'
+name: fake-demo
+roles:
+  - {id: ralph, runtime: fake, model: fake-1}
+routing: round_robin
+budget: {max_turns: 3, max_tokens: 10000, deadline_minutes: 5}
+exit_when: [turns_exhausted]
+scratch: {max_kb: 16}
+EOF
+./dist/rallish start --preset fake-demo --task "smoke test" --repo /tmp
+
+# A2A discovery (외부 클라이언트는 TCP 루프백 사용)
 curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent.json
 
 # A2A 태스크 전송
@@ -97,6 +119,8 @@ curl -X POST http://127.0.0.1:$(cat ~/.rallish/port)/a2a \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"Hello"}]}}}'
 ```
+
+턴별 요청/응답은 `~/.rallish/sessions/<id>/log.jsonl`에 기록됩니다.
 
 ## 사용법
 
@@ -127,21 +151,46 @@ Claude 두 개, Kimi 두 개, 또는 어떤 조합도 가능합니다. 브로커
 
 예산(토큰, 턴 수, 데드라인)은 세션별로 강제됩니다. 예산이 고갈되면 브로커는 `410 Gone`을 반환하고, 이어서 작업할 수 있도록 스크래치패드를 보존합니다.
 
-### 4. 사용자 정의 프리셋
+### 5. 사용자 정의 프리셋
 
 `~/.rallish/presets/<name>.yaml`에 YAML 파일을 배치하세요:
 
 ```yaml
 name: my-preset
+description: 한 줄 요약(선택).
 roles:
-  planner:
-    adapter: claude
-    model: claude-3-5-sonnet-20241022
-routing:
-  - planner
-exit:
-  maxTurns: 10
+  - id: planner
+    runtime: claude
+    model: opus
+  - id: executor
+    runtime: kimi
+    model: kimi-k2
+routing: handoff_then_round_robin    # 또는 round_robin
+budget:
+  max_turns: 20
+  max_tokens: 400000
+  deadline_minutes: 60
+exit_when: [tests_pass, reviewer_approved, turns_exhausted]
+scratch:
+  max_kb: 64
+  summarize_with: claude-haiku
 ```
+
+### 6. 데몬 라이프사이클
+
+```bash
+rallish daemon &                            # 명시적 기동 (선택 — start가 자동 스폰)
+ls ~/.rallish/                              # rallish.sock (0600), socket, port, sessions/
+kill -TERM $(pgrep -f "rallish daemon")     # graceful 종료 시 세 파일 모두 정리
+```
+
+`rallish doctor`로 도달성 확인:
+
+```
+daemon reachable via unix socket path=/Users/<you>/.rallish/rallish.sock perm=-rw-------
+```
+
+Windows에서는 브로커가 TCP 루프백만 사용합니다 (Unix 소켓 스텁이 `ErrUnsupported` 반환).
 
 ## 보안
 

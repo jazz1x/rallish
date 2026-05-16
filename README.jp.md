@@ -21,24 +21,31 @@
 | **トークン予算** | セッションごとのトークン、ターン数、時間の上限を強制 |
 | **スクラッチパッド** | 自動圧縮(compaction)が適用されたローリング共有スクラッチ |
 | **プリセット** | 役割、ルーティング、終了条件を定義した YAML テンプレート |
+| **Unix ソケット IPC** | CLI↔Daemon が `~/.rallish/rallish.sock`(`0600`) 経由。A2A 外部クライアントと Windows フォールバック用に TCP ループバックを保持 |
+| **自動デーモン** | `rallish start` がブローカー未起動時に自動スポーン。`rallish doctor` がソケット到達性を報告 |
 | **セキュリティ** | パストラバーサル防御、シークレットマスキング、最小限の環境変数許可リスト |
 
 ## アーキテクチャ
 
 ```
 ┌──────────────────────────────────────────┐
-│  rallish ブローカー (Go, 127.0.0.1)      │
+│  rallish ブローカー (Go)                 │
 │  POST /sessions                          │
 │  GET  /sessions/:id/next?as=<role> (SSE) │
 │  POST /sessions/:id/turn                 │
 │  GET  /.well-known/agent.json            │
 │  POST /a2a                               │
-└────────▲─────────────────────▲───────────┘
-         │                     │
-   ┌─────┴──────┐       ┌─────┴──────┐
-   │  エージェントA │       │  エージェントB │
-   └────────────┘       └────────────┘
+└──┬───────────────┬───────────────────┬───┘
+   │ unix socket   │ unix socket       │ tcp ループバック
+   │ ~/.rallish/   │ ~/.rallish/       │ 127.0.0.1:<port>
+   │ rallish.sock  │ rallish.sock      │ (A2A + フォールバック)
+┌──┴─────────┐   ┌─┴────────┐      ┌──┴───────────┐
+│エージェントA│   │エージェントB│      │ 外部 A2A     │
+│  (CLI)     │   │  (CLI)   │      │ クライアント │
+└────────────┘   └──────────┘      └──────────────┘
 ```
+
+同じブローカーが両トランスポートを同時に提供します。CLI(`rallish start`, `rallish doctor`) は Unix ソケットを優先し、外部 A2A クライアントは TCP ループバックを使用します。
 
 ## 前提条件
 
@@ -80,16 +87,31 @@ go install github.com/jazz1x/rallish@latest
 ## クイックスタート
 
 ```bash
-# 環境チェック
+# 環境チェック (アダプター有無 + デーモン到達性を報告)
 ./dist/rallish doctor
 
-# ターン制実行セッションを開始
+# 同梱アダプター/プリセット一覧
+./dist/rallish add --list
+
+# ターン制実行セッションを開始 (デーモン自動スポーン)
 ./dist/rallish start \
   --preset pair-review \
   --task "OAuth2 サポートを追加" \
   --repo ./my-project
 
-# A2A discovery
+# 実アダプターなしでスモークテスト (fake / 決定論的, 3 ターン)
+cat > ~/.rallish/presets/fake-demo.yaml <<'EOF'
+name: fake-demo
+roles:
+  - {id: ralph, runtime: fake, model: fake-1}
+routing: round_robin
+budget: {max_turns: 3, max_tokens: 10000, deadline_minutes: 5}
+exit_when: [turns_exhausted]
+scratch: {max_kb: 16}
+EOF
+./dist/rallish start --preset fake-demo --task "smoke test" --repo /tmp
+
+# A2A discovery (外部クライアントは TCP ループバックを使用)
 curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent.json
 
 # A2A タスク送信
@@ -97,6 +119,8 @@ curl -X POST http://127.0.0.1:$(cat ~/.rallish/port)/a2a \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"Hello"}]}}}'
 ```
+
+ターンごとのリクエスト/レスポンスは `~/.rallish/sessions/<id>/log.jsonl` に記録されます。
 
 ## 使い方
 
@@ -127,21 +151,46 @@ Claude 2 つ、Kimi 2 つ、または任意の組み合わせも可能です。�
 
 予算（トークン、ターン数、デッドライン）はセッションごとに強制されます。予算が尽きると、ブローカーは `410 Gone` を返し、再開できるようにスクラッチパッドを保存します。
 
-### 4. カスタムプリセット
+### 5. カスタムプリセット
 
 `~/.rallish/presets/<name>.yaml` に YAML ファイルを配置してください:
 
 ```yaml
 name: my-preset
+description: 任意の 1 行サマリ。
 roles:
-  planner:
-    adapter: claude
-    model: claude-3-5-sonnet-20241022
-routing:
-  - planner
-exit:
-  maxTurns: 10
+  - id: planner
+    runtime: claude
+    model: opus
+  - id: executor
+    runtime: kimi
+    model: kimi-k2
+routing: handoff_then_round_robin    # または round_robin
+budget:
+  max_turns: 20
+  max_tokens: 400000
+  deadline_minutes: 60
+exit_when: [tests_pass, reviewer_approved, turns_exhausted]
+scratch:
+  max_kb: 64
+  summarize_with: claude-haiku
 ```
+
+### 6. デーモンのライフサイクル
+
+```bash
+rallish daemon &                            # 明示起動 (任意 — start が自動スポーン)
+ls ~/.rallish/                              # rallish.sock (0600), socket, port, sessions/
+kill -TERM $(pgrep -f "rallish daemon")     # graceful 終了で 3 ファイル全て削除
+```
+
+`rallish doctor` で到達性確認:
+
+```
+daemon reachable via unix socket path=/Users/<you>/.rallish/rallish.sock perm=-rw-------
+```
+
+Windows ではブローカーは TCP ループバックのみを使用します (Unix ソケットスタブが `ErrUnsupported` を返却)。
 
 ## セキュリティ
 
