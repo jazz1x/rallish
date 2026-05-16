@@ -50,6 +50,27 @@ if [ "$CURRENT_BRANCH" != "$RELEASE_BRANCH" ] && [ "$FLAG" != "--yes" ]; then
   [ "$FLAG" = "--dry-run" ] || exit 1
 fi
 
+# --- safety: upstream tracking exists ---
+UPSTREAM="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+if [ -z "$UPSTREAM" ] && [ "$FLAG" != "--no-push" ] && [ "$FLAG" != "--dry-run" ]; then
+  echo "❌ no upstream set for branch '$CURRENT_BRANCH'." >&2
+  echo "   run: git push -u origin $CURRENT_BRANCH    (then re-run)" >&2
+  exit 1
+fi
+
+# --- safety: refresh remote refs so we see new tags / commits ---
+git fetch --tags --quiet origin 2>/dev/null || true
+
+# --- safety: local commits all pushed ---
+if [ -n "$UPSTREAM" ]; then
+  AHEAD="$(git rev-list --count "$UPSTREAM"..HEAD 2>/dev/null || echo 0)"
+  if [ "$AHEAD" -gt 0 ] && [ "$FLAG" != "--yes" ] && [ "$FLAG" != "--dry-run" ]; then
+    echo "⚠️  $AHEAD local commit(s) not pushed to $UPSTREAM."
+    echo "    the tag will move with them. re-run with --yes to acknowledge."
+    exit 1
+  fi
+fi
+
 # --- compute new version ---
 CURRENT="$(tr -d '[:space:]' < "$VERSION_FILE")"
 case "$KIND" in
@@ -73,14 +94,31 @@ case "$KIND" in
     ;;
 esac
 
+# --- safety: monotonic version (refuse if NEW <= CURRENT) ---
+ver_gt() {
+  # returns 0 (true) when $1 > $2 in semver
+  [ "$1" = "$2" ] && return 1
+  printf '%s\n%s\n' "$2" "$1" | sort -V -C 2>/dev/null
+}
+if ! ver_gt "$NEW" "$CURRENT"; then
+  echo "❌ new version $NEW is not greater than current $CURRENT." >&2
+  exit 1
+fi
+
 echo "Release plan:"
 echo "  current branch  : $CURRENT_BRANCH"
 echo "  current version : $CURRENT"
 echo "  next version    : $NEW"
 echo "  tag             : v$NEW"
 
+# Local tag exists?
 if git rev-parse -q --verify "refs/tags/v$NEW" >/dev/null; then
-  echo "❌ tag v$NEW already exists." >&2
+  echo "❌ tag v$NEW already exists locally." >&2
+  exit 1
+fi
+# Remote tag exists? (fetch above refreshed)
+if git ls-remote --tags origin "v$NEW" 2>/dev/null | grep -q "refs/tags/v$NEW"; then
+  echo "❌ tag v$NEW already exists on origin." >&2
   exit 1
 fi
 

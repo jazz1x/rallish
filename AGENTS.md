@@ -85,7 +85,10 @@ Current working combination (validated):
 
 ## Commit Messages
 
-Follow conventional commits:
+Follow conventional commits. **Enforced by lefthook `commit-msg` hook** — a
+commit without a valid prefix is rejected before it lands.
+
+Allowed prefixes:
 
 - `feat:` — new feature
 - `fix:` — bug fix
@@ -94,6 +97,14 @@ Follow conventional commits:
 - `test:` — adding or correcting tests
 - `chore:` — build / tooling changes
 - `sec:` — security-relevant change (permission tightening, sandbox, allowlist)
+- `ci:` — CI / GitHub Actions
+- `build:` — build system / dependencies
+- `perf:` — performance improvement
+- `style:` — formatting only, no semantic change
+
+Optional scope: `feat(rally): ...`, `fix(broker): ...`.
+
+`Merge ...` / `Revert ...` are accepted as-is.
 
 ## Feature Documentation Workflow
 
