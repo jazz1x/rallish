@@ -7,7 +7,7 @@ description: >
   프리셋 자동 실행)도 포함. 사용자가 이 리포에서 멀티 에이전트 랠리 세션을
   시작·참여·조율하려 할 때 읽어야 한다.
   Triggers: "rally start", "let's rally", "start a rally", "two agents", "두 에이전트", "두 에이전트 같이", "baton pass", "baton hand-off", "multi-agent session", "pair coding session", "rallish 시작", "squash session", "headless squash"
-version: 0.0.1
+version: 0.0.2
 ssl:
   scheduling:
     anti_triggers:
@@ -23,8 +23,10 @@ ssl:
       - "데몬 미실행 → `rallish start` 가 자동 스폰; 또는 명시적으로 `rallish daemon &`"
       - "헤드리스 프리셋(solo-ralph, pair-review) → `rallish squash --preset <name>`"
       - "인터랙티브 2-CLI → `rallish rally new/join/done/status`"
+      - "기본 round-robin 순서 → --handoff-to 생략; 명시적 hand-off → rally done 에 --handoff-to <name> 전달"
       - "세션 중단(SSE drop) → 같은 --as 이름으로 `rallish rally join` 재실행; 브로커가 마지막 baton 재전송"
       - "비-홀더가 done 호출 → 409 → exit 1 + stderr 메시지"
+      - "크래시 복구 (데몬 -9 종료로 소켓 파일 잔존) → 수동 `rm -f ~/.rallish/{rallish.sock,socket,port}` 후 재기동"
   logical:
     tools: [Bash, Read]
     side_effects:
@@ -34,7 +36,7 @@ ssl:
         - "~/.rallish/sessions/<id>/log.jsonl (턴별 req/resp)"
         - "~/.rallish/presets/*.yaml (사용자 커스텀 프리셋 추가 시)"
       deletes:
-        - "~/.rallish/{rallish.sock, socket, port} (데몬 SIGTERM 시)"
+        - "~/.rallish/{rallish.sock, socket, port} — 데몬 SIGTERM 시 자동; 데몬이 -9 로 종료되어 파일이 남았을 때 크래시 복구용으로 수동 `rm -f`"
       network: []
     idempotent: true
     rollback: null

@@ -8,7 +8,7 @@ description: >
   orchestration). Read this when the user wants to start, join, or coordinate
   a multi-agent rally session in this repo.
   Triggers: "rally start", "let's rally", "start a rally", "two agents", "두 에이전트", "두 에이전트 같이", "baton pass", "baton hand-off", "multi-agent session", "pair coding session", "rallish 시작", "squash session", "headless squash"
-version: 0.0.1
+version: 0.0.2
 ssl:
   scheduling:
     anti_triggers:
@@ -24,8 +24,10 @@ ssl:
       - "daemon not running → `rallish start` auto-spawns it; or `rallish daemon &` explicitly"
       - "headless preset (solo-ralph, pair-review) → use `rallish squash --preset <name>`"
       - "interactive 2-CLI → use `rallish rally new/join/done/status`"
+      - "default round-robin baton order → omit --handoff-to; explicit hand-off → pass --handoff-to <name> to rally done"
       - "session interrupted (SSE drop) → re-run `rallish rally join` with same --as name; broker replays last baton"
       - "wrong participant POSTs done → 409 surfaced as exit 1 with stderr message"
+      - "crash recovery (daemon killed -9, stale socket files) → manual `rm -f ~/.rallish/{rallish.sock,socket,port}` then relaunch"
   logical:
     tools: [Bash, Read]
     side_effects:
@@ -35,7 +37,7 @@ ssl:
         - "~/.rallish/sessions/<id>/log.jsonl (per-turn req/resp)"
         - "~/.rallish/presets/*.yaml (if user adds a custom preset)"
       deletes:
-        - "~/.rallish/{rallish.sock, socket, port} on daemon SIGTERM"
+        - "~/.rallish/{rallish.sock, socket, port} — by daemon on SIGTERM; manually via `rm -f` for crash recovery when daemon was killed -9 and left the files stale"
       network: []
     idempotent: true
     rollback: null
