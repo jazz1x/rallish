@@ -32,7 +32,7 @@ All commits must pass `lefthook run pre-commit` (go-fmt, go-vet, go-test -race, 
 | `internal/safepath/` | Path-traversal guards for user-supplied paths |
 | `internal/scratch/` | Rolling scratchpad with compaction |
 | `internal/session/` | In-memory session store |
-| `pkg/contract/` | Public types (A2A, Budget, Session) |
+| `pkg/contract/` | Public types (A2A, Budget, Session, Rally) |
 
 **Package surface rule:** `pkg/contract` is the only package importable by
 external adapters or A2A clients. Everything under `internal/` is private

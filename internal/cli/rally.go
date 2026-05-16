@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jazz1x/rallish/internal/safepath"
 	"github.com/jazz1x/rallish/pkg/contract"
 	"github.com/spf13/cobra"
 )
@@ -145,6 +146,22 @@ func runRallyNew(ctx context.Context, homeDir, participants, repo, task string, 
 		if !nameRe.MatchString(name) {
 			return fmt.Errorf("invalid participant name %q: must match ^[a-zA-Z0-9_-]{1,16}$", name)
 		}
+	}
+
+	// Validate --repo if supplied: must be an existing directory with no traversal.
+	if repo != "" {
+		cleanedRepo, cleanErr := safepath.Clean(repo)
+		if cleanErr != nil {
+			return fmt.Errorf("--repo: %w", cleanErr)
+		}
+		info, statErr := os.Stat(cleanedRepo)
+		if statErr != nil {
+			return fmt.Errorf("--repo %q: %w", repo, statErr)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("--repo %q: not a directory", repo)
+		}
+		repo = cleanedRepo
 	}
 
 	bc, err := resolveBrokerClient(homeDir, 30*time.Second)

@@ -55,6 +55,9 @@ type BatonEvent struct {
 	From string `json:"from,omitempty"`
 	// Note is the optional message passed along with the baton.
 	Note string `json:"note,omitempty"`
+	// Closed, when true, signals that the session has been interrupted and the
+	// SSE stream is being terminated by the broker (e.g. on SIGTERM).
+	Closed bool `json:"closed,omitempty"`
 }
 
 // DoneRequest is the body for POST /rally/sessions/:id/done.

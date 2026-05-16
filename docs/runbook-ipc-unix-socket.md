@@ -201,12 +201,12 @@ ls ~/.rallish/port         2>/dev/null && echo "FAIL" || echo "OK: port file rem
 
 ---
 
-## 10. `rallish start` integration
+## 10. `rallish squash` integration
 
 With the daemon running (restart if needed):
 
 ```bash
-./dist/rallish start --task "say hello"
+./dist/rallish squash --task "say hello"
 ```
 
 **Expected:** CLI discovers the daemon via `~/.rallish/socket`, creates a session, and exits cleanly.

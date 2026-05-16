@@ -550,3 +550,93 @@ func TestRallyBatonNonMember(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 }
 
+// TestCloseAllRallies verifies that an active SSE baton stream receives a
+// terminal data: {"closed":true} event and the connection closes within 1 s
+// after CloseAllRallies is called.
+func TestCloseAllRallies(t *testing.T) {
+	resetRallies()
+	ts, _ := newRallyServer(t)
+
+	sess := createSession(t, ts, []string{"alice", "bob"})
+	sessionID := sess.ID
+
+	// Channel to receive lines from alice's SSE stream.
+	type sseResult struct {
+		lines []string
+		err   error
+	}
+	done := make(chan sseResult, 1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Join as alice — she gets the baton immediately (first participant).
+	joined := make(chan struct{})
+	go func() {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			ts.URL+"/rally/sessions/"+sessionID+"/baton?as=alice", nil)
+		if err != nil {
+			done <- sseResult{err: err}
+			return
+		}
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			done <- sseResult{err: err}
+			return
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		var lines []string
+		scanner := bufio.NewScanner(resp.Body)
+		firstData := false
+		for scanner.Scan() {
+			line := scanner.Text()
+			lines = append(lines, line)
+			if !firstData && strings.HasPrefix(line, "data: ") {
+				firstData = true
+				select {
+				case joined <- struct{}{}:
+				default:
+				}
+			}
+		}
+		done <- sseResult{lines: lines, err: scanner.Err()}
+	}()
+
+	// Wait for alice to receive her first data event (baton grant).
+	select {
+	case <-joined:
+	case <-time.After(3 * time.Second):
+		t.Fatal("alice did not receive initial baton event in time")
+	}
+
+	// Now call CloseAllRallies — alice's stream should receive closed:true.
+	CloseAllRallies()
+
+	// Stream should close within 1 second.
+	select {
+	case res := <-done:
+		require.NoError(t, res.err)
+		// Find the closed:true data line.
+		found := false
+		for _, line := range res.lines {
+			if strings.Contains(line, `"closed":true`) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected closed:true line in SSE output; got lines: %v", res.lines)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("SSE stream did not close within 1 s after CloseAllRallies")
+	}
+
+	// Verify session status is interrupted.
+	rallies.mu.Lock()
+	status := rallies.sessions[sessionID].status
+	rallies.mu.Unlock()
+	require.Equal(t, contract.RallyStateInterrupted, status)
+}
+

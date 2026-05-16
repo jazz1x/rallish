@@ -315,7 +315,20 @@ func (s *Server) handleRallyBaton(w http.ResponseWriter, r *http.Request) {
 
 		case evt, more := <-ch:
 			if !more {
-				// Channel closed (session interrupted).
+				// Channel closed (session interrupted): send terminal close event.
+				_ = rc.SetWriteDeadline(time.Now().Add(2 * time.Second))
+				_, _ = fmt.Fprintf(w, "data: {\"closed\":true}\n\n")
+				_ = rc.SetWriteDeadline(time.Time{})
+				_ = rc.Flush()
+				cleanupStream(id, as)
+				return
+			}
+			if evt.Closed {
+				// Explicit close sentinel sent before channel close.
+				_ = rc.SetWriteDeadline(time.Now().Add(2 * time.Second))
+				_, _ = fmt.Fprintf(w, "data: {\"closed\":true}\n\n")
+				_ = rc.SetWriteDeadline(time.Time{})
+				_ = rc.Flush()
 				cleanupStream(id, as)
 				return
 			}
@@ -520,5 +533,32 @@ func SetRallyStaleThreshold(sessionID string, thresholdMS int64) {
 	defer rallies.mu.Unlock()
 	if sess, ok := rallies.sessions[sessionID]; ok {
 		sess.staleThreshold = thresholdMS
+	}
+}
+
+// CloseAllRallies marks every active rally as interrupted and sends a final
+// {"closed":true} event to every connected SSE stream, then closes those
+// streams. Idempotent.
+func CloseAllRallies() {
+	rallies.mu.Lock()
+	defer rallies.mu.Unlock()
+	for _, sess := range rallies.sessions {
+		if sess.status == contract.RallyStateInterrupted {
+			continue
+		}
+		sess.status = contract.RallyStateInterrupted
+		for name, ch := range sess.streams {
+			if ch == nil {
+				continue
+			}
+			// Non-blocking send of the sentinel event; if the buffer is full we
+			// still close the channel so the reader unblocks.
+			select {
+			case ch <- contract.BatonEvent{Closed: true}:
+			default:
+			}
+			close(ch)
+			delete(sess.streams, name)
+		}
 	}
 }

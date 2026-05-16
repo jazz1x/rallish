@@ -160,3 +160,218 @@ func writePortFile(homeDir, serverURL string) error {
 	}
 	return os.WriteFile(filepath.Join(dir, "port"), []byte(port), 0o600)
 }
+
+// TestRallyJoinReceivesBaton tests that runRallyJoin prints a "your turn" cue
+// line when the stub broker emits a single SSE baton event, and returns once
+// the stream closes.
+func TestRallyJoinReceivesBaton(t *testing.T) {
+	evt := contract.BatonEvent{TurnN: 1, From: "start", Note: "begin"}
+	evtJSON, err := json.Marshal(evt)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/rally/sessions/") {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		_, _ = w.Write([]byte("data: " + string(evtJSON) + "\n\n"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		// Close stream immediately — simulates broker ending the SSE.
+	}))
+	t.Cleanup(stub.Close)
+
+	homeDir := t.TempDir()
+	if err := writePortFile(homeDir, stub.URL); err != nil {
+		t.Fatalf("write port file: %v", err)
+	}
+
+	var out bytes.Buffer
+	err = runRallyJoin(context.Background(), homeDir, "rly_test_0001", "alice", &out)
+	if err != nil {
+		t.Fatalf("runRallyJoin returned error: %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "your turn") {
+		t.Fatalf("expected 'your turn' in output, got: %q", output)
+	}
+}
+
+// TestRallyStatusFormatting checks that runRallyStatus prints participant names
+// and history entries from a stub broker.
+func TestRallyStatusFormatting(t *testing.T) {
+	sess := contract.RallySession{
+		ID:           "rly_test_0002",
+		Status:       contract.RallyState("alice_turn"),
+		Holder:       "alice",
+		TurnN:        2,
+		Participants: []string{"alice", "bob"},
+		LastSeen:     map[string]int64{},
+		History: []contract.BatonHandoff{
+			{From: "alice", To: "bob", TurnN: 1, Note: "first pass", At: 0},
+		},
+	}
+
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sess)
+	}))
+	t.Cleanup(stub.Close)
+
+	homeDir := t.TempDir()
+	if err := writePortFile(homeDir, stub.URL); err != nil {
+		t.Fatalf("write port file: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := runRallyStatus(context.Background(), homeDir, sess.ID, &out)
+	if err != nil {
+		t.Fatalf("runRallyStatus: %v", err)
+	}
+
+	output := out.String()
+	for _, want := range []string{"alice", "bob", "first pass", "History"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected %q in status output; got:\n%s", want, output)
+		}
+	}
+}
+
+// TestRallyDoneHappyPath verifies that runRallyDone prints the expected
+// "ok — baton passed to <next>" line when the broker returns 200.
+func TestRallyDoneHappyPath(t *testing.T) {
+	nextSess := contract.RallySession{
+		ID:     "rly_test_0003",
+		Holder: "bob",
+		TurnN:  2,
+		Status: contract.RallyState("bob_turn"),
+	}
+
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(nextSess)
+	}))
+	t.Cleanup(stub.Close)
+
+	homeDir := t.TempDir()
+	if err := writePortFile(homeDir, stub.URL); err != nil {
+		t.Fatalf("write port file: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := runRallyDone(context.Background(), homeDir, nextSess.ID, "alice", "done note", "bob", &out)
+	if err != nil {
+		t.Fatalf("runRallyDone: %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "baton passed to bob") {
+		t.Fatalf("expected 'baton passed to bob' in output, got: %q", output)
+	}
+}
+
+// TestRallyNewWithRepo tests that runRallyNew validates a --repo path and
+// sends it to the broker.
+func TestRallyNewWithRepo(t *testing.T) {
+	// Use a real temp directory so Stat succeeds.
+	repoDir := t.TempDir()
+
+	var capturedRepo string
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req contract.NewRallyRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		capturedRepo = req.Repo
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(contract.RallySession{ID: "rly_test_0004"})
+	}))
+	t.Cleanup(stub.Close)
+
+	homeDir := t.TempDir()
+	if err := writePortFile(homeDir, stub.URL); err != nil {
+		t.Fatalf("write port file: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := runRallyNew(context.Background(), homeDir, "alice,bob", repoDir, "", &out); err != nil {
+		t.Fatalf("runRallyNew with valid repo: %v", err)
+	}
+	if capturedRepo != repoDir {
+		t.Fatalf("broker received repo %q, want %q", capturedRepo, repoDir)
+	}
+}
+
+// TestRallyNewWithBadRepo tests that runRallyNew rejects a non-existent repo path.
+func TestRallyNewWithBadRepo(t *testing.T) {
+	homeDir := t.TempDir()
+	err := runRallyNew(context.Background(), homeDir, "alice,bob", "/definitely/does/not/exist/12345", "", &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error for non-existent repo, got nil")
+	}
+}
+
+// TestRallyCmdBuilders exercises the Cobra command constructors to ensure they
+// build without panicking and register the expected subcommands / flags.
+func TestRallyCmdBuilders(t *testing.T) {
+	cmd := RallyCmd()
+	if cmd.Use != "rally" {
+		t.Fatalf("RallyCmd Use = %q, want rally", cmd.Use)
+	}
+
+	newCmd := RallyNewCmd()
+	if newCmd.Use != "new" {
+		t.Fatalf("RallyNewCmd Use = %q, want new", newCmd.Use)
+	}
+	if newCmd.Flags().Lookup("participants") == nil {
+		t.Fatal("RallyNewCmd missing --participants flag")
+	}
+	if newCmd.Flags().Lookup("repo") == nil {
+		t.Fatal("RallyNewCmd missing --repo flag")
+	}
+
+	joinCmd := RallyJoinCmd()
+	if joinCmd.Use != "join" {
+		t.Fatalf("RallyJoinCmd Use = %q, want join", joinCmd.Use)
+	}
+	if joinCmd.Flags().Lookup("session-id") == nil {
+		t.Fatal("RallyJoinCmd missing --session-id flag")
+	}
+
+	doneCmd := RallyDoneCmd()
+	if doneCmd.Use != "done" {
+		t.Fatalf("RallyDoneCmd Use = %q, want done", doneCmd.Use)
+	}
+
+	statusCmd := RallyStatusCmd()
+	if statusCmd.Use != "status" {
+		t.Fatalf("RallyStatusCmd Use = %q, want status", statusCmd.Use)
+	}
+}
+
+// TestHolderDisplayEdgeCases covers holderDisplay for the empty and non-empty cases.
+func TestHolderDisplayEdgeCases(t *testing.T) {
+	if got := holderDisplay(""); got != "(none)" {
+		t.Fatalf("holderDisplay(\"\") = %q, want \"(none)\"", got)
+	}
+	if got := holderDisplay("alice"); got != "alice" {
+		t.Fatalf("holderDisplay(\"alice\") = %q, want \"alice\"", got)
+	}
+}

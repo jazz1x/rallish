@@ -51,6 +51,7 @@ func main() {
 	}()
 
 	if err := root.ExecuteContext(context.Background()); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "Error:", err)
 		exitCode = 1
 	}
 	os.Exit(exitCode) //nolint:gocritic // defer resets signals; exit code must propagate

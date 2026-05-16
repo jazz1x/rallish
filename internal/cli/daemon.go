@@ -56,6 +56,9 @@ func RunDaemon(ctx context.Context, homeDir string, shutdown <-chan struct{}) er
 
 	go func() { //nolint:gosec // background context is for shutdown timeout
 		<-shutdown
+		// Interrupt active rally sessions before HTTP shutdown so SSE clients
+		// receive the terminal {"closed":true} event and unblock promptly.
+		broker.CloseAllRallies()
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = httpSrv.Shutdown(sctx)
