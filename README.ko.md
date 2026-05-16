@@ -82,8 +82,21 @@ brew install rallish
 ### 옵션 3 — go install
 
 ```bash
-go install github.com/jazz1x/rallish@latest
+go install github.com/jazz1x/rallish/cmd/rallish@latest
 ```
+
+### 1회 부트스트랩 (설치 방식 무관)
+
+`rallish` 바이너리가 `$PATH`에 있으면 **어디서든 단 한 번** 실행:
+
+```bash
+rallish bootstrap
+```
+
+`rallish-operator` 스킬을 `~/.claude/skills/rallish-operator/` 에 설치하고
+(멱등 — 재실행 시 `unchanged` 보고) 데몬을 검증합니다. 이후 Claude Code
+(또는 다른 스킬 인식 코딩 CLI)에서 어느 프로젝트를 열어도 랠리 트리거가
+자동 발견됩니다 — rallish 소스 트리 안에 있을 필요 없음.
 
 ## 빠른 시작
 

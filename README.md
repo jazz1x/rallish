@@ -82,8 +82,22 @@ brew install rallish
 ### Option 3 — go install
 
 ```bash
-go install github.com/jazz1x/rallish@latest
+go install github.com/jazz1x/rallish/cmd/rallish@latest
 ```
+
+### One-time bootstrap (any install path)
+
+After getting the `rallish` binary on `$PATH`, run **once** from anywhere:
+
+```bash
+rallish bootstrap
+```
+
+This installs the `rallish-operator` skill to `~/.claude/skills/rallish-operator/`
+(idempotent — re-runs report `unchanged`) and verifies the daemon. After this,
+any project opened in Claude Code (or another skill-aware coding CLI) will
+auto-discover the rally triggers — you do not need to be in the rallish source
+tree.
 
 ## Quickstart
 

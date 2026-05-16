@@ -82,8 +82,22 @@ brew install rallish
 ### オプション 3 — go install
 
 ```bash
-go install github.com/jazz1x/rallish@latest
+go install github.com/jazz1x/rallish/cmd/rallish@latest
 ```
+
+### 1回のブートストラップ (インストール方法を問わず)
+
+`rallish` バイナリが `$PATH` にあれば、**どこからでも 1 回だけ**実行:
+
+```bash
+rallish bootstrap
+```
+
+`rallish-operator` スキルを `~/.claude/skills/rallish-operator/` にインストール
+(冪等 — 再実行時は `unchanged` を報告) し、デーモンを検証します。これ以降は
+Claude Code (またはスキル対応の他のコーディング CLI) でどのプロジェクトを
+開いてもラリートリガーが自動検出されます — rallish ソースツリー内にいる
+必要はありません。
 
 ## クイックスタート
 

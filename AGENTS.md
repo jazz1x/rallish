@@ -33,7 +33,8 @@ All commits must pass `lefthook run pre-commit` (go-fmt, go-vet, go-test -race, 
 | `internal/scratch/` | Rolling scratchpad with compaction |
 | `internal/session/` | In-memory session store |
 | `pkg/contract/` | Public types (A2A, Budget, Session, Rally) |
-| `skills/` | Vendor-neutral Agent Skills (`<name>/SKILL.md` + optional `.ko.md`) shipped with the repo so any compatible agent (Claude Code, Cursor, …) discovers them on clone |
+| `skills/` | Symlink → `internal/skills/`. Vendor-neutral Agent Skills discovery path |
+| `internal/skills/` | Canonical SKILL.md sources (embedded into the rallish binary via `go:embed`); installed globally by `rallish bootstrap` |
 
 **Package surface rule:** `pkg/contract` is the only package importable by
 external adapters or A2A clients. Everything under `internal/` is private
