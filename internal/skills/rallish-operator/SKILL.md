@@ -51,13 +51,38 @@ This skill drives a live tennis-style rally between two coding-CLI sessions
 through the rallish broker. The user types three things; the agent does the
 rest.
 
-## Bootstrap (when you don't yet have this skill installed globally)
+## Bootstrap (when the skill or the binary is missing)
 
-If a coding-CLI agent sees the user's trigger but reports "skill not found":
+If a coding-CLI agent sees the user's trigger but reports "skill not found",
+walk the user through (or run these yourself if shell access is granted):
 
-1. Ensure rallish CLI is on PATH: `command -v rallish` should work. If not, install: `go install github.com/jazz1x/rallish/cmd/rallish@latest` (or build from source).
-2. Run `rallish skill install` — installs the skill globally to `~/.claude/skills/rallish-operator/`.
-3. Reload the coding-CLI session and re-issue the trigger.
+**1. Install the skill** (if `~/.claude/skills/rallish-operator/SKILL.md` is missing):
+
+```sh
+npx skills add jazz1x/rallish   # registry-style install via skills.sh
+```
+
+**2. Install the binary** (if `command -v rallish` fails), in preference order:
+
+```sh
+# macOS via Homebrew tap (recommended)
+brew install jazz1x/rallish/rallish
+
+# Any Unix (no toolchain required)
+curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh | sh
+
+# Or from source (Go developers only)
+git clone https://github.com/jazz1x/rallish && cd rallish && make build
+```
+
+**3. Verify and reload:**
+
+```sh
+rallish bootstrap        # confirms skill + daemon
+```
+
+Then reload the coding-CLI session (or open a new chat) and re-issue the
+original trigger.
 
 ## Resolve the `rallish` binary first
 Before any rally command, pick the runnable path:

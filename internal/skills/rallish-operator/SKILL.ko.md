@@ -51,13 +51,37 @@ ssl:
 스타일 랠리를 에이전트가 직접 구동합니다. 사용자는 세 가지만 입력하면
 되고, 나머지는 에이전트가 처리합니다.
 
-## Bootstrap (스킬이 글로벌로 설치되어 있지 않을 때)
+## Bootstrap (스킬 또는 바이너리가 없을 때)
 
-코딩 CLI 에이전트가 사용자의 트리거를 감지했지만 "skill not found"를 보고할 경우:
+코딩 CLI 에이전트가 트리거를 감지했지만 "skill not found"를 보고하면 사용자에게
+안내(또는 셸 권한 있을 시 직접 실행):
 
-1. rallish CLI가 PATH에 있는지 확인: `command -v rallish`가 작동해야 합니다. 아니라면 설치: `go install github.com/jazz1x/rallish/cmd/rallish@latest` (또는 소스에서 빌드).
-2. `rallish skill install` 실행 — 스킬을 `~/.claude/skills/rallish-operator/`에 글로벌로 설치합니다.
-3. 코딩 CLI 세션을 재시작하고 트리거를 다시 입력하세요.
+**1. 스킬 설치** (`~/.claude/skills/rallish-operator/SKILL.md` 없을 때):
+
+```sh
+npx skills add jazz1x/rallish   # skills.sh 레지스트리 경유 설치
+```
+
+**2. 바이너리 설치** (`command -v rallish` 실패 시), 우선순위 순:
+
+```sh
+# macOS, Homebrew tap (권장)
+brew install jazz1x/rallish/rallish
+
+# 모든 Unix (툴체인 불필요)
+curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh | sh
+
+# 또는 소스 빌드 (Go 개발자용)
+git clone https://github.com/jazz1x/rallish && cd rallish && make build
+```
+
+**3. 검증 + 재시작:**
+
+```sh
+rallish bootstrap        # 스킬 + 데몬 확인
+```
+
+이후 코딩 CLI 세션 재시작(또는 새 채팅) 후 원래 트리거 재입력.
 
 ## `rallish` 바이너리 경로 먼저 해결
 어떤 rally 명령보다 먼저 실행 가능 경로를 결정:
