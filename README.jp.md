@@ -112,19 +112,23 @@ scratch: {max_kb: 16}
 EOF
 ./dist/rallish squash --preset fake-demo --task "smoke test" --repo /tmp
 
-# 2 ターミナルラリー (人間セッション間のライブバトン受け渡し)
-# ターミナル A — セッションを作成して alice として参加:
-SESSION=$(./dist/rallish rally new --participants alice,bob --task "ping pong")
-./dist/rallish rally join --session-id $SESSION --as alice   # ブロック; alice が最初のバトンを取得
-
-# ターミナル B — bob として参加 (alice がパスするまでブロック):
-./dist/rallish rally join --session-id $SESSION --as bob
-
-# どちらのターミナルからでも — バトンを渡す:
-./dist/rallish rally done --session-id $SESSION --as alice --note "draft v1"
-
-# セッション状態を確認:
+# 2 ターミナル テニスラリー (ライブバトン受け渡し)
+# skills/rallish-operator による自然言語 UX を推奨 —
+# エージェント (Claude Code, Cursor など) がすべての rally コマンドを代行します。
+# ターミナル A のコーディング CLI セッション:        "랠리보낼 준비해"
+# エージェント: → rally new + role=server, SID を出力。
+# ターミナル B のコーディング CLI セッション:        "랠리받을 준비해 <SID>"
+# エージェント: → rally status + role=returner, 待機。
+# 再びターミナル A:                                "시작"
+# エージェント: 最初のターンをサーブし、要約 note 付きで rally done。
+# ターミナル B:                                    "내 차례"
+# エージェント: バトンを受け取り、リターンして rally done。
+# どちらでも、終了時:                              "끝"
+#
+# Raw CLI (スキルが内部呼び出し / スクリプト用):
+SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-up rally")
 ./dist/rallish rally status --session-id $SESSION
+./dist/rallish rally done   --session-id $SESSION --as server --note "draft v1"
 
 # A2A discovery (外部クライアントは TCP ループバックを使用)
 curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent.json
@@ -149,21 +153,34 @@ rallish squash --preset <name> --task "<説明>" --repo <パス>
 
 ### 1b. インタラクティブラリーセッションを開始
 
+**エージェント主導 (推奨).** スキルを自動検出するコーディング CLI
+(Claude Code, Cursor など) でこのリポを開くと、
+[`skills/rallish-operator`](skills/rallish-operator/SKILL.md) スキルが
+以下の自然言語トリガーでロードされます:
+
+| 発話 | エージェント動作 |
+|---|---|
+| `랠리보낼 준비해` / `let's serve` | `rally new` 実行、ROLE=`server`、SID 出力 |
+| `랠리받을 준비해 <SID>` / `let's return` | `rally status` 実行、ROLE=`returner`、待機 |
+| `시작` / `go` (サーバー側) | 最初のターンをサーブ後、要約 note 付きで `rally done` |
+| `내 차례` / `is it my turn` (レシーバー側) | `rally status`; 自分のターンなら前 note を読み作業後 `rally done` |
+| `끝` / `match over` | クリーン終了 |
+
+`시작` / `go` / `끝` / `내 차례` のような短いトリガーは、直前の prep
+トリガーで ROLE+SID が既に設定された場合にのみ有効化 — 無関係な汎用語は
+無視されます。
+
+**Raw CLI (スクリプトやスキル未対応クライアント用):**
+
 ```bash
-# セッションを作成; セッション ID を出力
-rallish rally new --participants <名前1>,<名前2> [--task "<説明>"]
-
-# 各参加者が自分のターミナルで参加 (バトン待機中にブロック)
-rallish rally join --session-id <id> --as <名前>
-
-# 完了時にバトンを渡す
-rallish rally done --session-id <id> --as <名前> [--note "<サマリ>"]
-
-# いつでも状態を確認
+rallish rally new    --participants <a>,<b> [--task "<説明>"]
+rallish rally join   --session-id <id> --as <名前>           # SSE ブロック
+rallish rally done   --session-id <id> --as <名前> [--note "<サマリ>"] [--handoff-to <名前>]
 rallish rally status --session-id <id>
 ```
 
-完全な 2 ターミナルウォークスルーは [docs/runbook-rally-mode.md](docs/runbook-rally-mode.md) を参照してください。
+完全な 2 ターミナルウォークスルーは [docs/runbook-rally-mode.md](docs/runbook-rally-mode.md)
+を参照してください。
 
 ### 2. A2A 連携
 

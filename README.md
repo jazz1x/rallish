@@ -112,19 +112,23 @@ scratch: {max_kb: 16}
 EOF
 ./dist/rallish squash --preset fake-demo --task "smoke test" --repo /tmp
 
-# Two-terminal rally (live baton-passing between human sessions)
-# Terminal A — create session and join as alice:
-SESSION=$(./dist/rallish rally new --participants alice,bob --task "ping pong")
-./dist/rallish rally join --session-id $SESSION --as alice   # blocks; alice gets first baton
-
-# Terminal B — join as bob (blocks until alice passes):
-./dist/rallish rally join --session-id $SESSION --as bob
-
-# Any terminal — pass the baton:
-./dist/rallish rally done --session-id $SESSION --as alice --note "draft v1"
-
-# Check session state:
+# Two-terminal tennis rally (live baton-passing between human sessions)
+# Prefer the natural-language UX driven by skills/rallish-operator —
+# the agent (Claude Code, Cursor, …) runs all rally commands for you.
+# In Terminal A's coding-CLI session you say:    "랠리보낼 준비해"
+# Agent: → rally new + role=server, prints SID.
+# In Terminal B's coding-CLI session you say:    "랠리받을 준비해 <SID>"
+# Agent: → rally status + role=returner, waits.
+# Back in Terminal A:                            "시작"
+# Agent: serves the first turn, runs rally done with a summary note.
+# In Terminal B:                                 "내 차례"
+# Agent: picks up the baton, returns, runs rally done.
+# Either side, when finished:                    "끝"
+#
+# Raw CLI surface (used by the skill under the hood, or by scripts):
+SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-up rally")
 ./dist/rallish rally status --session-id $SESSION
+./dist/rallish rally done   --session-id $SESSION --as server --note "draft v1"
 
 # A2A discovery (external clients use TCP loopback)
 curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent.json
@@ -149,21 +153,33 @@ Presets live in `internal/preset/presets/` (built-ins) or `~/.rallish/presets/` 
 
 ### 1b. Start an interactive rally session
 
+**Agent-driven (recommended).** Open this repo in any coding CLI that
+auto-discovers skills (Claude Code, Cursor, …). The
+[`skills/rallish-operator`](skills/rallish-operator/SKILL.md) skill loads
+on these natural-language triggers:
+
+| You say | The agent does |
+|---|---|
+| `랠리보낼 준비해` / `let's serve` | `rally new`, takes role=`server`, prints the SID |
+| `랠리받을 준비해 <SID>` / `let's return` | `rally status`, takes role=`returner`, waits |
+| `시작` / `go` (server side) | serves the first turn, then `rally done` with a summary note |
+| `내 차례` / `is it my turn` (receiver side) | `rally status`; if it's your turn, reads the previous note, does the work, runs `rally done` |
+| `끝` / `match over` | clean shutdown |
+
+Short triggers like `시작` / `go` / `끝` / `내 차례` only activate after
+a prior prep trigger set the role + SID; bare generic words are ignored.
+
+**Raw CLI (for scripts or non-skill-aware clients):**
+
 ```bash
-# Create session; prints session ID
-rallish rally new --participants <name1>,<name2> [--task "<description>"]
-
-# Each participant joins in their own terminal (blocks waiting for the baton)
-rallish rally join --session-id <id> --as <name>
-
-# Pass the baton when done
-rallish rally done --session-id <id> --as <name> [--note "<summary>"]
-
-# Check status at any time
+rallish rally new    --participants <a>,<b> [--task "<desc>"]
+rallish rally join   --session-id <id> --as <name>           # blocks on SSE
+rallish rally done   --session-id <id> --as <name> [--note "<s>"] [--handoff-to <n>]
 rallish rally status --session-id <id>
 ```
 
-See [docs/runbook-rally-mode.md](docs/runbook-rally-mode.md) for the full two-terminal walkthrough.
+See [docs/runbook-rally-mode.md](docs/runbook-rally-mode.md) for the full
+two-terminal walkthrough.
 
 ### 2. A2A integration
 

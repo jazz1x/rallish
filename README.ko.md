@@ -112,19 +112,23 @@ scratch: {max_kb: 16}
 EOF
 ./dist/rallish squash --preset fake-demo --task "smoke test" --repo /tmp
 
-# 두 터미널 랠리 (인간 세션 간 라이브 바톤 전달)
-# 터미널 A — 세션 생성 후 alice로 참가:
-SESSION=$(./dist/rallish rally new --participants alice,bob --task "ping pong")
-./dist/rallish rally join --session-id $SESSION --as alice   # 블록; alice가 첫 번째 바톤 획득
-
-# 터미널 B — bob으로 참가 (alice가 패스할 때까지 블록):
-./dist/rallish rally join --session-id $SESSION --as bob
-
-# 어느 터미널에서나 — 바톤 전달:
-./dist/rallish rally done --session-id $SESSION --as alice --note "draft v1"
-
-# 세션 상태 확인:
+# 두 터미널 테니스 랠리 (라이브 바톤 전달)
+# skills/rallish-operator 기반 자연어 UX를 권장합니다 —
+# 에이전트(Claude Code, Cursor 등)가 모든 rally 명령을 대신 실행합니다.
+# 터미널 A 의 코딩 CLI 세션:                   "랠리보낼 준비해"
+# 에이전트: → rally new + role=server, SID 출력.
+# 터미널 B 의 코딩 CLI 세션:                   "랠리받을 준비해 <SID>"
+# 에이전트: → rally status + role=returner, 대기.
+# 다시 터미널 A:                              "시작"
+# 에이전트: 첫 턴 서브, rally done 으로 요약 note 와 함께 넘김.
+# 터미널 B:                                   "내 차례"
+# 에이전트: 바톤 받아 리턴 후 rally done.
+# 어느 쪽이든, 끝낼 때:                       "끝"
+#
+# Raw CLI (스킬이 내부적으로 호출 / 스크립트에서 사용):
+SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-up rally")
 ./dist/rallish rally status --session-id $SESSION
+./dist/rallish rally done   --session-id $SESSION --as server --note "draft v1"
 
 # A2A discovery (외부 클라이언트는 TCP 루프백 사용)
 curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent.json
@@ -149,21 +153,32 @@ rallish squash --preset <name> --task "<설명>" --repo <경로>
 
 ### 1b. 인터랙티브 랠리 세션 시작
 
+**에이전트 주도 (권장).** 스킬을 자동 발견하는 코딩 CLI(Claude Code, Cursor
+등)에서 이 리포를 열면 [`skills/rallish-operator`](skills/rallish-operator/SKILL.md)
+스킬이 다음 자연어 트리거로 로드됩니다:
+
+| 발화 | 에이전트 동작 |
+|---|---|
+| `랠리보낼 준비해` / `let's serve` | `rally new` 실행, ROLE=`server`, SID 출력 |
+| `랠리받을 준비해 <SID>` / `let's return` | `rally status` 실행, ROLE=`returner`, 대기 |
+| `시작` / `go` (서버 측) | 첫 턴 서브 후 요약 note 와 함께 `rally done` |
+| `내 차례` / `is it my turn` (리시버 측) | `rally status`; 자기 차례면 직전 note 읽고 작업 후 `rally done` |
+| `끝` / `match over` | 깔끔한 종료 |
+
+`시작` / `go` / `끝` / `내 차례` 같은 짧은 트리거는 직전 prep 트리거로
+ROLE+SID 가 이미 설정된 경우에만 활성화 — 무관한 일반 단어는 무시됩니다.
+
+**Raw CLI (스크립트나 스킬 미지원 클라이언트용):**
+
 ```bash
-# 세션 생성; 세션 ID 출력
-rallish rally new --participants <이름1>,<이름2> [--task "<설명>"]
-
-# 각 참가자가 자신의 터미널에서 참가 (바톤 대기 중 블록)
-rallish rally join --session-id <id> --as <이름>
-
-# 완료 시 바톤 전달
-rallish rally done --session-id <id> --as <이름> [--note "<요약>"]
-
-# 언제든지 상태 확인
+rallish rally new    --participants <a>,<b> [--task "<설명>"]
+rallish rally join   --session-id <id> --as <이름>          # SSE 블록
+rallish rally done   --session-id <id> --as <이름> [--note "<요약>"] [--handoff-to <이름>]
 rallish rally status --session-id <id>
 ```
 
-전체 두 터미널 연습은 [docs/runbook-rally-mode.md](docs/runbook-rally-mode.md)를 참조하세요.
+전체 두 터미널 연습은 [docs/runbook-rally-mode.md](docs/runbook-rally-mode.md)를
+참조하세요.
 
 ### 2. A2A 연동
 
