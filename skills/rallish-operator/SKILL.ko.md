@@ -51,10 +51,20 @@ ssl:
 스타일 랠리를 에이전트가 직접 구동합니다. 사용자는 세 가지만 입력하면
 되고, 나머지는 에이전트가 처리합니다.
 
+## `rallish` 바이너리 경로 먼저 해결
+어떤 rally 명령보다 먼저 실행 가능 경로를 결정:
+
+1. `command -v rallish` 시도. 있으면 그대로 사용.
+2. 없으면 `$PWD/dist/rallish` 확인 (`make build` 직후 생성). 있으면 이후 모든 CLI 호출에 절대경로 사용.
+3. 그것도 없으면 빌드: 리포 루트에서 `make build` 실행 후 `$PWD/dist/rallish` 사용.
+
+선택된 경로를 이 스킬 전체에서 `$RALLISH` 로 부른다.
+
 ## 유지할 대화 상태
 - SID: 랠리 세션 ID (`rally new` 출력 또는 사용자 메시지에서 추출)
 - ROLE: "server" 또는 "returner"
 - PHASE: prep / serving / returning / done
+- RALLISH: 해결된 바이너리 경로 (위 참조)
 
 ## 트리거 A — "랠리보낼 준비해" (또는 영어 동의어)
 이 쪽 에이전트가 서버가 됩니다.

@@ -51,10 +51,20 @@ This skill drives a live tennis-style rally between two coding-CLI sessions
 through the rallish broker. The user types three things; the agent does the
 rest.
 
+## Resolve the `rallish` binary first
+Before any rally command, pick the runnable path:
+
+1. Try `command -v rallish`. If found, use bare `rallish`.
+2. Else look at `$PWD/dist/rallish` (after a fresh `make build`). If present, use that absolute path for every subsequent CLI call.
+3. Else build it: `make build` in the repo root, then use `$PWD/dist/rallish`.
+
+Refer to the chosen path as `$RALLISH` for the rest of this skill.
+
 ## Conversation state to maintain
 - SID: rally session id (from `rally new` or user message)
 - ROLE: "server" or "returner"
 - PHASE: prep / serving / returning / done
+- RALLISH: resolved binary path (see above)
 
 ## Trigger A — "랠리보낼 준비해" (or English equivalents)
 The agent on this side becomes the server.
