@@ -62,42 +62,38 @@ which claude      # $PATH 上のサポート対象アダプターバイナリ
 
 ## インストール
 
-### オプション 1 — ソースからビルド (開発用に推奨)
+最速ルートは **ワンライナー 2 つ** — スキル用と バイナリ用。
+スキルは `~/.claude/skills/` に、バイナリは `$PATH` に入ります。
+
+### 1) スキルをインストール
 
 ```bash
-git clone https://github.com/jazz1x/rallish.git
-cd rallish
-make build
+npx skills add jazz1x/rallish
 ```
 
-バイナリは `./dist/rallish` に生成されます。
+[skills.sh](https://www.skills.sh) 経由で解決 — `rallish-operator/SKILL.md`
+(+ `.ko.md`) をエージェント検出可能な場所にインストール。スキル対応の
+コーディング CLI (Claude Code, Cursor など) が自動的に検出します。
 
-### オプション 2 — Homebrew (初回リリース以降)
+### 2) バイナリをインストール
 
-```bash
-brew tap jazz1x/rallish
-brew install rallish
-```
+| 方法 | コマンド | 適したユーザー |
+|---|---|---|
+| **Homebrew tap** (macOS) | `brew install jazz1x/rallish/rallish` | brew 入りの macOS |
+| **curl インストールスクリプト** (Unix 全般) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` | ツールチェーン不要の Linux/macOS |
+| **ソースビルド** (開発者) | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` | rallish 本体をハックするとき |
+| **`go install`** (Go ≥1.25) | `go install github.com/jazz1x/rallish/cmd/rallish@latest` | 既に Go エコシステムにいるとき |
 
-### オプション 3 — go install
-
-```bash
-go install github.com/jazz1x/rallish/cmd/rallish@latest
-```
-
-### 1回のブートストラップ (インストール方法を問わず)
-
-`rallish` バイナリが `$PATH` にあれば、**どこからでも 1 回だけ**実行:
+### 3) 検証
 
 ```bash
 rallish bootstrap
 ```
 
-`rallish-operator` スキルを `~/.claude/skills/rallish-operator/` にインストール
-(冪等 — 再実行時は `unchanged` を報告) し、デーモンを検証します。これ以降は
-Claude Code (またはスキル対応の他のコーディング CLI) でどのプロジェクトを
-開いてもラリートリガーが自動検出されます — rallish ソースツリー内にいる
-必要はありません。
+スキルインストールパスを冪等に再実行 + デーモン到達性確認 + 次のステップを
+案内。この後は**どのプロジェクト**でも Claude Code を開いて `랠리보낼 준비해`
+(または `let's serve`) でラリー開始 — rallish ソースツリー内にいる必要は
+ありません。
 
 ## クイックスタート
 

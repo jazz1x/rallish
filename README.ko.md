@@ -62,41 +62,38 @@ which claude      # $PATH에 있는 지원 어댑터 바이너리
 
 ## 설치
 
-### 옵션 1 — 소스에서 빌드 (개발용 권장)
+가장 빠른 경로는 **한 줄짜리 두 개** — 스킬용 하나, 바이너리용 하나.
+스킬은 `~/.claude/skills/`로, 바이너리는 `$PATH`로 들어갑니다.
+
+### 1) 스킬 설치
 
 ```bash
-git clone https://github.com/jazz1x/rallish.git
-cd rallish
-make build
+npx skills add jazz1x/rallish
 ```
 
-바이너리는 `./dist/rallish`에 생성됩니다.
+[skills.sh](https://www.skills.sh) 경유로 해석 — `rallish-operator/SKILL.md`
+(+ `.ko.md`)를 에이전트가 발견할 수 있는 위치에 설치. 스킬을 인식하는 모든
+코딩 CLI(Claude Code, Cursor 등)가 자동으로 잡습니다.
 
-### 옵션 2 — Homebrew (첫 릴리즈 이후)
+### 2) 바이너리 설치
 
-```bash
-brew tap jazz1x/rallish
-brew install rallish
-```
+| 방법 | 명령 | 적합한 사용자 |
+|---|---|---|
+| **Homebrew tap** (macOS) | `brew install jazz1x/rallish/rallish` | brew 가 깔린 macOS |
+| **curl 설치 스크립트** (Unix 전반) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` | 툴체인 없이 Linux/macOS |
+| **소스 빌드** (개발자) | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` | rallish 자체를 해킹할 때 |
+| **`go install`** (Go ≥1.25) | `go install github.com/jazz1x/rallish/cmd/rallish@latest` | 이미 Go 생태계에 있을 때 |
 
-### 옵션 3 — go install
-
-```bash
-go install github.com/jazz1x/rallish/cmd/rallish@latest
-```
-
-### 1회 부트스트랩 (설치 방식 무관)
-
-`rallish` 바이너리가 `$PATH`에 있으면 **어디서든 단 한 번** 실행:
+### 3) 검증
 
 ```bash
 rallish bootstrap
 ```
 
-`rallish-operator` 스킬을 `~/.claude/skills/rallish-operator/` 에 설치하고
-(멱등 — 재실행 시 `unchanged` 보고) 데몬을 검증합니다. 이후 Claude Code
-(또는 다른 스킬 인식 코딩 CLI)에서 어느 프로젝트를 열어도 랠리 트리거가
-자동 발견됩니다 — rallish 소스 트리 안에 있을 필요 없음.
+스킬 설치 경로를 방어적으로(멱등) 한 번 더 실행 + 데몬 도달성 확인 + 다음
+단계 안내. 이 이후로는 **아무 프로젝트**에서 Claude Code 열고 `랠리보낼
+준비해` (또는 `let's serve`) 하면 랠리 시작 — rallish 소스 트리 안일 필요
+없음.
 
 ## 빠른 시작
 

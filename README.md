@@ -62,42 +62,38 @@ which claude      # any supported adapter binary on $PATH
 
 ## Install
 
-### Option 1 — From source (recommended for development)
+The fastest path has **two one-liners** — one for the skill, one for the
+binary. Skill content goes to `~/.claude/skills/`; binary goes on `$PATH`.
+
+### 1) Install the skill
 
 ```bash
-git clone https://github.com/jazz1x/rallish.git
-cd rallish
-make build
+npx skills add jazz1x/rallish
 ```
 
-Binary appears at `./dist/rallish`.
+Resolves via [skills.sh](https://www.skills.sh): drops
+`rallish-operator/SKILL.md` (+ `.ko.md`) into the agent-discoverable
+location. Any skill-aware coding CLI (Claude Code, Cursor, …) picks it up.
 
-### Option 2 — Homebrew (after first release)
+### 2) Install the binary
 
-```bash
-brew tap jazz1x/rallish
-brew install rallish
-```
+| Method | Command | Best for |
+|---|---|---|
+| **Homebrew tap** (macOS) | `brew install jazz1x/rallish/rallish` | macOS users with brew |
+| **curl install script** (any Unix) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` | Linux + macOS, no toolchain |
+| **From source** (developers) | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` | Hacking on rallish itself |
+| **`go install`** (Go ≥1.25) | `go install github.com/jazz1x/rallish/cmd/rallish@latest` | Already in the Go ecosystem |
 
-### Option 3 — go install
-
-```bash
-go install github.com/jazz1x/rallish/cmd/rallish@latest
-```
-
-### One-time bootstrap (any install path)
-
-After getting the `rallish` binary on `$PATH`, run **once** from anywhere:
+### 3) Verify
 
 ```bash
 rallish bootstrap
 ```
 
-This installs the `rallish-operator` skill to `~/.claude/skills/rallish-operator/`
-(idempotent — re-runs report `unchanged`) and verifies the daemon. After this,
-any project opened in Claude Code (or another skill-aware coding CLI) will
-auto-discover the rally triggers — you do not need to be in the rallish source
-tree.
+Runs the skill install path defensively (idempotent), confirms the daemon is
+reachable, and prints next-step hints. After this point, opening **any**
+project in Claude Code and saying `랠리보낼 준비해` (or `let's serve`) starts
+a rally — you don't need to be in the rallish source tree.
 
 ## Quickstart
 
