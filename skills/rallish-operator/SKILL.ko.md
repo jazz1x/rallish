@@ -1,13 +1,12 @@
 ---
 name: rallish-operator
 description: >
-  rallish 랠리 운용 플레이북 — 사람이 직접 띄운 두 코딩 CLI 세션(claude, kimi 등)
-  사이에서 로컬 rallish 브로커가 baton을 중계하는 라이브 협업 모드. 세션 셋업,
-  참가자 브리핑, baton 수신, hand-off, 종료까지 다룬다. squash 모드(헤드리스
-  프리셋 자동 실행)도 포함. 사용자가 이 리포에서 멀티 에이전트 랠리 세션을
-  시작·참여·조율하려 할 때 읽어야 한다.
-  Triggers: "rally start", "let's rally", "start a rally", "two agents", "두 에이전트", "두 에이전트 같이", "baton pass", "baton hand-off", "multi-agent session", "pair coding session", "rallish 시작", "squash session", "headless squash"
-version: 0.0.2
+  에이전트 주도 테니스 스타일 랠리 플레이북. 에이전트가 rallish CLI 명령을
+  직접 실행하며, 사용자는 세 가지 자연어 트리거만 입력하면 됩니다. 서버
+  준비, 리시버 준비, 첫 번째 서브, 이후 리턴, 종료까지 다룹니다. squash
+  모드(헤드리스 프리셋 자동 실행)도 포함합니다.
+  Triggers: "랠리보낼 준비해", "let's serve", "serve prep", "rally prep — serving", "서브 준비", "랠리받을 준비해", "let's return", "returner prep", "rally prep — returning", "리턴 준비", "시작", "serve!", "go", "start rally", "내 차례", "내 차례 됐어?", "is it my turn", "ready", "ready to return", "끝", "match over", "stop rally", "랠리 끝"
+version: 0.1.0
 ssl:
   scheduling:
     anti_triggers:
@@ -15,18 +14,22 @@ ssl:
       - "브로커 HTTP 표면 수정 — docs/prd-rally-mode.md 와 internal/broker/ 참조"
       - "일반 Go 코딩 컨벤션 — AGENTS.md 참조"
       - "스킬 감사 / SSL 점검 — galmuri:audit 사용"
+      - "짧은 트리거 '시작' / 'go' / '끝' / '내 차례'는 STATE-GATED. 직전의 'serve prep' 또는 'returner prep' 트리거로 ROLE과 SID가 이미 설정된 경우에만 매칭. 무관한 맥락의 단독 'go' / '시작' / '끝'은 무시 — 랠리 시그널이 아닌 일반 언어로 취급."
   structural:
-    scenes: [Setup, Brief, Listen, HandOff, Status, Shutdown]
+    scenes: [ServerPrep, ReceiverPrep, Serve, Return, Continue, MatchOver]
     resumable: true
     branches:
-      - "fresh repo → `make build` 후 `rallish doctor`"
-      - "데몬 미실행 → `rallish start` 가 자동 스폰; 또는 명시적으로 `rallish daemon &`"
-      - "헤드리스 프리셋(solo-ralph, pair-review) → `rallish squash --preset <name>`"
-      - "인터랙티브 2-CLI → `rallish rally new/join/done/status`"
-      - "기본 round-robin 순서 → --handoff-to 생략; 명시적 hand-off → rally done 에 --handoff-to <name> 전달"
-      - "세션 중단(SSE drop) → 같은 --as 이름으로 `rallish rally join` 재실행; 브로커가 마지막 baton 재전송"
-      - "비-홀더가 done 호출 → 409 → exit 1 + stderr 메시지"
-      - "크래시 복구 (데몬 -9 종료로 소켓 파일 잔존) → 수동 `rm -f ~/.rallish/{rallish.sock,socket,port}` 후 재기동"
+      - "ServerPrep: 데몬 미실행 → `rally new` 전 `rallish daemon &` 백그라운드 실행"
+      - "ServerPrep: `rally new` stdout에서 rly_... 세션 ID 파싱"
+      - "ReceiverPrep: 사용자 메시지에서 rly_... 패턴으로 SID 추출"
+      - "ReceiverPrep: status 확인 시 404 → 세션 없음 안내 후 중단"
+      - "Serve(첫 턴): 시작 메시지에 작업 설명이 있으면 사용; 없으면 질문"
+      - "Return/Continue: holder 불일치 → 실제 holder 보고, 진행 중단"
+      - "409(rally done): 드문 레이스; rally status 재실행 후 실제 holder 보고"
+      - "SSE 미사용 — 에이전트는 사용자 트리거 시 rally status 폴링 (메시지별 생명주기)"
+      - "크래시 복구 (데몬 -9 종료로 소켓 잔존) → 수동 `rm -f ~/.rallish/{rallish.sock,socket,port}` 후 `rallish daemon &`"
+      - "--handoff-to: 지원; 사용자가 대상 참가자를 지정하면 rally done에 전달"
+      - "headless squash 폴백: 두 번째 터미널 없을 때 `rallish squash --preset solo-ralph --task \"...\"`"
   logical:
     tools: [Bash, Read]
     side_effects:
@@ -42,158 +45,90 @@ ssl:
     rollback: null
 ---
 
-# rallish-operator — 라이브 랠리 플레이북
+# rallish-operator — 테니스 랠리 플레이북
 
-이 스킬은 이 리포의 rallish 브로커를 사용해 **rally** 세션 — 두 라이브 코딩
-CLI 인스턴스 사이의 baton 전달 — 을 운용하는 에이전트(또는 사람)를 위한
-브리핑이다.
+이 스킬은 rallish 브로커를 통해 두 코딩 CLI 세션 사이의 라이브 테니스
+스타일 랠리를 에이전트가 직접 구동합니다. 사용자는 세 가지만 입력하면
+되고, 나머지는 에이전트가 처리합니다.
 
-## rallish란
+## 유지할 대화 상태
+- SID: 랠리 세션 ID (`rally new` 출력 또는 사용자 메시지에서 추출)
+- ROLE: "server" 또는 "returner"
+- PHASE: prep / serving / returning / done
 
-여러 에이전트가 한 작업을 두고 turn-taking 할 때 "지금 누구 차례인지"를
-관리하는 로컬 브로커 프로세스. 두 가지 모드:
+## 트리거 A — "랠리보낼 준비해" (또는 영어 동의어)
+이 쪽 에이전트가 서버가 됩니다.
 
-- **squash** — 헤드리스. `rallish` 가 어댑터 서브프로세스(`claude -p`,
-  `kimi -p`)를 스폰하고 프리셋(`solo-ralph`, `pair-review`)을 사람 개입
-  없이 끝까지 돌림.
-- **rally** — 인터랙티브. 두 사람(또는 사람+에이전트)이 각자의 CLI 세션을
-  띄움; rallish는 SSE로 baton만 양쪽에 전달.
+1. `rallish doctor` 실행해 브로커 접속 확인. 데몬 미실행 시
+   `rallish daemon &` 백그라운드 실행.
+2. `SID=$(rallish rally new --participants server,returner --task "TBD")` 실행.
+   stdout에서 SID 파싱.
+3. 상태 저장: SID, ROLE=server, PHASE=prep.
+4. 사용자에게 안내:
+   > Server 준비 완료. Session ID: <SID>.
+   > 다른 터미널에서 "랠리받을 준비해 <SID>" 라고 말해줘.
+   > 받는 쪽 준비되면 여기에 "시작" 이라고 해.
 
-squash는 "자동운전". rally는 "두 라이브 선수의 테니스, rallish는 심판".
+## 트리거 B — "랠리받을 준비해 <SID>" (또는 영어 동의어)
+이 쪽 에이전트가 리시버가 됩니다.
 
-## Pre-flight
+1. 사용자 메시지에서 rly_... 패턴으로 SID 추출.
+2. `rallish rally status --session-id $SID` 실행해 세션 존재 확인.
+   404 시 "그 ID로 세션이 없어. 서버 쪽에서 다시 만들어달라고 해줘." 안내 후 중단.
+3. 상태 저장: SID, ROLE=returner, PHASE=prep.
+4. 사용자에게 안내:
+   > Returner 준비 완료. 서버가 서브할 때까지 대기 중.
+   > 서버가 넘겼다고 알려주면 그냥 "내 차례" 라고 말해.
 
-```bash
-make build                   # ./dist/rallish 생성
-./dist/rallish doctor        # 어댑터 바이너리 + 데몬 상태 점검
-```
+## 트리거 C — "시작" (서버 쪽, prep 이후)
+에이전트가 첫 번째 턴을 서브합니다.
 
-`doctor`가 `daemon not running` (다음 명령이 자동 스폰) 또는
-`daemon reachable via unix socket path=~/.rallish/rallish.sock perm=-rw-------`
-보고.
+1. ROLE == server 이고 PHASE == prep 인지 확인 (아니면 잘못된 쪽 메시지 안내).
+2. `rallish rally status --session-id $SID` 실행. holder == "server" 확인.
+3. "서브할 작업 뭐야?" 질문 — 단, 사용자의 "시작" 메시지에 이미 작업 설명이
+   포함되어 있으면 그것을 사용.
+4. 작업 수행 — 파일 읽기, 코드 작성, 명령 실행 등 작업에 필요한 모든 것.
+5. `rallish rally done --session-id $SID --as server --note "<방금 한 작업 한 줄 요약>"` 실행.
+6. 사용자에게 안내:
+   > 🎾 서브 완료. Returner한테 넘겼어.
+   > 상대 터미널에서 "내 차례" 라고 말하면 받을 거야.
 
-## Squash 모드 (헤드리스)
+## 트리거 D — "내 차례" (prep 이후, 리시버 쪽)
+에이전트가 자기 차례이면 바톤을 받습니다.
 
-```bash
-rallish squash --preset solo-ralph  --task "foo/bar 의 flaky 테스트 수정"
-rallish squash --preset pair-review --task "session store 리팩터"
-```
+1. `rallish rally status --session-id $SID` 실행.
+2. holder != 내 ROLE: "아직 내 차례 아니야. 현재 홀더: <holder>." 안내 후 중단.
+3. holder == 내 ROLE: 히스토리 마지막 항목의 note 읽기.
+4. 사용자에게 "🎾 상대가 넘긴 메모: \"<note>\". 이대로 진행할까?" 확인 (방향 수정 기회 제공).
+5. 사용자 OK 또는 수정 지시 대기. 그런 다음 작업 수행.
+6. `rallish rally done --session-id $SID --as <내 ROLE> --note "<요약>"` 실행.
+7. 사용자에게 안내:
+   > 🎾 리턴 완료. 다시 상대 차례.
+   > 상대가 넘기면 또 "내 차례" 라고 말해.
 
-브로커가 설정된 어댑터를 스폰해 예산 소진 또는 `exit_when` 일치까지 구동.
-턴별 페이로드는 `~/.rallish/sessions/<id>/log.jsonl` 에 기록. 추가 입력
-불필요.
+## 트리거 E — "끝" / "match over"
+깔끔한 종료.
 
-## Rally 모드 (인터랙티브)
+1. 사용자에게 안내: "랠리 종료. 데몬은 살아있어 — 다음 세션도 같은 데몬 씀.
+   완전히 끄려면 `kill -TERM $(pgrep -f 'rallish daemon')` 직접 실행."
+2. 상태 초기화.
 
-### 1. 세션 생성
+## 에러 처리 (가능하면 조용히 처리)
+- 409 "not your turn": 드물지만 발생 시 rally status 실행 후
+  실제 holder를 사용자에게 보고.
+- 데몬 연결 거부: `rallish doctor` 실행; 데몬 미실행 시 `rallish daemon &`
+  실행 후 재시도.
+- 이 흐름에서 SSE 미사용 — 에이전트가 `rally status` 폴링으로 대체
+  (장기 백그라운드 프로세스 불필요).
 
-```bash
-SID=$(rallish rally new --participants alice,bob --task "OAuth2 PKCE")
-echo $SID                    # rly_1747382400000_a3f9
-```
-
-이름은 `^[a-zA-Z0-9_-]{1,16}$` 매치 필수. 참가자 2명 이상.
-
-### 2. 각 참가자가 자기 터미널에서 join
-
-```bash
-# 터미널 A
-rallish rally join --session-id $SID --as alice
-
-# 터미널 B
-rallish rally join --session-id $SID --as bob
-```
-
-첫 join 한 참가자가 자동으로 첫 baton을 받음. join은 blocking — 프로세스가
-SSE를 잡고 있다가 자기 차례 되면 cue를 출력:
-
-```
-🏓 your turn (turn 1, from (start)): (no note)
-   → work in your CLI (e.g. claude). When done, in any terminal:
-   →   rallish rally done --session-id rly_... --as alice --note "<summary>"
-```
-
-### 3. 라이브 에이전트 브리핑
-
-라이브 코딩 CLI(claude/kimi/cursor)는 rally 시그널을 자동으로 보지 못함.
-다음과 같이 알려줄 것:
-
-> 당신은 rally 세션 `<SID>` 의 참가자 `<name>` 입니다. join 터미널에
-> `🏓 your turn` 이 뜨면 이번 턴 작업을 수행하세요. 끝나면 멈추고
-> 다음 한 줄을 출력하세요: `RALLY:DONE — <요약 한 줄>`. 그 줄 이후로는
-> 계속 진행하지 말고 다음 턴을 기다리세요.
-
-각 에이전트에게 줄 system prompt 블록 예:
-
-```
-당신은 rally <SID> 의 PLANNER, 상대는 REVIEWER 입니다.
-- 파일 경로와 diff 가 포함된 구체적 계획을 출력하세요.
-- 완료 시 "RALLY:DONE — <요약>" 출력 후 정지.
-- 컨벤션: 작은 diff, conventional commits, AGENTS.md 참조.
-```
-
-### 4. baton 전달
-
-라이브 에이전트가 자기 턴 작업을 끝내면 운영자가:
-
-```bash
-rallish rally done --session-id $SID --as alice --note "plan v1: endpoint 3개"
-```
-
-선택적 `--handoff-to bob` 으로 기본 round-robin 순서 오버라이드 가능.
-출력: `ok — baton passed to bob (turn 2)`. bob의 join 터미널이 즉시 alice의
-note를 컨텍스트로 cue 출력.
-
-### 5. 상태 확인
-
-```bash
-rallish rally status --session-id $SID
-```
-
-현재 holder, 턴 카운트, 참가자별 last-seen 하트비트, hand-off 이력 표시.
-
-### 6. 종료
-
-```bash
-kill -TERM $(pgrep -f "rallish daemon")
-```
-
-데몬이 활성 SSE 스트림에 `data: {"closed":true}` 브로드캐스트, 세션을
-`interrupted` 로 전이, `~/.rallish/{rallish.sock, socket, port}` 를 1초 내
-정리.
-
-## 에이전트에게 주입할 컨벤션
-
-- **무한 루프 금지.** `RALLY:DONE` 출력하고 멈춤. 운영자(또는 셸 권한 있다면
-  본인)가 `rally done` 호출.
-- **이전 note 를 먼저 읽을 것.** 직전 참가자의 작업 요약.
-- **첫 턴 note 는 `(no note)`** — `rallish rally status` 의 task 설명에서 시작.
-- **409 발생 시** ("not your turn"): `rally status` 로 실제 holder 확인.
-- **연결 끊김 시**(SSE drop): `rallish rally join --as <name>` 재실행.
-  자기 차례면 브로커가 현재 baton 재전송.
-
-## Anti-pattern
-
-| 하지 말 것 | 이유 |
-|---|---|
-| 비-홀더가 `rally done` | 409; 브로커가 거부 + 로그 |
-| 비-trivial 턴에 `--note` 생략 | 다음 홀더에 컨텍스트 없음 |
-| `RALLY:DONE` 이후에도 계속 작업 | 턴 경계 깨짐; 브로커가 도울 수 없음 |
-| `~/.rallish/sessions/<id>/log.jsonl` 직접 편집 | append-only 감사 로그; resume 깨짐 |
-
-## 트러블슈팅
-
-| 증상 | 원인 | 해결 |
-|---|---|---|
-| `rally new` 후 `daemon not running` | 첫 실행; 다음 명령이 자동 스폰 | 재시도; `rallish doctor` 로 확인 |
-| `🏓 your turn` 안 옴 | 상대 참가자가 아직 join 안 했거나 본인이 holder 아님 | `rally status` 로 holder 확인 |
-| stderr `Error: not your turn (holder: bob)` | 다른 참가자 이름으로 done 호출 | 실제 holder 이름으로 재시도 |
-| 크래시 후 소켓 파일 잔존 | 데몬을 -9 로 죽임 (TERM 아님) | `rm -f ~/.rallish/{rallish.sock,socket,port}` 후 재기동 |
+## 폴링, SSE 아닌 이유?
+에이전트의 생명주기는 메시지 단위이며 지속적이지 않습니다. 백그라운드
+SSE는 이 스킬의 범위를 벗어나는 프로세스 감시가 필요합니다. `rally status`
+는 HTTP GET 한 번이면 충분하고, 사용자 주도 턴 흐름이 이미 명시적이므로
+"내 차례" 시 폴링이 올바른 자동화 수준입니다.
 
 ## 참조
-
-- PRD: `docs/prd-rally-mode.md`
-- 런북 (검증 워크스루): `docs/runbook-rally-mode.md`
-- 코드: `internal/broker/rally.go`, `internal/cli/rally.go`
-- 프로젝트 컨벤션: `AGENTS.md`
-- 아키텍처: `DESIGN.md`
+- PRD: docs/prd-rally-mode.md
+- 런북: docs/runbook-rally-mode.md
+- 코드: internal/broker/rally.go, internal/cli/rally.go
+- 프로젝트 컨벤션: AGENTS.md

@@ -311,7 +311,7 @@ func handleBatonEvent(data, sessionID, as string, out io.Writer) error {
 		note = "(no note)"
 	}
 
-	_, _ = fmt.Fprintf(out, "\U0001f3d3 your turn (turn %d, from %s): %s\n", evt.TurnN, from, note)
+	_, _ = fmt.Fprintf(out, "\U0001f3be your turn (turn %d, from %s): %s\n", evt.TurnN, from, note)
 	_, _ = fmt.Fprintf(out, "   -> work in your CLI (e.g. claude). When done, in any terminal:\n")
 	_, _ = fmt.Fprintf(out, "   ->   rallish rally done --session-id %s --as %s --note \"<summary>\"\n", sessionID, as)
 	return nil

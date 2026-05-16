@@ -1,14 +1,12 @@
 ---
 name: rallish-operator
 description: >
-  Operator playbook for running a rallish rally — live baton-passing between two
-  human-launched coding-CLI sessions (claude, kimi, etc.) coordinated by the
-  local rallish broker. Covers session setup, per-agent briefing, baton
-  listening, hand-off, and shutdown. Also covers squash mode (headless preset
-  orchestration). Read this when the user wants to start, join, or coordinate
-  a multi-agent rally session in this repo.
-  Triggers: "rally start", "let's rally", "start a rally", "two agents", "두 에이전트", "두 에이전트 같이", "baton pass", "baton hand-off", "multi-agent session", "pair coding session", "rallish 시작", "squash session", "headless squash"
-version: 0.0.2
+  Agent-driven tennis-style rally playbook. The agent runs all rallish CLI
+  commands; the user only types three natural-language triggers. Covers server
+  prep, returner prep, serving the first turn, picking up subsequent turns,
+  and clean shutdown. Also covers squash mode (headless preset orchestration).
+  Triggers: "랠리보낼 준비해", "let's serve", "serve prep", "rally prep — serving", "서브 준비", "랠리받을 준비해", "let's return", "returner prep", "rally prep — returning", "리턴 준비", "시작", "serve!", "go", "start rally", "내 차례", "내 차례 됐어?", "is it my turn", "ready", "ready to return", "끝", "match over", "stop rally", "랠리 끝"
+version: 0.1.0
 ssl:
   scheduling:
     anti_triggers:
@@ -16,18 +14,22 @@ ssl:
       - "Modifying the broker HTTP surface — see docs/prd-rally-mode.md and internal/broker/"
       - "Generic Go coding conventions — see AGENTS.md"
       - "Skill audit / SSL inspection — use galmuri:audit"
+      - "Short triggers '시작' / 'go' / '끝' / '내 차례' are STATE-GATED. Match only when conversation already holds ROLE and SID (set by a prior 'serve prep' or 'returner prep' trigger). Bare 'go' / '시작' / '끝' in unrelated context must be ignored — treat as normal language, not a rally signal."
   structural:
-    scenes: [Setup, Brief, Listen, HandOff, Status, Shutdown]
+    scenes: [ServerPrep, ReceiverPrep, Serve, Return, Continue, MatchOver]
     resumable: true
     branches:
-      - "fresh repo → run `make build` first, then `rallish doctor`"
-      - "daemon not running → `rallish start` auto-spawns it; or `rallish daemon &` explicitly"
-      - "headless preset (solo-ralph, pair-review) → use `rallish squash --preset <name>`"
-      - "interactive 2-CLI → use `rallish rally new/join/done/status`"
-      - "default round-robin baton order → omit --handoff-to; explicit hand-off → pass --handoff-to <name> to rally done"
-      - "session interrupted (SSE drop) → re-run `rallish rally join` with same --as name; broker replays last baton"
-      - "wrong participant POSTs done → 409 surfaced as exit 1 with stderr message"
-      - "crash recovery (daemon killed -9, stale socket files) → manual `rm -f ~/.rallish/{rallish.sock,socket,port}` then relaunch"
+      - "ServerPrep: daemon not running → run `rallish daemon &` in background before `rally new`"
+      - "ServerPrep: `rally new` stdout parsed for rly_... session id"
+      - "ReceiverPrep: SID extracted from user message via rly_... pattern"
+      - "ReceiverPrep: 404 on status check → tell user session not found, stop"
+      - "Serve (first turn): user's 시작 message may already contain task description — use it; otherwise ask"
+      - "Return/Continue: holder mismatch → report actual holder, do not proceed"
+      - "409 from rally done: rare race; re-run rally status, report actual holder"
+      - "SSE not used — agent polls with rally status on user trigger (per-message lifecycle)"
+      - "crash recovery (daemon -9, stale socket files) → manual `rm -f ~/.rallish/{rallish.sock,socket,port}` then `rallish daemon &`"
+      - "--handoff-to: supported; pass to rally done when user specifies a target participant"
+      - "headless squash fallback: `rallish squash --preset solo-ralph --task \"...\"` when no second terminal available"
   logical:
     tools: [Bash, Read]
     side_effects:
@@ -43,162 +45,89 @@ ssl:
     rollback: null
 ---
 
-# rallish-operator — Live Rally Playbook
+# rallish-operator — Tennis Rally Playbook
 
-This skill briefs an agent (you, or a human) on running a **rally** session
-between two live coding-CLI instances using the rallish broker in this repo.
+This skill drives a live tennis-style rally between two coding-CLI sessions
+through the rallish broker. The user types three things; the agent does the
+rest.
 
-## What rallish is
+## Conversation state to maintain
+- SID: rally session id (from `rally new` or user message)
+- ROLE: "server" or "returner"
+- PHASE: prep / serving / returning / done
 
-A local broker process that owns "whose turn is it" for multi-agent work.
-Two modes:
+## Trigger A — "랠리보낼 준비해" (or English equivalents)
+The agent on this side becomes the server.
 
-- **squash** — headless. `rallish` spawns adapter subprocesses (`claude -p`,
-  `kimi -p`) and runs a preset (`solo-ralph`, `pair-review`) end-to-end with
-  no human in the loop.
-- **rally** — interactive. Two humans (or human+agent pairs) launch their own
-  CLI sessions; rallish only carries the baton between them via SSE.
+1. Run `rallish doctor` to confirm broker reachable. If daemon not running,
+   run `rallish daemon &` in the background.
+2. Run `SID=$(rallish rally new --participants server,returner --task "TBD")`.
+   Parse SID from stdout.
+3. Save state: SID, ROLE=server, PHASE=prep.
+4. Tell user:
+   > Server 준비 완료. Session ID: <SID>.
+   > 다른 터미널에서 "랠리받을 준비해 <SID>" 라고 말해줘.
+   > 받는 쪽 준비되면 여기에 "시작" 이라고 해.
 
-Squash is "auto-pilot." Rally is "tennis between two live players, with
-rallish keeping score."
+## Trigger B — "랠리받을 준비해 <SID>" (or English equivalents)
+The agent on this side becomes the returner.
 
-## Pre-flight
+1. Extract SID from the user message (any rly_... pattern).
+2. Run `rallish rally status --session-id $SID` to confirm session exists.
+   If not found (404), tell user "그 ID로 세션이 없어. 서버 쪽에서 다시 만들어달라고 해줘." and stop.
+3. Save state: SID, ROLE=returner, PHASE=prep.
+4. Tell user:
+   > Returner 준비 완료. 서버가 서브할 때까지 대기 중.
+   > 서버가 넘겼다고 알려주면 그냥 "내 차례" 라고 말해.
 
-```bash
-make build                   # produce ./dist/rallish
-./dist/rallish doctor        # verify adapter binaries + daemon state
-```
+## Trigger C — "시작" (server side, after prep)
+The agent serves the first turn.
 
-`doctor` reports either `daemon not running` (next command auto-spawns it) or
-`daemon reachable via unix socket path=~/.rallish/rallish.sock perm=-rw-------`.
+1. Verify ROLE == server and PHASE == prep (else: tell user the wrong-side message).
+2. Run `rallish rally status --session-id $SID`. Confirm holder == "server".
+3. Ask user: "서브할 작업 뭐야?" — unless the user's "시작" message already includes a task description (then use that).
+4. Do the work — read files, write code, run commands, whatever the task requires.
+5. Run `rallish rally done --session-id $SID --as server --note "<one-line summary of what I just did>"`.
+6. Tell user:
+   > 🎾 서브 완료. Returner한테 넘겼어.
+   > 상대 터미널에서 "내 차례" 라고 말하면 받을 거야.
 
-## Squash mode (headless)
+## Trigger D — "내 차례" (any input after prep, on receiver side)
+The agent picks up the baton if it's its turn.
 
-```bash
-rallish squash --preset solo-ralph  --task "fix the flaky test in foo/bar"
-rallish squash --preset pair-review --task "refactor session store"
-```
+1. Run `rallish rally status --session-id $SID`.
+2. If holder != my ROLE: tell user "아직 내 차례 아니야. 현재 홀더: <holder>." and stop.
+3. If holder == my ROLE: read the most recent history entry's note.
+4. Tell user "🎾 상대가 넘긴 메모: \"<note>\". 이대로 진행할까?" (give user a chance to redirect).
+5. Wait for user OK or revised instruction. Then do the work.
+6. Run `rallish rally done --session-id $SID --as <my ROLE> --note "<summary>"`.
+7. Tell user:
+   > 🎾 리턴 완료. 다시 상대 차례.
+   > 상대가 넘기면 또 "내 차례" 라고 말해.
 
-The broker spawns the configured adapters and drives them to budget
-exhaustion or `exit_when` match. Per-turn payloads land in
-`~/.rallish/sessions/<id>/log.jsonl`. No further input needed.
+## Trigger E — "끝" / "match over"
+Clean shutdown.
 
-## Rally mode (interactive)
+1. Tell user: "랠리 종료. 데몬은 살아있어 — 다음 세션도 같은 데몬 씀.
+   완전히 끄려면 `kill -TERM $(pgrep -f 'rallish daemon')` 직접 실행."
+2. Forget state.
 
-### 1. Create session
+## Error paths (handle silently when possible)
+- 409 "not your turn": rare, but if it happens, run rally status and report the
+  actual holder to the user.
+- daemon connection refused: run `rallish doctor`; if daemon not up, `rallish
+  daemon &` and retry.
+- SSE not used in this flow — the agent polls with `rally status` instead
+  (avoids long-running background processes).
 
-```bash
-SID=$(rallish rally new --participants alice,bob --task "OAuth2 PKCE")
-echo $SID                    # rly_1747382400000_a3f9
-```
-
-Names must match `^[a-zA-Z0-9_-]{1,16}$`. Two or more participants required.
-
-### 2. Each participant joins their own terminal
-
-```bash
-# Terminal A
-rallish rally join --session-id $SID --as alice
-
-# Terminal B
-rallish rally join --session-id $SID --as bob
-```
-
-The first joiner gets the first baton automatically. Joining is blocking —
-the process holds SSE open and prints a cue when it's that participant's
-turn:
-
-```
-🏓 your turn (turn 1, from (start)): (no note)
-   → work in your CLI (e.g. claude). When done, in any terminal:
-   →   rallish rally done --session-id rly_... --as alice --note "<summary>"
-```
-
-### 3. Brief the live agent
-
-The live coding CLI (claude/kimi/cursor) does NOT see the rally signal
-automatically. Tell it:
-
-> You are participant `<name>` in rally session `<SID>`. When the join
-> terminal prints `🏓 your turn`, do the work for this turn. When finished,
-> stop and print: `RALLY:DONE — <one-line summary>`. Do not continue past
-> that line — wait for the next turn.
-
-A typical system-prompt block in the operator's first message to each agent:
-
-```
-You're the PLANNER in rally <SID> with REVIEWER.
-- Output a concrete plan with file paths and diffs.
-- When complete, emit "RALLY:DONE — <summary>" and stop.
-- Conventions: small diffs, conventional commits, see AGENTS.md.
-```
-
-### 4. Pass the baton
-
-When the live agent finishes its turn, the operator runs:
-
-```bash
-rallish rally done --session-id $SID --as alice --note "plan v1: 3 endpoints"
-```
-
-Optional `--handoff-to bob` overrides default round-robin order. Output:
-`ok — baton passed to bob (turn 2)`. Bob's join terminal immediately prints
-its cue with alice's note as context.
-
-### 5. Status
-
-```bash
-rallish rally status --session-id $SID
-```
-
-Shows current holder, turn count, participant last-seen heartbeats, and
-handoff history.
-
-### 6. Shutdown
-
-```bash
-kill -TERM $(pgrep -f "rallish daemon")
-```
-
-Daemon broadcasts `data: {"closed":true}` to active SSE streams, transitions
-session to `interrupted`, removes `~/.rallish/{rallish.sock, socket, port}`
-within ~1s.
-
-## Conventions to teach the agent
-
-- **Don't loop forever.** Emit `RALLY:DONE` and stop. The operator (or you,
-  if shell access is granted) runs `rally done`.
-- **Read the previous note** before working. It's the previous participant's
-  summary of what they just finished.
-- **First turn's note is `(no note)`** — start from the task description in
-  `rallish rally status`.
-- **On 409** ("not your turn"): check `rally status` to see who actually
-  holds the baton.
-- **On disconnect** (SSE drops): re-run `rallish rally join --as <name>`.
-  The broker replays the current baton if it's your turn.
-
-## Anti-patterns
-
-| Don't | Why |
-|---|---|
-| Run `rally done` from a non-holder | 409; broker rejects (and logs it) |
-| Skip the `--note` flag for non-trivial turns | Next holder has no context |
-| Keep working past `RALLY:DONE` | Defeats turn boundary; broker can't help |
-| Edit `~/.rallish/sessions/<id>/log.jsonl` manually | It's append-only audit; tampering breaks resume |
-
-## Troubleshooting
-
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| `daemon not running` after `rally new` | First-run; broker auto-spawns next command | retry; `rallish doctor` confirms |
-| `🏓 your turn` never arrives | Other participant hasn't joined OR you're not the holder | `rally status` to see holder |
-| stderr `Error: not your turn (holder: bob)` | You POSTed done as wrong participant | retry as the actual holder |
-| Socket file leaked after crash | Daemon killed -9 instead of -TERM | `rm -f ~/.rallish/{rallish.sock,socket,port}` and re-launch |
+## Why polling, not SSE?
+The agent's lifecycle is per-message, not persistent. Background SSE would
+require process supervision that goes beyond what this skill should impose.
+`rally status` is cheap (one HTTP GET) and the user-driven turn cadence is
+already explicit, so polling on "내 차례" is the right level of automation.
 
 ## Reference
-
-- PRD: `docs/prd-rally-mode.md`
-- Runbook (verification walkthrough): `docs/runbook-rally-mode.md`
-- Code: `internal/broker/rally.go`, `internal/cli/rally.go`
-- Project conventions: `AGENTS.md`
-- Architecture: `DESIGN.md`
+- PRD: docs/prd-rally-mode.md
+- Runbook: docs/runbook-rally-mode.md
+- Code: internal/broker/rally.go, internal/cli/rally.go
+- Project conventions: AGENTS.md

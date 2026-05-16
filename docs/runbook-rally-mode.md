@@ -97,7 +97,7 @@ Alice is `participants[0]`, so joining immediately delivers the first baton.
 **Expected output in Terminal A (alice's join):**
 
 ```
-🏓 your turn (turn 1, from (start)): (no note)
+🎾 your turn (turn 1, from (start)): (no note)
    -> work in your CLI (e.g. claude). When done, in any terminal:
    ->   rallish rally done --session-id rly_1747382400000_a3f9 --as alice --note "<summary>"
 ```
@@ -127,7 +127,7 @@ ok — baton passed to bob (turn 2)
 Terminal B's blocked `rally join` now unblocks and prints:
 
 ```
-🏓 your turn (turn 2, from alice): draft v1
+🎾 your turn (turn 2, from alice): draft v1
    -> work in your CLI (e.g. claude). When done, in any terminal:
    ->   rallish rally done --session-id rly_1747382400000_a3f9 --as bob --note "<summary>"
 ```
