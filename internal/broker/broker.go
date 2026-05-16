@@ -57,6 +57,7 @@ func NewServer(store *session.Store, budgeter *budget.Budgeter) *Server {
 	s.mux.HandleFunc("GET /sessions/{id}/next", s.handleNextTurn)
 	s.mux.HandleFunc("POST /sessions/{id}/turn", s.handlePostTurn)
 	s.registerA2ARoutes()
+	s.registerRallyRoutes()
 	return s
 }
 
