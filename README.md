@@ -62,38 +62,34 @@ which claude      # any supported adapter binary on $PATH
 
 ## Install
 
-The fastest path has **two one-liners** — one for the skill, one for the
-binary. Skill content goes to `~/.claude/skills/`; binary goes on `$PATH`.
-
-### 1) Install the skill
+One command:
 
 ```bash
 npx skills add jazz1x/rallish
 ```
 
-Resolves via [skills.sh](https://www.skills.sh): drops
-`rallish-operator/SKILL.md` (+ `.ko.md`) into the agent-discoverable
-location. Any skill-aware coding CLI (Claude Code, Cursor, …) picks it up.
+That delivers the skill bundle (SKILL.md + bundled binary installer) to
+`~/.claude/skills/rallish-operator/`. Resolves via [skills.sh](https://www.skills.sh).
 
-### 2) Install the binary
+Open any project in Claude Code (or another skill-aware coding CLI) and say
+`랠리보낼 준비해` / `let's serve`. On first use the skill self-installs the
+`rallish` binary via the bundled platform-detecting script
+(`scripts/install-binary.sh` → fetches the latest GitHub Release into
+`/usr/local/bin` or `~/.local/bin`).
 
-| Method | Command | Best for |
-|---|---|---|
-| **Homebrew tap** (macOS) | `brew install jazz1x/rallish/rallish` | macOS users with brew |
-| **curl install script** (any Unix) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` | Linux + macOS, no toolchain |
-| **From source** (developers) | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` | Hacking on rallish itself |
-| **`go install`** (Go ≥1.25) | `go install github.com/jazz1x/rallish/cmd/rallish@latest` | Already in the Go ecosystem |
+<details>
+<summary><b>Power-user alternatives (skip the bundle)</b></summary>
 
-### 3) Verify
+| Method | Command |
+|---|---|
+| **Homebrew tap** (macOS) | `brew install jazz1x/rallish/rallish` |
+| **curl** (any Unix) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
+| **From source** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
+| **`go install`** | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
 
-```bash
-rallish bootstrap
-```
-
-Runs the skill install path defensively (idempotent), confirms the daemon is
-reachable, and prints next-step hints. After this point, opening **any**
-project in Claude Code and saying `랠리보낼 준비해` (or `let's serve`) starts
-a rally — you don't need to be in the rallish source tree.
+After the binary is on `$PATH`, `rallish bootstrap` (idempotent) installs the
+skill bundle and verifies the daemon.
+</details>
 
 ## Quickstart
 

@@ -51,38 +51,18 @@ This skill drives a live tennis-style rally between two coding-CLI sessions
 through the rallish broker. The user types three things; the agent does the
 rest.
 
-## Bootstrap (when the skill or the binary is missing)
+## Bootstrap (when the rallish binary is missing)
 
-If a coding-CLI agent sees the user's trigger but reports "skill not found",
-walk the user through (or run these yourself if shell access is granted):
-
-**1. Install the skill** (if `~/.claude/skills/rallish-operator/SKILL.md` is missing):
+The skill bundles a platform-detecting installer. If `command -v rallish`
+fails, run the bundled script:
 
 ```sh
-npx skills add jazz1x/rallish   # registry-style install via skills.sh
+sh ~/.claude/skills/rallish-operator/scripts/install-binary.sh
 ```
 
-**2. Install the binary** (if `command -v rallish` fails), in preference order:
-
-```sh
-# macOS via Homebrew tap (recommended)
-brew install jazz1x/rallish/rallish
-
-# Any Unix (no toolchain required)
-curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh | sh
-
-# Or from source (Go developers only)
-git clone https://github.com/jazz1x/rallish && cd rallish && make build
-```
-
-**3. Verify and reload:**
-
-```sh
-rallish bootstrap        # confirms skill + daemon
-```
-
-Then reload the coding-CLI session (or open a new chat) and re-issue the
-original trigger.
+That fetches the latest GitHub Release binary for the current OS/arch
+and installs it to `/usr/local/bin` (or `~/.local/bin` if unwritable).
+After it succeeds, re-run the trigger.
 
 ## Resolve the `rallish` binary first
 Before any rally command, pick the runnable path:

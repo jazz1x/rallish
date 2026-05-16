@@ -8,8 +8,13 @@ import (
 	"github.com/jazz1x/rallish/internal/skills"
 )
 
-// embeddedFiles lists file basenames expected to be installed.
-var embeddedFiles = []string{"SKILL.md", "SKILL.ko.md"}
+// embeddedFiles lists relative paths (from install target root) expected to be
+// installed. Must match the files in rallish-operator/ exactly.
+var embeddedFiles = []string{
+	"SKILL.md",
+	"SKILL.ko.md",
+	"scripts/install-binary.sh",
+}
 
 func TestInstall_EmptyDir(t *testing.T) {
 	t.Parallel()
@@ -57,9 +62,13 @@ func TestInstall_Idempotent(t *testing.T) {
 func TestInstall_OverwritesCorrupted(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	// Pre-populate with corrupted content.
-	for _, name := range embeddedFiles {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("corrupted"), 0o600); err != nil {
+	// Pre-populate with corrupted content using the same relative paths.
+	for _, rel := range embeddedFiles {
+		dest := filepath.Join(dir, rel)
+		if mkErr := os.MkdirAll(filepath.Dir(dest), 0o750); mkErr != nil { //nolint:gosec // test temp dir
+			t.Fatalf("setup mkdir: %v", mkErr)
+		}
+		if err := os.WriteFile(dest, []byte("corrupted"), 0o600); err != nil {
 			t.Fatalf("setup: %v", err)
 		}
 	}
@@ -96,5 +105,33 @@ func TestInstall_CreatesTargetDir(t *testing.T) {
 		if r.Action != "created" {
 			t.Errorf("expected created, got %q for %s", r.Action, r.Path)
 		}
+	}
+}
+
+func TestInstallBundlesScripts(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if _, err := skills.Install(dir); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	scriptPath := filepath.Join(dir, "scripts", "install-binary.sh")
+	info, err := os.Stat(scriptPath)
+	if err != nil {
+		t.Fatalf("scripts/install-binary.sh not found after install: %v", err)
+	}
+
+	// Verify executable bit is set.
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Errorf("scripts/install-binary.sh is not executable: mode=%v", info.Mode().Perm())
+	}
+
+	// Verify content is non-empty and contains expected marker.
+	data, readErr := os.ReadFile(scriptPath) //nolint:gosec // test temp path
+	if readErr != nil {
+		t.Fatalf("read install-binary.sh: %v", readErr)
+	}
+	if len(data) == 0 {
+		t.Fatal("install-binary.sh is empty")
 	}
 }
