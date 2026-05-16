@@ -32,7 +32,8 @@ func main() {
 			return doctor.Run(cmd.Context(), home)
 		}},
 		daemonCmd(shutdown, &isDaemon),
-		startCmd(),
+		squashCmd(),
+		cli.RallyCmd(),
 		cli.AddCmd(),
 	)
 
@@ -73,18 +74,18 @@ func daemonCmd(shutdown chan struct{}, isDaemon *bool) *cobra.Command {
 	}
 }
 
-func startCmd() *cobra.Command {
-	var opts cli.StartOptions
+func squashCmd() *cobra.Command {
+	var opts cli.SquashOptions
 	cmd := &cobra.Command{
-		Use:   "start",
-		Short: "Start a new rallish session",
+		Use:   "squash",
+		Short: "Run a headless squash session (solo-ralph, pair-review, …)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			home, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("get home dir: %w", err)
 			}
 			opts.HomeDir = home
-			return cli.RunStart(cmd.Context(), opts)
+			return cli.RunSquash(cmd.Context(), opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.PresetName, "preset", "solo-ralph", "Preset to use")

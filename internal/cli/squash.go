@@ -23,8 +23,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// StartOptions holds flags for the start command.
-type StartOptions struct {
+// SquashOptions holds flags for the squash command.
+type SquashOptions struct {
 	PresetName     string
 	Task           string
 	SessionID      string
@@ -33,8 +33,8 @@ type StartOptions struct {
 	Repo           string
 }
 
-// RunStart loads a preset, ensures the daemon is running, creates a session, and starts runners.
-func RunStart(ctx context.Context, opts StartOptions) error {
+// RunSquash loads a preset, ensures the daemon is running, creates a session, and starts runners.
+func RunSquash(ctx context.Context, opts SquashOptions) error {
 	repoRoot := opts.Repo
 	if repoRoot == "" {
 		var err error
