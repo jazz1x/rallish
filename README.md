@@ -82,7 +82,7 @@ Open any project in Claude Code (or another skill-aware coding CLI) and say
 
 | Method | Command |
 |---|---|
-| **Homebrew tap** (macOS) | `brew install jazz1x/rallish/rallish` |
+| **Homebrew tap** (macOS) | `brew install jazz1x/rallish/rallish` <br>or `brew tap jazz1x/rallish && brew install rallish` |
 | **curl** (any Unix) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
 | **From source** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
 | **`go install`** | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
