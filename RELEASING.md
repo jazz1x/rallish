@@ -24,12 +24,30 @@ Version numbers are Git tags. There is no `VERSION` file in the repo.
    make check
    ```
 
-2. **Decide the next version.**
-   - Bug fixes → bump patch (`v0.1.0` → `v0.1.1`)
-   - New features → bump minor (`v0.1.0` → `v0.2.0`)
-   - Breaking changes → bump major (`v0.1.0` → `v1.0.0`)
+2. **Bump version + tag + push** (one command):
 
-3. **Create and push a Git tag.**
+   ```bash
+   make release-patch    # 0.1.0 → 0.1.1   (bug fixes)
+   make release-minor    # 0.1.0 → 0.2.0   (new features)
+   make release-major    # 0.1.0 → 1.0.0   (breaking)
+
+   make release-dry-run  # preview without changing anything
+   ```
+
+   The helper (`scripts/release.sh`) refuses to run on a dirty tree, warns
+   if you're not on `main`, writes the new version to `VERSION`, propagates
+   it to README badges (`scripts/update-version.sh`), commits `release: vX.Y.Z`,
+   creates an annotated tag, and prompts before pushing.
+
+   For full control, the underlying script accepts an explicit version and
+   flags:
+   ```bash
+   scripts/release.sh 1.2.3                # explicit version
+   scripts/release.sh patch --no-push      # tag locally only
+   scripts/release.sh patch --yes          # skip the push prompt
+   ```
+
+3. **Or do it manually** (legacy path):
    ```bash
    git tag -a v0.1.0 -m "Release v0.1.0"
    git push origin v0.1.0

@@ -1,4 +1,4 @@
-.PHONY: build test check run lint tidy bench setup-hooks install-skill
+.PHONY: build test check run lint tidy bench setup-hooks install-skill release-patch release-minor release-major release-dry-run
 
 VERSION ?= $(shell cat VERSION 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -69,3 +69,17 @@ install-skill:
 
 update-version:
 	@bash scripts/update-version.sh
+
+# Release helpers — bump VERSION, tag, push. Triggers .github/workflows/release.yml.
+release-patch:
+	@bash scripts/release.sh patch
+
+release-minor:
+	@bash scripts/release.sh minor
+
+release-major:
+	@bash scripts/release.sh major
+
+# Preview what `make release-patch` would do without making changes.
+release-dry-run:
+	@bash scripts/release.sh patch --dry-run
