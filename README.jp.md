@@ -16,13 +16,14 @@
 
 | 機能 | 説明 |
 |------|------|
-| **ターン制実行** | 共有ブローカーを介してエージェントが交互に実行 |
+| **Squash（ヘッドレス）** | `rallish squash` でヘッドレスプリセットセッションを実行（`solo-ralph`、`pair-review`）; ブローカーがアダプターを自動スポーン |
+| **Rally（インタラクティブ）** | `rallish rally` で 2 つ以上の人間ターミナル間のライブバトン受け渡し; SSE による排他的ホルダー強制 |
 | **A2A プロトコル** | `/.well-known/agent.json`, JSON-RPC 2.0 タスク, SSE ストリーミング |
 | **トークン予算** | セッションごとのトークン、ターン数、時間の上限を強制 |
 | **スクラッチパッド** | 自動圧縮(compaction)が適用されたローリング共有スクラッチ |
 | **プリセット** | 役割、ルーティング、終了条件を定義した YAML テンプレート |
 | **Unix ソケット IPC** | CLI↔Daemon が `~/.rallish/rallish.sock`(`0600`) 経由。A2A 外部クライアントと Windows フォールバック用に TCP ループバックを保持 |
-| **自動デーモン** | `rallish start` がブローカー未起動時に自動スポーン。`rallish doctor` がソケット到達性を報告 |
+| **自動デーモン** | `rallish squash` がブローカー未起動時に自動スポーン。`rallish doctor` がソケット到達性を報告 |
 | **セキュリティ** | パストラバーサル防御、シークレットマスキング、最小限の環境変数許可リスト |
 
 ## アーキテクチャ
@@ -45,7 +46,7 @@
 └────────────┘   └──────────┘      └──────────────┘
 ```
 
-同じブローカーが両トランスポートを同時に提供します。CLI(`rallish start`, `rallish doctor`) は Unix ソケットを優先し、外部 A2A クライアントは TCP ループバックを使用します。
+同じブローカーが両トランスポートを同時に提供します。CLI(`rallish squash`, `rallish rally`, `rallish doctor`) は Unix ソケットを優先し、外部 A2A クライアントは TCP ループバックを使用します。
 
 ## 前提条件
 
@@ -93,8 +94,8 @@ go install github.com/jazz1x/rallish@latest
 # 同梱アダプター/プリセット一覧
 ./dist/rallish add --list
 
-# ターン制実行セッションを開始 (デーモン自動スポーン)
-./dist/rallish start \
+# ヘッドレスプリセットセッションを開始 (デーモン自動スポーン)
+./dist/rallish squash \
   --preset pair-review \
   --task "OAuth2 サポートを追加" \
   --repo ./my-project
@@ -109,7 +110,21 @@ budget: {max_turns: 3, max_tokens: 10000, deadline_minutes: 5}
 exit_when: [turns_exhausted]
 scratch: {max_kb: 16}
 EOF
-./dist/rallish start --preset fake-demo --task "smoke test" --repo /tmp
+./dist/rallish squash --preset fake-demo --task "smoke test" --repo /tmp
+
+# 2 ターミナルラリー (人間セッション間のライブバトン受け渡し)
+# ターミナル A — セッションを作成して alice として参加:
+SESSION=$(./dist/rallish rally new --participants alice,bob --task "ping pong")
+./dist/rallish rally join --session-id $SESSION --as alice   # ブロック; alice が最初のバトンを取得
+
+# ターミナル B — bob として参加 (alice がパスするまでブロック):
+./dist/rallish rally join --session-id $SESSION --as bob
+
+# どちらのターミナルからでも — バトンを渡す:
+./dist/rallish rally done --session-id $SESSION --as alice --note "draft v1"
+
+# セッション状態を確認:
+./dist/rallish rally status --session-id $SESSION
 
 # A2A discovery (外部クライアントは TCP ループバックを使用)
 curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent.json
@@ -124,13 +139,31 @@ curl -X POST http://127.0.0.1:$(cat ~/.rallish/port)/a2a \
 
 ## 使い方
 
-### 1. セッションを開始
+### 1. ヘッドレスセッションを開始
 
 ```bash
-rallish start --preset <name> --task "<説明>" --repo <パス>
+rallish squash --preset <name> --task "<説明>" --repo <パス>
 ```
 
 プリセットは `internal/preset/presets/` (同梱) または `~/.rallish/presets/` (カスタム) にあります。プリセットの作成方法は [docs/handbook.md](docs/handbook.md) を参照してください。
+
+### 1b. インタラクティブラリーセッションを開始
+
+```bash
+# セッションを作成; セッション ID を出力
+rallish rally new --participants <名前1>,<名前2> [--task "<説明>"]
+
+# 各参加者が自分のターミナルで参加 (バトン待機中にブロック)
+rallish rally join --session-id <id> --as <名前>
+
+# 完了時にバトンを渡す
+rallish rally done --session-id <id> --as <名前> [--note "<サマリ>"]
+
+# いつでも状態を確認
+rallish rally status --session-id <id>
+```
+
+完全な 2 ターミナルウォークスルーは [docs/runbook-rally-mode.md](docs/runbook-rally-mode.md) を参照してください。
 
 ### 2. A2A 連携
 
@@ -179,7 +212,7 @@ scratch:
 ### 6. デーモンのライフサイクル
 
 ```bash
-rallish daemon &                            # 明示起動 (任意 — start が自動スポーン)
+rallish daemon &                            # 明示起動 (任意 — squash が自動スポーン)
 ls ~/.rallish/                              # rallish.sock (0600), socket, port, sessions/
 kill -TERM $(pgrep -f "rallish daemon")     # graceful 終了で 3 ファイル全て削除
 ```

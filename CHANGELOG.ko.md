@@ -9,6 +9,8 @@
 
 ### 추가됨
 
+- 랠리 모드: 인터랙티브 CLI 세션 간 라이브 바톤 전달 (`rally new/join/done/status`); 세션 ID 접두사 `rly_`; 독점 홀더 강제; SSE 하트비트 + 비활성 감지.
+- Squash 이름 변경: `rallish start` → `rallish squash`; 하위 호환 별칭 없음.
 - CLI ↔ 데몬 기본 전송 채널로 Unix 도메인 소켓(`~/.rallish/rallish.sock`) 추가.
   TCP 루프백은 폴백 및 A2A 클라이언트용으로 유지. 데몬은 소켓 권한을 `0600`으로
   강제하고, CLI는 소켓 포인터 변조를 차단. Windows 빌드는 빌드태그 스텁을 통해

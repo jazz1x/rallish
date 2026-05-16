@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Rally mode: live baton-passing between interactive CLI sessions (`rally new/join/done/status`); session IDs prefixed `rly_`; exclusive holder enforcement; SSE heartbeat + stale detection.
+- Squash umbrella rename: `rallish start` → `rallish squash`; no backward-compat alias.
 - Unix domain socket IPC at `~/.rallish/rallish.sock` as the primary CLI↔Daemon
   transport. TCP loopback is retained for fallback and A2A clients. Daemon
   enforces `0600` socket permissions; CLI guards against socket-pointer

@@ -21,7 +21,7 @@ All commits must pass `lefthook run pre-commit` (go-fmt, go-vet, go-test -race, 
 | `internal/broker/` | HTTP broker, A2A handlers, SSE |
 | `internal/budget/` | Token / turn / deadline budgets |
 | `internal/buildinfo/` | Build metadata (version string) |
-| `internal/cli/` | Cobra commands (start, doctor) |
+| `internal/cli/` | Cobra commands (squash, rally, doctor, daemon, add) |
 | `internal/doctor/` | Adapter + daemon health checks |
 | `internal/exit/` | Exit condition evaluators |
 | `internal/ipc/` | Unix domain socket transport (CLI↔Daemon) |

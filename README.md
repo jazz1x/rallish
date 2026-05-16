@@ -16,13 +16,14 @@ Everything runs locally. No cloud broker, no external coordination service. The 
 
 | Feature | Description |
 |---------|-------------|
-| **Turn-taking** | Agents alternate turns via a shared broker; no direct coupling |
+| **Squash (headless)** | `rallish squash` runs headless preset sessions (`solo-ralph`, `pair-review`); broker spawns adapters automatically |
+| **Rally (interactive)** | `rallish rally` provides live baton-passing between two or more human terminals; exclusive holder enforcement via SSE |
 | **A2A Protocol** | `/.well-known/agent.json`, JSON-RPC 2.0 tasks, SSE streaming |
 | **Token Budgets** | Hard caps on tokens, turns, and wall-clock time per session |
 | **Scratchpad** | Rolling shared scratch with automatic compaction |
 | **Presets** | YAML templates for roles, routing, and exit conditions |
 | **Unix socket IPC** | CLI↔Daemon over `~/.rallish/rallish.sock` (mode `0600`); TCP loopback retained for A2A clients and Windows fallback |
-| **Auto-daemon** | `rallish start` spawns the broker if none is running; `rallish doctor` reports socket reachability |
+| **Auto-daemon** | `rallish squash` spawns the broker if none is running; `rallish doctor` reports socket reachability |
 | **Security** | Path traversal guards, secret redaction, minimal env allowlists |
 
 ## Architecture
@@ -45,7 +46,7 @@ Everything runs locally. No cloud broker, no external coordination service. The 
 └────────────┘   └──────────┘      └──────────────┘
 ```
 
-Same broker serves both transports concurrently. The CLI (`rallish start`, `rallish doctor`) prefers the Unix socket; external A2A clients use TCP loopback.
+Same broker serves both transports concurrently. The CLI (`rallish squash`, `rallish rally`, `rallish doctor`) prefers the Unix socket; external A2A clients use TCP loopback.
 
 ## Prerequisites
 
@@ -93,8 +94,8 @@ go install github.com/jazz1x/rallish@latest
 # List built-in adapters and presets
 ./dist/rallish add --list
 
-# Start a turn-taking session (auto-spawns the daemon)
-./dist/rallish start \
+# Headless preset session (auto-spawns the daemon)
+./dist/rallish squash \
   --preset pair-review \
   --task "Add OAuth2 support" \
   --repo ./my-project
@@ -109,7 +110,21 @@ budget: {max_turns: 3, max_tokens: 10000, deadline_minutes: 5}
 exit_when: [turns_exhausted]
 scratch: {max_kb: 16}
 EOF
-./dist/rallish start --preset fake-demo --task "smoke test" --repo /tmp
+./dist/rallish squash --preset fake-demo --task "smoke test" --repo /tmp
+
+# Two-terminal rally (live baton-passing between human sessions)
+# Terminal A — create session and join as alice:
+SESSION=$(./dist/rallish rally new --participants alice,bob --task "ping pong")
+./dist/rallish rally join --session-id $SESSION --as alice   # blocks; alice gets first baton
+
+# Terminal B — join as bob (blocks until alice passes):
+./dist/rallish rally join --session-id $SESSION --as bob
+
+# Any terminal — pass the baton:
+./dist/rallish rally done --session-id $SESSION --as alice --note "draft v1"
+
+# Check session state:
+./dist/rallish rally status --session-id $SESSION
 
 # A2A discovery (external clients use TCP loopback)
 curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent.json
@@ -124,13 +139,31 @@ Per-turn requests and responses land in `~/.rallish/sessions/<id>/log.jsonl`.
 
 ## Usage
 
-### 1. Start a session
+### 1. Start a headless session
 
 ```bash
-rallish start --preset <name> --task "<description>" --repo <path>
+rallish squash --preset <name> --task "<description>" --repo <path>
 ```
 
 Presets live in `internal/preset/presets/` (built-ins) or `~/.rallish/presets/` (custom). See [docs/handbook.md](docs/handbook.md) for preset authoring.
+
+### 1b. Start an interactive rally session
+
+```bash
+# Create session; prints session ID
+rallish rally new --participants <name1>,<name2> [--task "<description>"]
+
+# Each participant joins in their own terminal (blocks waiting for the baton)
+rallish rally join --session-id <id> --as <name>
+
+# Pass the baton when done
+rallish rally done --session-id <id> --as <name> [--note "<summary>"]
+
+# Check status at any time
+rallish rally status --session-id <id>
+```
+
+See [docs/runbook-rally-mode.md](docs/runbook-rally-mode.md) for the full two-terminal walkthrough.
 
 ### 2. A2A integration
 
@@ -179,7 +212,7 @@ scratch:
 ### 6. Daemon lifecycle
 
 ```bash
-rallish daemon &                            # explicit start (optional — start auto-spawns)
+rallish daemon &                            # explicit start (optional — squash auto-spawns)
 ls ~/.rallish/                              # rallish.sock (0600), socket, port, sessions/
 kill -TERM $(pgrep -f "rallish daemon")     # graceful shutdown removes all three files
 ```

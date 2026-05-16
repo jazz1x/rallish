@@ -16,13 +16,14 @@
 
 | 기능 | 설명 |
 |------|------|
-| **순차 실행** | 공유 브로커를 통해 에이전트가 턴을 번갈아가며 실행 |
+| **Squash (헤드리스)** | `rallish squash`로 헤드리스 프리셋 세션 실행(`solo-ralph`, `pair-review`); 브로커가 어댑터를 자동으로 스폰 |
+| **Rally (인터랙티브)** | `rallish rally`로 두 개 이상의 인간 터미널 간 라이브 바톤 전달; SSE를 통한 독점 홀더 강제 |
 | **A2A 프로토콜** | `/.well-known/agent.json`, JSON-RPC 2.0 태스크, SSE 스트리밍 |
 | **토큰 예산** | 세션당 토큰, 턴 수, 시간의 상한선을 강제 |
 | **스크래치패드** | 자동 압축(compaction)이 적용된 롤링 공유 스크래치 |
 | **프리셋** | 역할, 라우팅, 종료 조건을 정의한 YAML 템플릿 |
 | **Unix 소켓 IPC** | CLI↔Daemon이 `~/.rallish/rallish.sock`(`0600`) 경유. A2A 외부 클라이언트와 Windows 폴백용으로 TCP 루프백 유지 |
-| **자동 데몬** | `rallish start`가 브로커 미실행 시 자동 스폰. `rallish doctor`가 소켓 도달성 보고 |
+| **자동 데몬** | `rallish squash`가 브로커 미실행 시 자동 스폰. `rallish doctor`가 소켓 도달성 보고 |
 | **보안** | 경로 탐색 방어, 비밀 정보 마스킹, 최소한의 환경 변수 허용 목록 |
 
 ## 아키텍처
@@ -45,7 +46,7 @@
 └────────────┘   └──────────┘      └──────────────┘
 ```
 
-같은 브로커가 두 전송 채널을 동시에 서비스합니다. CLI(`rallish start`, `rallish doctor`)는 Unix 소켓을 우선 사용하고, 외부 A2A 클라이언트는 TCP 루프백을 사용합니다.
+같은 브로커가 두 전송 채널을 동시에 서비스합니다. CLI(`rallish squash`, `rallish rally`, `rallish doctor`)는 Unix 소켓을 우선 사용하고, 외부 A2A 클라이언트는 TCP 루프백을 사용합니다.
 
 ## 사전 요구사항
 
@@ -93,8 +94,8 @@ go install github.com/jazz1x/rallish@latest
 # 내장 어댑터/프리셋 목록
 ./dist/rallish add --list
 
-# 순차 실행 세션 시작 (데몬 자동 스폰)
-./dist/rallish start \
+# 헤드리스 프리셋 세션 시작 (데몬 자동 스폰)
+./dist/rallish squash \
   --preset pair-review \
   --task "OAuth2 지원 추가" \
   --repo ./my-project
@@ -109,7 +110,21 @@ budget: {max_turns: 3, max_tokens: 10000, deadline_minutes: 5}
 exit_when: [turns_exhausted]
 scratch: {max_kb: 16}
 EOF
-./dist/rallish start --preset fake-demo --task "smoke test" --repo /tmp
+./dist/rallish squash --preset fake-demo --task "smoke test" --repo /tmp
+
+# 두 터미널 랠리 (인간 세션 간 라이브 바톤 전달)
+# 터미널 A — 세션 생성 후 alice로 참가:
+SESSION=$(./dist/rallish rally new --participants alice,bob --task "ping pong")
+./dist/rallish rally join --session-id $SESSION --as alice   # 블록; alice가 첫 번째 바톤 획득
+
+# 터미널 B — bob으로 참가 (alice가 패스할 때까지 블록):
+./dist/rallish rally join --session-id $SESSION --as bob
+
+# 어느 터미널에서나 — 바톤 전달:
+./dist/rallish rally done --session-id $SESSION --as alice --note "draft v1"
+
+# 세션 상태 확인:
+./dist/rallish rally status --session-id $SESSION
 
 # A2A discovery (외부 클라이언트는 TCP 루프백 사용)
 curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent.json
@@ -124,13 +139,31 @@ curl -X POST http://127.0.0.1:$(cat ~/.rallish/port)/a2a \
 
 ## 사용법
 
-### 1. 세션 시작
+### 1. 헤드리스 세션 시작
 
 ```bash
-rallish start --preset <name> --task "<설명>" --repo <경로>
+rallish squash --preset <name> --task "<설명>" --repo <경로>
 ```
 
 프리셋은 `internal/preset/presets/` (내장) 또는 `~/.rallish/presets/` (사용자 정의)에 있습니다. 프리셋 작성법은 [docs/handbook.md](docs/handbook.md)를 참조하세요.
+
+### 1b. 인터랙티브 랠리 세션 시작
+
+```bash
+# 세션 생성; 세션 ID 출력
+rallish rally new --participants <이름1>,<이름2> [--task "<설명>"]
+
+# 각 참가자가 자신의 터미널에서 참가 (바톤 대기 중 블록)
+rallish rally join --session-id <id> --as <이름>
+
+# 완료 시 바톤 전달
+rallish rally done --session-id <id> --as <이름> [--note "<요약>"]
+
+# 언제든지 상태 확인
+rallish rally status --session-id <id>
+```
+
+전체 두 터미널 연습은 [docs/runbook-rally-mode.md](docs/runbook-rally-mode.md)를 참조하세요.
 
 ### 2. A2A 연동
 
@@ -179,7 +212,7 @@ scratch:
 ### 6. 데몬 라이프사이클
 
 ```bash
-rallish daemon &                            # 명시적 기동 (선택 — start가 자동 스폰)
+rallish daemon &                            # 명시적 기동 (선택 — squash가 자동 스폰)
 ls ~/.rallish/                              # rallish.sock (0600), socket, port, sessions/
 kill -TERM $(pgrep -f "rallish daemon")     # graceful 종료 시 세 파일 모두 정리
 ```

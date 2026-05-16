@@ -262,13 +262,15 @@ func (s *Server) handleRallyBaton(w http.ResponseWriter, r *http.Request) {
 		evt := contract.BatonEvent{TurnN: sess.turnN, From: ""}
 		immediateEvent = &evt
 	} else if sess.status == contract.RallyTurnState(as) {
-		// Session already in this participant's turn (reconnect scenario).
-		// Derive "from" from the last history entry, not sess.holder (which is already `as`).
-		var from string
+		// Session already in this participant's turn (reconnect or late-join).
+		// Derive "from"/"note" from the last history entry; sess.holder is
+		// already `as` so we cannot read it there.
+		var from, note string
 		if n := len(sess.history); n > 0 {
 			from = sess.history[n-1].From
+			note = sess.history[n-1].Note
 		}
-		evt := contract.BatonEvent{TurnN: sess.turnN, From: from}
+		evt := contract.BatonEvent{TurnN: sess.turnN, From: from, Note: note}
 		immediateEvent = &evt
 	}
 	rallies.mu.Unlock()

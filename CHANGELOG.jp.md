@@ -9,6 +9,8 @@
 
 ### 追加
 
+- ラリーモード: インタラクティブ CLI セッション間のライブバトン受け渡し (`rally new/join/done/status`); セッション ID プレフィックス `rly_`; 排他的ホルダー強制; SSE ハートビート + 非活性検出。
+- Squash 名称変更: `rallish start` → `rallish squash`; 後方互換エイリアスなし。
 - CLI ↔ デーモンの主要トランスポートとして Unix ドメインソケット
   (`~/.rallish/rallish.sock`) を追加。TCP ループバックはフォールバックおよび
   A2A クライアント用に保持。デーモンはソケット権限を `0600` に強制し、CLI は
