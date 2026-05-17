@@ -102,7 +102,10 @@ func checkDaemon(ctx context.Context, logger *slog.Logger, homeDir string) {
 			logger.Warn("daemon socket pointer invalid", "pointer", pointer, "path", socketPath, "error", cerr)
 			break
 		}
-		info, serr := os.Stat(safePath)
+		// gosec G703 taint analysis cannot recognise safepath.UnderRoot +
+		// safepath.Clean as sanitisers above; the path is constrained to
+		// ~/.rallish/ by that guard.
+		info, serr := os.Stat(safePath) //nolint:gosec // path validated by safepath above
 		if serr != nil {
 			logger.Warn("daemon socket pointer present but socket file missing", "pointer", pointer, "path", safePath, "error", serr)
 			break

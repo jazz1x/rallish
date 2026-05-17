@@ -80,8 +80,20 @@ This repo uses **golangci-lint v2**. The following rules are non-obvious and cos
 
 Current working combination (validated):
 - Action: `golangci/golangci-lint-action@v7`
-- Version: `latest` (tracks newest v2)
+- Version: `latest` (tracks newest v2, currently `v2.12.2`)
 - Install mode: `binary` (default)
+
+**Local toolchain at `.toolchain/bin/golangci-lint` should match CI** — keep
+it at v2.12.2 or newer. Older v2 minors (e.g. v2.1.6) do not have the
+`gosec` G703 (path-traversal taint) rule, so a clean local lint can still
+fail the CI pipeline. To upgrade:
+
+```bash
+curl -fsSL -o /tmp/gcl.tar.gz \
+  "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz"
+tar -xzf /tmp/gcl.tar.gz -C /tmp
+mv /tmp/golangci-lint-2.12.2-*/golangci-lint .toolchain/bin/golangci-lint
+```
 
 ## Commit Messages
 
