@@ -70,23 +70,30 @@ signs:
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
-brews:
-  - name: rallish
-    repository:
-      owner: jazz1x
-      name: homebrew-rallish
-      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
-    folder: Formula
-    goarm: ""
-    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
-    homepage: https://github.com/jazz1x/rallish
-    description: A local broker for multi-agent turn-taking
-    license: MIT
-    test: |
-      system "#{bin}/rallish version"
-    dependencies:
-      - name: go
-        type: optional
+# Homebrew tap publish is temporarily disabled — the `jazz1x/homebrew-rallish`
+# tap repo + TAP_GITHUB_TOKEN secret have not been provisioned yet. v0.1.0
+# attempted release failed at this step. Re-enable in a follow-up once the
+# tap repo and PAT are in place; until then users install via:
+#   - curl install.sh                   (fetches GH Release binary)
+#   - npx skills add jazz1x/rallish     (skill bundle, agent self-installs binary)
+#   - git clone + make build            (developers)
+# brews:
+#   - name: rallish
+#     repository:
+#       owner: jazz1x
+#       name: homebrew-rallish
+#       token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+#     folder: Formula
+#     goarm: ""
+#     commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+#     homepage: https://github.com/jazz1x/rallish
+#     description: A local broker for multi-agent turn-taking
+#     license: MIT
+#     test: |
+#       system "#{bin}/rallish version"
+#     dependencies:
+#       - name: go
+#         type: optional
 
 changelog:
   use: github
