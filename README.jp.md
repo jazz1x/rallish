@@ -83,7 +83,7 @@ npx skills add jazz1x/rallish
 
 | 方法 | コマンド |
 |---|---|
-| **Homebrew tap** (macOS) | `brew install jazz1x/rallish/rallish` <br>または `brew tap jazz1x/rallish && brew install rallish` |
+| **Homebrew tap** (macOS) | _準備中_ — `jazz1x/homebrew-rallish` tap リポと `TAP_GITHUB_TOKEN` シークレットを設定後に `brew install jazz1x/rallish/rallish` が動作予定 |
 | **curl** (Unix 全般) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
 | **ソースビルド** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
 | **`go install`** | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |

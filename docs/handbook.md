@@ -8,83 +8,147 @@
 2. [Configuration](#configuration)
 3. [Presets](#presets)
 4. [A2A Integration](#a2a-integration)
-5. [Security](#security)
-6. [Troubleshooting](#troubleshooting)
+5. [Rally vs Squash](#rally-vs-squash)
+6. [Security](#security)
+7. [Troubleshooting](#troubleshooting)
 
 ## Installation
 
-### From Source
+One command via [skills.sh](https://www.skills.sh):
 
 ```bash
+npx skills add jazz1x/rallish
+```
+
+That installs the `rallish-operator` skill (SKILL.md + bundled
+`scripts/install-binary.sh`). Open any project in Claude Code (or
+another skill-aware coding CLI) and say `랠리보낼 준비해` /
+`let's serve`; on first trigger the agent self-installs the `rallish`
+binary via the bundled script.
+
+<details>
+<summary><b>Alternative install paths</b></summary>
+
+```bash
+# Curl (no toolchain required, fetches the latest GitHub Release tarball)
+curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh | sh
+
+# From source (Go 1.25+)
 git clone https://github.com/jazz1x/rallish.git
 cd rallish
 make build
-sudo cp dist/rallish /usr/local/bin/
+sudo install dist/rallish /usr/local/bin/rallish
+
+# go install
+go install github.com/jazz1x/rallish/cmd/rallish@latest
+
+# Homebrew tap — coming soon (needs jazz1x/homebrew-rallish + TAP_GITHUB_TOKEN)
+# brew install jazz1x/rallish/rallish
 ```
 
-### From Homebrew (after first release)
+</details>
+
+### Bootstrap
+
+After the binary is on `$PATH`:
 
 ```bash
-brew tap jazz1x/rallish
-brew install rallish
+rallish bootstrap
 ```
+
+Idempotent. Materializes the skill at `~/.claude/skills/rallish-operator/`
+(if not already there) and verifies the daemon is reachable.
 
 ### Prerequisites
 
-- Go 1.25+
-- `claude` or `kimi` CLI with a valid API key
+- macOS or Linux (Windows uses a TCP-fallback build; some IPC features
+  are no-ops on Windows).
+- `claude` or `kimi` CLI on `$PATH` with a valid API key, for squash
+  sessions. (Rally mode only routes between user-driven sessions, so it
+  doesn't strictly need adapters in `$PATH`.)
 
 ## Configuration
 
 rallish stores runtime state in `~/.rallish/`:
 
 | File / Dir | Purpose |
-|------------|---------|
-| `port` | Auto-detected free port |
-| `sessions/` | Session JSON dumps |
-| `presets/` | Custom preset overrides |
+|---|---|
+| `rallish.sock` | Unix domain socket; mode `0600`; primary CLI↔Daemon transport |
+| `socket` | Plain-text pointer file holding the socket path (`~/.rallish/rallish.sock`) |
+| `port` | TCP loopback port for A2A clients and Windows fallback |
+| `sessions/<id>/log.jsonl` | Append-only per-turn req/resp audit log |
+| `sessions/<id>/scratch/` | Rolling scratchpad (auto-compacted when `max_kb` exceeded) |
+| `presets/*.yaml` | User-supplied preset overrides (built-ins live in `internal/preset/presets/`) |
 
-Environment variables:
+The daemon removes `rallish.sock`, `socket`, and `port` on SIGTERM. If
+it was killed `-9`, run `rm -f ~/.rallish/{rallish.sock,socket,port}`
+before relaunching to clear the stale files.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `RALLISH_PORT` | auto | Broker HTTP port |
-| `RALLISH_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+### Skill discovery
+
+`~/.claude/skills/rallish-operator/` (installed by `rallish bootstrap`
+or `npx skills add jazz1x/rallish`) contains:
+
+```
+SKILL.md
+SKILL.ko.md
+scripts/install-binary.sh
+```
+
+Any skill-aware coding CLI scans this path on session start.
 
 ## Presets
 
-Presets are YAML files that define:
+Built-in presets live at `internal/preset/presets/` and are embedded
+into the binary. Custom presets go at `~/.rallish/presets/<name>.yaml`.
 
-- `roles`: name → adapter mapping
-- `routing`: who runs after whom
-- `exit`: conditions for stopping a session
-
-Example:
+Schema (matches the loader at `internal/preset/preset.go`):
 
 ```yaml
 name: pair-review
+description: Planner → executor → reviewer rotation with budget gates.
 roles:
-  planner:
-    adapter: claude
-    model: claude-3-5-sonnet-20241022
-  executor:
-    adapter: claude
-    model: claude-3-5-sonnet-20241022
-  reviewer:
-    adapter: kimi
-    model: kimi-moonshot-v1-32k
-routing:
-  - planner
-  - executor
-  - reviewer
-exit:
-  maxTurns: 10
-  deadlineMinutes: 30
+  - id: planner
+    runtime: claude
+    model: opus
+  - id: executor
+    runtime: kimi
+    model: kimi-k2
+  - id: reviewer
+    runtime: claude
+    model: sonnet
+routing: handoff_then_round_robin    # or round_robin
+budget:
+  max_turns: 20
+  max_tokens: 400000
+  deadline_minutes: 60
+exit_when:
+  - tests_pass
+  - reviewer_approved
+  - turns_exhausted
+scratch:
+  max_kb: 64
+  summarize_with: claude-haiku
 ```
+
+Field reference:
+
+| Field | Required | Notes |
+|---|---|---|
+| `name` | ✓ | Filename stem must match |
+| `description` | — | One-line summary; appears in `rallish add --list` |
+| `roles` | ✓ | List of `{id, runtime, model}` |
+| `routing` | ✓ | `round_robin` or `handoff_then_round_robin` |
+| `budget.max_turns` | ✓ | Hard cap on turn count |
+| `budget.max_tokens` | ✓ | Hard cap on cumulative tokens (broker enforces) |
+| `budget.deadline_minutes` | ✓ | Wall-clock cap from session creation |
+| `exit_when` | ✓ | List of exit predicates (see `internal/exit/`) |
+| `scratch.max_kb` | ✓ | Rolling scratch budget; triggers auto-compaction |
+| `scratch.summarize_with` | — | Adapter+model used for compaction summaries |
 
 ## A2A Integration
 
-rallish exposes two A2A endpoints:
+rallish exposes:
 
 - `GET /.well-known/agent.json` — Agent Card
 - `POST /a2a` — JSON-RPC 2.0 task methods
@@ -92,26 +156,57 @@ rallish exposes two A2A endpoints:
 Supported methods:
 
 | Method | Description |
-|--------|-------------|
+|---|---|
 | `tasks/send` | Send a message, return final task state |
 | `tasks/sendSubscribe` | Send a message, stream SSE updates |
 | `tasks/get` | Get current task state by ID |
 | `tasks/cancel` | Cancel a running task |
 
-See [docs/a2a-compatibility.md](a2a-compatibility.md) for the full mapping.
+A2A clients reach the broker via TCP loopback at the port written to
+`~/.rallish/port`. The Unix socket is reserved for the rallish CLI
+itself; external A2A clients use TCP.
+
+See [docs/a2a-compatibility.md](a2a-compatibility.md) for the field-by-field
+JSON-RPC mapping.
+
+## Rally vs Squash
+
+| Mode | When to use | Command |
+|---|---|---|
+| **squash** | Headless, agent-driven — let rallish spawn adapters and drive a preset to completion | `rallish squash --preset solo-ralph --task "fix the flaky test"` |
+| **rally** | Two human-launched CLI sessions take turns; rallish only carries the baton | The skill drives this. Say `랠리보낼 준비해` in one terminal, `랠리받을 준비해 <SID>` in another. |
+
+See [docs/runbook-rally-mode.md](runbook-rally-mode.md) for a full
+two-terminal walkthrough.
 
 ## Security
 
-- Broker binds to `127.0.0.1` only.
-- No auth layer in v0; use a reverse proxy or local firewall for shared machines.
+- Daemon binds Unix socket at `~/.rallish/rallish.sock` (mode `0600`)
+  and TCP at `127.0.0.1:<port>`. Neither is exposed beyond the local
+  machine.
+- No auth layer in v0.x. On shared machines, use OS-level user
+  isolation or a reverse proxy.
+- Socket-pointer file (`~/.rallish/socket`) is validated via
+  `internal/safepath.UnderRoot` before any FS touch, so a tampered
+  pointer cannot redirect to arbitrary paths.
+- `--repo` paths flow through `internal/safepath.Clean` and an explicit
+  `os.Stat` directory check before reaching the broker.
 - Preset files are validated for path traversal before loading.
-- Secrets in env vars are redacted from logs.
+- `forbidigo` lint rules ban `os.Environ()` and `exec.Command("sh"…)`
+  in library code (see DESIGN.md §14).
+- `govulncheck` runs on every push/PR.
+- Release artifacts carry SBOMs (SPDX-JSON, via syft) and cosign
+  keyless signatures.
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `bind: address already in use` | Another rallish instance running | `killall rallish` or set `RALLISH_PORT` |
-| `adapter not found: claude` | CLI binary not in `$PATH` | Install `claude` CLI and ensure it is on `$PATH` |
-| SSE stream hangs | All agents waiting for input | Check `doctor` output for API key issues |
-| Budget exceeded early | Token count drift | Verify `model` matches actual model in preset |
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `daemon not running` from `rallish doctor` | First run | The next CLI command auto-spawns the daemon. Or `rallish daemon &` explicitly. |
+| `🎾 your turn` cue never arrives in rally | Other participant hasn't joined, or you're not the current holder | `rallish rally status --session-id <id>` to see the current holder. |
+| `not your turn (holder: <name>)` on `rally done` | Stale state or wrong `--as` | Confirm with `rally status`; retry with the correct holder name. |
+| Stale socket files after crash | Daemon killed `-9` (not `-TERM`) | `rm -f ~/.rallish/{rallish.sock,socket,port}` then relaunch. |
+| `bind: address already in use` | Another rallish daemon running | `pkill -TERM -f "rallish daemon"` |
+| `adapter not found: claude` | CLI binary not on `$PATH` | Install the `claude` CLI and ensure `which claude` succeeds. |
+| Budget exceeded early | Token-count drift between adapter & broker | Verify `model:` in your preset matches the model the adapter actually invokes. |
+| `Error: Skill not found: rallish-operator` in Claude Code | Skill bundle not installed globally | `npx skills add jazz1x/rallish` or `rallish skill install` |
