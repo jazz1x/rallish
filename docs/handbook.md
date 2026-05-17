@@ -179,6 +179,26 @@ JSON-RPC mapping.
 See [docs/runbook-rally-mode.md](runbook-rally-mode.md) for a full
 two-terminal walkthrough.
 
+### Rally patterns
+
+Rally sessions can adopt one of three behavioural patterns layered on
+top of the baton primitive:
+
+- **cycle** — planner ↔ executor; structured slice-by-slice work with
+  `[plan]` / `[result]` / `[review]` note conventions.
+- **discuss** — peer ↔ peer; design debate that converges on mutual
+  `[agree]`.
+- **help** — owner ↔ helper; short asymmetric exchange when the owner
+  is stuck. Helper refuses to take more than ~3 consecutive `[hint]`
+  turns without a `[try]` from the owner.
+
+The pattern is selected at server-prep time by appending a cue to the
+trigger (e.g. `랠리보낼 준비해 — 사이클로 가자`). See
+[docs/runbook-rally-mode.md#rally-patterns](runbook-rally-mode.md#rally-patterns)
+for full walkthroughs and
+[docs/prd-rally-patterns.md](prd-rally-patterns.md) for the design
+rationale.
+
 ## Security
 
 - Daemon binds Unix socket at `~/.rallish/rallish.sock` (mode `0600`)

@@ -291,9 +291,186 @@ make check
 
 ---
 
+## Rally Patterns
+
+The `rallish-operator` skill (v0.2.0) layers three behavioural patterns on top
+of the baton primitive. Pattern is selected at server-prep time; no broker or
+CLI changes are required — the pattern is encoded in the `--task` field and
+read back by the returner from `rally status`.
+
+### Pattern: cycle (plan / execute / review)
+
+**When to use:** delegating a sliced task across two coding-CLI sessions.
+Planner owns the roadmap; executor owns the implementation.
+
+**Terminal A (server) — trigger:**
+
+```
+랠리보낼 준비해 — 사이클로 가자
+```
+
+The agent detects `사이클로 가자`, sets `PATTERN=cycle`, prompts:
+
+```
+서브할 작업 뭐야?
+> OAuth2 PKCE 도입
+```
+
+Then runs:
+
+```bash
+SID=$(rallish rally new --participants server,returner \
+      --task "[pattern:cycle] OAuth2 PKCE 도입")
+```
+
+Prints:
+
+```
+🎾 Server 준비 완료. Session ID: rly_1747382400000_a3f9
+다른 터미널에서 "랠리받을 준비해 rly_1747382400000_a3f9" 라고 말해줘.
+받는 쪽 준비되면 여기에 "시작" 이라고 해.
+```
+
+**Terminal B (returner):**
+
+```
+랠리받을 준비해 rly_1747382400000_a3f9
+```
+
+Agent runs `rally status`, parses `[pattern:cycle]` from the task field, sets
+`PATTERN=cycle`, frames itself as **executor**. Responds:
+
+```
+Returner 준비 완료. 서버가 서브할 때까지 대기 중.
+서버가 넘겼다고 알려주면 그냥 "내 차례" 라고 말해.
+```
+
+**Four-turn walkthrough:**
+
+| Turn | Side | Note passed via `rally done` |
+|------|------|------------------------------|
+| 1 | server (planner) | `[plan] step 1: add OAuth2 PKCE client config` |
+| 2 | returner (executor) | `[result] diff: cmd/auth/oauth.go +42 / tests: pass` |
+| 3 | server (planner) | `[review] approved. [plan] step 2: wire flag in CLI` |
+| 4 | returner (executor) | `[result] diff: internal/cli/auth.go +28 / tests: pass` |
+
+Server sends one more turn:
+
+```
+[review] approved. all slices done.
+```
+
+Session ends when the user says `끝` or after the final `[review] approved`.
+
+---
+
+### Pattern: discuss (multi-perspective)
+
+**When to use:** design debates or architecture decisions where two viewpoints
+must converge on a shared conclusion.
+
+**Terminal A (server) — trigger:**
+
+```
+랠리보낼 준비해 — 논의 랠리
+```
+
+Agent sets `PATTERN=discuss`, prompts for the topic:
+
+```
+논의 주제가 뭐야?
+> SQLite vs Postgres for v2
+```
+
+Then runs:
+
+```bash
+SID=$(rallish rally new --participants server,returner \
+      --task "[pattern:discuss] SQLite vs Postgres for v2")
+```
+
+Both sides are framed as **peer** (no hierarchy). Note prefixes:
+`[opinion]`, `[question]`, `[counter]`, `[agree]`.
+
+**Five-turn walkthrough:**
+
+| Turn | Side | Note |
+|------|------|------|
+| 1 | server (peer1) | `[opinion] migrate to Postgres; SQLite locks under write contention` |
+| 2 | returner (peer2) | `[counter] WAL mode handles it; switching costs us 2 weeks` |
+| 3 | server (peer1) | `[question] target wQPS where WAL still holds?` |
+| 4 | returner (peer2) | `[opinion] our load peaks ~50 wQPS; WAL fine to 1000+` |
+| 5 | server (peer1) | `[agree] stay on SQLite + WAL; revisit if wQPS > 500` |
+
+Returner responds:
+
+```
+[agree] same
+```
+
+Both sides emitting `[agree]` within the last two turns signals convergence;
+the session ends.
+
+---
+
+### Pattern: help (stuck-help)
+
+**When to use:** the owner is blocked on a sub-problem and wants one or two
+rounds of focused input from a helper before resuming solo work.
+
+**Terminal A (owner) — trigger:**
+
+```
+랠리보낼 준비해 — 막혔어 도와줘
+```
+
+Agent sets `PATTERN=help`, framing server = **owner**, returner = **helper**.
+
+**Three-turn walkthrough:**
+
+| Turn | Side | Note |
+|------|------|------|
+| 1 | server (owner) | `[stuck] SSE writes block after 3 turns; tried setting WriteTimeout` |
+| 2 | returner (helper) | `[hint] check whether http.ResponseController is shadowed by a parent context cancellation` |
+| 3 | server (owner) | `[try] added context check; reproduced still` |
+| 4 | returner (helper) | `[hint] flush before each write; goroutine may be GCed` |
+| 5 | server (owner) | `[resolved] yes — added rc.Flush() after each event; root cause was buffered writer` |
+
+**Helper rule:** the helper must not take more than ~3 consecutive `[hint]`
+turns without an `[try]` from the owner. If that happens, the helper emits
+`[suggest:share-context]` asking the owner to paste the relevant code or log.
+The `[resolved]` note from the owner ends the session.
+
+---
+
+### Mid-rally pattern switch
+
+Either side can propose switching to a different pattern mid-session using a
+`[switch-pattern:<name>]` note:
+
+**Proposer's turn:**
+
+```bash
+rallish rally done --session-id $SID --as server \
+  --note "[switch-pattern:discuss] reason: scope expanded beyond a single task"
+```
+
+**Receiver's next turn** acknowledges:
+
+```bash
+rallish rally done --session-id $SID --as returner \
+  --note "[switch-ack:discuss] switching — will frame next note as [opinion]"
+```
+
+Both sides update their local `PATTERN` after the exchange. The broker and CLI
+are unaware of the switch; it is a pure convention between the two agents.
+
+---
+
 ## Reference
 
 - PRD: [`docs/prd-rally-mode.md`](./prd-rally-mode.md)
+- Rally patterns PRD: [`docs/prd-rally-patterns.md`](./prd-rally-patterns.md)
 - Rally types: [`pkg/contract/rally.go`](../pkg/contract/rally.go)
 - Broker handlers: [`internal/broker/rally.go`](../internal/broker/rally.go)
 - CLI commands: [`internal/cli/rally.go`](../internal/cli/rally.go)

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Rally patterns** — three behavioural patterns layered on the rally
+  primitive: **cycle** (planner ↔ executor with `[plan]`/`[result]`/`[review]`
+  notes), **discuss** (peer ↔ peer converging on mutual `[agree]`), and
+  **help** (owner ↔ helper short asymmetric exchange with
+  `[stuck]`/`[hint]`/`[try]`/`[resolved]`). Pattern is selected at server-prep
+  time via natural-language cue (`"사이클로 가자"`, `"논의 랠리"`, `"막혔어
+  도와줘"`). No broker / CLI / contract changes; encoded as conventions
+  in the rallish-operator skill body (v0.1.0 → v0.2.0). See
+  [docs/prd-rally-patterns.md](docs/prd-rally-patterns.md) and
+  [docs/runbook-rally-mode.md#rally-patterns](docs/runbook-rally-mode.md#rally-patterns).
+
 ## [0.1.1] - 2026-05-17
 
 ### Changed
