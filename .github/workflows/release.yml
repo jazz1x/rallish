@@ -6,9 +6,8 @@ on:
       - "v*"
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: write     # publish GitHub Release
+  id-token: write     # cosign keyless signing (sigstore OIDC)
 
 jobs:
   release:
@@ -20,10 +19,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate tag is semver vX.Y.Z
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          if ! printf '%s' "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::release tag must match vX.Y.Z, got: $TAG"
+            exit 1
+          fi
+          echo "tag ok: $TAG"
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.25"
+          check-latest: true
           cache: true
 
       - name: Download modules

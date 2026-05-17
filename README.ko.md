@@ -16,29 +16,37 @@
 
 | 기능 | 설명 |
 |------|------|
-| **순차 실행** | 공유 브로커를 통해 에이전트가 턴을 번갈아가며 실행 |
+| **Squash (헤드리스)** | `rallish squash`로 헤드리스 프리셋 세션 실행(`solo-ralph`, `pair-review`); 브로커가 어댑터를 자동으로 스폰 |
+| **Rally (인터랙티브)** | `rallish rally`로 두 개 이상의 인간 터미널 간 라이브 바톤 전달; SSE를 통한 독점 홀더 강제 |
 | **A2A 프로토콜** | `/.well-known/agent.json`, JSON-RPC 2.0 태스크, SSE 스트리밍 |
 | **토큰 예산** | 세션당 토큰, 턴 수, 시간의 상한선을 강제 |
 | **스크래치패드** | 자동 압축(compaction)이 적용된 롤링 공유 스크래치 |
 | **프리셋** | 역할, 라우팅, 종료 조건을 정의한 YAML 템플릿 |
+| **Unix 소켓 IPC** | CLI↔Daemon이 `~/.rallish/rallish.sock`(`0600`) 경유. A2A 외부 클라이언트와 Windows 폴백용으로 TCP 루프백 유지 |
+| **자동 데몬** | `rallish squash`가 브로커 미실행 시 자동 스폰. `rallish doctor`가 소켓 도달성 보고 |
 | **보안** | 경로 탐색 방어, 비밀 정보 마스킹, 최소한의 환경 변수 허용 목록 |
 
 ## 아키텍처
 
 ```
 ┌──────────────────────────────────────────┐
-│  rallish 브로커 (Go, 127.0.0.1)         │
+│  rallish 브로커 (Go)                     │
 │  POST /sessions                          │
 │  GET  /sessions/:id/next?as=<role> (SSE) │
 │  POST /sessions/:id/turn                 │
 │  GET  /.well-known/agent.json            │
 │  POST /a2a                               │
-└────────▲─────────────────────▲───────────┘
-         │                     │
-   ┌─────┴──────┐       ┌─────┴──────┐
-   │  에이전트 A │       │  에이전트 B │
-   └────────────┘       └────────────┘
+└──┬───────────────┬───────────────────┬───┘
+   │ unix socket   │ unix socket       │ tcp 루프백
+   │ ~/.rallish/   │ ~/.rallish/       │ 127.0.0.1:<port>
+   │ rallish.sock  │ rallish.sock      │ (A2A + 폴백)
+┌──┴─────────┐   ┌─┴────────┐      ┌──┴───────────┐
+│ 에이전트 A │   │에이전트 B│      │ 외부 A2A     │
+│  (CLI)     │   │  (CLI)   │      │ 클라이언트    │
+└────────────┘   └──────────┘      └──────────────┘
 ```
+
+같은 브로커가 두 전송 채널을 동시에 서비스합니다. CLI(`rallish squash`, `rallish rally`, `rallish doctor`)는 Unix 소켓을 우선 사용하고, 외부 A2A 클라이언트는 TCP 루프백을 사용합니다.
 
 ## 사전 요구사항
 
@@ -54,42 +62,80 @@ which claude      # $PATH에 있는 지원 어댑터 바이너리
 
 ## 설치
 
-### 옵션 1 — 소스에서 빌드 (개발용 권장)
+명령 하나:
 
 ```bash
-git clone https://github.com/jazz1x/rallish.git
-cd rallish
-make build
+npx skills add jazz1x/rallish
 ```
 
-바이너리는 `./dist/rallish`에 생성됩니다.
+스킬 번들(SKILL.md + 바이너리 인스톨러)을 `~/.claude/skills/rallish-operator/`
+에 깔아둡니다. [skills.sh](https://www.skills.sh) 경유로 해석.
 
-### 옵션 2 — Homebrew (첫 릴리즈 이후)
+어떤 프로젝트든 Claude Code (또는 다른 스킬 인식 코딩 CLI) 열고
+`랠리보낼 준비해` / `let's serve`. 첫 사용 시 스킬이 번들된 플랫폼 감지
+스크립트(`scripts/install-binary.sh`)로 `rallish` 바이너리를 자동 설치
+(최신 GitHub Release → `/usr/local/bin` 또는 `~/.local/bin`).
 
-```bash
-brew tap jazz1x/rallish
-brew install rallish
-```
+<details>
+<summary><b>파워 유저용 (번들 우회)</b></summary>
 
-### 옵션 3 — go install
+| 방법 | 명령 |
+|---|---|
+| **Homebrew tap** (macOS) | `brew install jazz1x/rallish/rallish` <br>또는 `brew tap jazz1x/rallish && brew install rallish` |
+| **curl** (Unix 전반) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
+| **소스 빌드** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
+| **`go install`** | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
 
-```bash
-go install github.com/jazz1x/rallish@latest
-```
+바이너리가 `$PATH`에 있으면 `rallish bootstrap` (멱등)이 스킬 번들 설치 +
+데몬 검증을 수행.
+</details>
 
 ## 빠른 시작
 
 ```bash
-# 환경 점검
+# 환경 점검 (어댑터 존재 + 데몬 도달성 보고)
 ./dist/rallish doctor
 
-# 순차 실행 세션 시작
-./dist/rallish start \
+# 내장 어댑터/프리셋 목록
+./dist/rallish add --list
+
+# 헤드리스 프리셋 세션 시작 (데몬 자동 스폰)
+./dist/rallish squash \
   --preset pair-review \
   --task "OAuth2 지원 추가" \
   --repo ./my-project
 
-# A2A discovery
+# 실제 어댑터 없이 스모크 테스트 (fake/결정론적, 3턴)
+cat > ~/.rallish/presets/fake-demo.yaml <<'EOF'
+name: fake-demo
+roles:
+  - {id: ralph, runtime: fake, model: fake-1}
+routing: round_robin
+budget: {max_turns: 3, max_tokens: 10000, deadline_minutes: 5}
+exit_when: [turns_exhausted]
+scratch: {max_kb: 16}
+EOF
+./dist/rallish squash --preset fake-demo --task "smoke test" --repo /tmp
+
+# 두 터미널 테니스 랠리 (라이브 바톤 전달)
+# skills/rallish-operator 기반 자연어 UX를 권장합니다 —
+# 에이전트(Claude Code, Cursor 등)가 모든 rally 명령을 대신 실행합니다.
+# 터미널 A 의 코딩 CLI 세션:                   "랠리보낼 준비해"
+# 에이전트: → rally new + role=server, SID 출력.
+# 터미널 B 의 코딩 CLI 세션:                   "랠리받을 준비해 <SID>"
+# 에이전트: → rally status + role=returner, 대기.
+# 다시 터미널 A:                              "시작"
+# 에이전트: 첫 턴 서브, rally done 으로 요약 note 와 함께 넘김.
+# 터미널 B:                                   "내 차례"
+# 에이전트: 바톤 받아 리턴 후 rally done.
+# 어느 쪽이든, 끝낼 때:                       "끝"
+#
+# Raw CLI (스킬이 내부적으로 호출 / 스크립트에서 사용):
+SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-up rally")
+./dist/rallish rally status --session-id $SESSION
+./dist/rallish rally done   --session-id $SESSION --as server --note "draft v1"
+
+# A2A discovery (외부 클라이언트는 TCP 루프백 사용)
 curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent.json
 
 # A2A 태스크 전송
@@ -98,15 +144,46 @@ curl -X POST http://127.0.0.1:$(cat ~/.rallish/port)/a2a \
   -d '{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"Hello"}]}}}'
 ```
 
+턴별 요청/응답은 `~/.rallish/sessions/<id>/log.jsonl`에 기록됩니다.
+
 ## 사용법
 
-### 1. 세션 시작
+### 1. 헤드리스 세션 시작
 
 ```bash
-rallish start --preset <name> --task "<설명>" --repo <경로>
+rallish squash --preset <name> --task "<설명>" --repo <경로>
 ```
 
 프리셋은 `internal/preset/presets/` (내장) 또는 `~/.rallish/presets/` (사용자 정의)에 있습니다. 프리셋 작성법은 [docs/handbook.md](docs/handbook.md)를 참조하세요.
+
+### 1b. 인터랙티브 랠리 세션 시작
+
+**에이전트 주도 (권장).** 스킬을 자동 발견하는 코딩 CLI(Claude Code, Cursor
+등)에서 이 리포를 열면 [`skills/rallish-operator`](skills/rallish-operator/SKILL.md)
+스킬이 다음 자연어 트리거로 로드됩니다:
+
+| 발화 | 에이전트 동작 |
+|---|---|
+| `랠리보낼 준비해` / `let's serve` | `rally new` 실행, ROLE=`server`, SID 출력 |
+| `랠리받을 준비해 <SID>` / `let's return` | `rally status` 실행, ROLE=`returner`, 대기 |
+| `시작` / `go` (서버 측) | 첫 턴 서브 후 요약 note 와 함께 `rally done` |
+| `내 차례` / `is it my turn` (리시버 측) | `rally status`; 자기 차례면 직전 note 읽고 작업 후 `rally done` |
+| `끝` / `match over` | 깔끔한 종료 |
+
+`시작` / `go` / `끝` / `내 차례` 같은 짧은 트리거는 직전 prep 트리거로
+ROLE+SID 가 이미 설정된 경우에만 활성화 — 무관한 일반 단어는 무시됩니다.
+
+**Raw CLI (스크립트나 스킬 미지원 클라이언트용):**
+
+```bash
+rallish rally new    --participants <a>,<b> [--task "<설명>"]
+rallish rally join   --session-id <id> --as <이름>          # SSE 블록
+rallish rally done   --session-id <id> --as <이름> [--note "<요약>"] [--handoff-to <이름>]
+rallish rally status --session-id <id>
+```
+
+전체 두 터미널 연습은 [docs/runbook-rally-mode.md](docs/runbook-rally-mode.md)를
+참조하세요.
 
 ### 2. A2A 연동
 
@@ -127,21 +204,46 @@ Claude 두 개, Kimi 두 개, 또는 어떤 조합도 가능합니다. 브로커
 
 예산(토큰, 턴 수, 데드라인)은 세션별로 강제됩니다. 예산이 고갈되면 브로커는 `410 Gone`을 반환하고, 이어서 작업할 수 있도록 스크래치패드를 보존합니다.
 
-### 4. 사용자 정의 프리셋
+### 5. 사용자 정의 프리셋
 
 `~/.rallish/presets/<name>.yaml`에 YAML 파일을 배치하세요:
 
 ```yaml
 name: my-preset
+description: 한 줄 요약(선택).
 roles:
-  planner:
-    adapter: claude
-    model: claude-3-5-sonnet-20241022
-routing:
-  - planner
-exit:
-  maxTurns: 10
+  - id: planner
+    runtime: claude
+    model: opus
+  - id: executor
+    runtime: kimi
+    model: kimi-k2
+routing: handoff_then_round_robin    # 또는 round_robin
+budget:
+  max_turns: 20
+  max_tokens: 400000
+  deadline_minutes: 60
+exit_when: [tests_pass, reviewer_approved, turns_exhausted]
+scratch:
+  max_kb: 64
+  summarize_with: claude-haiku
 ```
+
+### 6. 데몬 라이프사이클
+
+```bash
+rallish daemon &                            # 명시적 기동 (선택 — squash가 자동 스폰)
+ls ~/.rallish/                              # rallish.sock (0600), socket, port, sessions/
+kill -TERM $(pgrep -f "rallish daemon")     # graceful 종료 시 세 파일 모두 정리
+```
+
+`rallish doctor`로 도달성 확인:
+
+```
+daemon reachable via unix socket path=/Users/<you>/.rallish/rallish.sock perm=-rw-------
+```
+
+Windows에서는 브로커가 TCP 루프백만 사용합니다 (Unix 소켓 스텁이 `ErrUnsupported` 반환).
 
 ## 보안
 

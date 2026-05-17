@@ -14,3 +14,33 @@ pre-commit:
     go-lint:
       run: golangci-lint run --timeout=5m
       fail_text: "Linting failed. Please fix linting issues before committing."
+
+# Reject commit messages that don't use a conventional-commits prefix (see
+# AGENTS.md §Commit Messages). Merge/Revert messages from git are allowed.
+commit-msg:
+  commands:
+    conventional:
+      run: |
+        head -1 {1} | grep -qE '^(feat|fix|refactor|docs|test|chore|sec|ci|build|perf|style)(\(.+\))?: ' && exit 0
+        head -1 {1} | grep -qE '^(Merge|Revert)' && exit 0
+        echo "❌ commit subject must start with a conventional prefix:" >&2
+        echo "   feat: fix: refactor: docs: test: chore: sec: ci: build: perf: style:" >&2
+        echo "   (optional scope in parens, e.g. feat(rally): ...)" >&2
+        echo "   see AGENTS.md §Commit Messages" >&2
+        exit 1
+      fail_text: "use a conventional-commits prefix on the subject line"
+
+# Belt-and-braces before push: build + vet + race tests one more time so a
+# failing branch can't sneak past pre-commit (e.g. via --no-verify or rebase).
+pre-push:
+  parallel: true
+  commands:
+    build:
+      run: go build ./...
+      fail_text: "go build failed — push aborted"
+    vet:
+      run: go vet ./...
+      fail_text: "go vet failed — push aborted"
+    test:
+      run: go test ./... -race -count=1
+      fail_text: "race tests failed — push aborted"

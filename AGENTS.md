@@ -20,15 +20,25 @@ All commits must pass `lefthook run pre-commit` (go-fmt, go-vet, go-test -race, 
 | `internal/adapter/` | CLI adapters (claude, kimi, fake) |
 | `internal/broker/` | HTTP broker, A2A handlers, SSE |
 | `internal/budget/` | Token / turn / deadline budgets |
-| `internal/cli/` | Cobra commands (start, doctor) |
+| `internal/buildinfo/` | Build metadata (version string) |
+| `internal/cli/` | Cobra commands (squash, rally, doctor, daemon, add) |
+| `internal/doctor/` | Adapter + daemon health checks |
 | `internal/exit/` | Exit condition evaluators |
-| `internal/ipc/` | Daemon IPC (start / resume) |
+| `internal/ipc/` | Unix domain socket transport (CLI↔Daemon) |
 | `internal/logx/` | Structured logging |
 | `internal/preset/` | YAML preset loader + built-ins |
 | `internal/router/` | Role-based routing |
+| `internal/runner/` | Polling loop that drives adapters |
+| `internal/safepath/` | Path-traversal guards for user-supplied paths |
 | `internal/scratch/` | Rolling scratchpad with compaction |
 | `internal/session/` | In-memory session store |
-| `pkg/contract/` | Public types (A2A, Budget, Session) |
+| `pkg/contract/` | Public types (A2A, Budget, Session, Rally) |
+| `skills/` | Symlink → `internal/skills/`. Vendor-neutral Agent Skills discovery path |
+| `internal/skills/` | Canonical SKILL.md sources (embedded into the rallish binary via `go:embed`); installed globally by `rallish bootstrap` |
+
+**Package surface rule:** `pkg/contract` is the only package importable by
+external adapters or A2A clients. Everything under `internal/` is private
+and may break without notice.
 
 ## Code Style
 
@@ -70,12 +80,27 @@ This repo uses **golangci-lint v2**. The following rules are non-obvious and cos
 
 Current working combination (validated):
 - Action: `golangci/golangci-lint-action@v7`
-- Version: `latest` (tracks newest v2)
+- Version: `latest` (tracks newest v2, currently `v2.12.2`)
 - Install mode: `binary` (default)
+
+**Local toolchain at `.toolchain/bin/golangci-lint` should match CI** — keep
+it at v2.12.2 or newer. Older v2 minors (e.g. v2.1.6) do not have the
+`gosec` G703 (path-traversal taint) rule, so a clean local lint can still
+fail the CI pipeline. To upgrade:
+
+```bash
+curl -fsSL -o /tmp/gcl.tar.gz \
+  "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz"
+tar -xzf /tmp/gcl.tar.gz -C /tmp
+mv /tmp/golangci-lint-2.12.2-*/golangci-lint .toolchain/bin/golangci-lint
+```
 
 ## Commit Messages
 
-Follow conventional commits:
+Follow conventional commits. **Enforced by lefthook `commit-msg` hook** — a
+commit without a valid prefix is rejected before it lands.
+
+Allowed prefixes:
 
 - `feat:` — new feature
 - `fix:` — bug fix
@@ -83,3 +108,27 @@ Follow conventional commits:
 - `docs:` — documentation only
 - `test:` — adding or correcting tests
 - `chore:` — build / tooling changes
+- `sec:` — security-relevant change (permission tightening, sandbox, allowlist)
+- `ci:` — CI / GitHub Actions
+- `build:` — build system / dependencies
+- `perf:` — performance improvement
+- `style:` — formatting only, no semantic change
+
+Optional scope: `feat(rally): ...`, `fix(broker): ...`.
+
+`Merge ...` / `Revert ...` are accepted as-is.
+
+## Feature Documentation Workflow
+
+For any non-trivial subsystem (a new `internal/*` package, a new protocol
+surface, a new daemon endpoint):
+
+1. Seed a PRD in `docs/prd-<name>.md` describing problem, decision, alternatives,
+   spec, test plan, guardrails, acceptance criteria.
+2. Implement.
+3. Add a runbook in `docs/runbook-<name>.md` describing how to verify the
+   feature end-to-end.
+4. Update `CHANGELOG.md`, `CHANGELOG.ko.md`, `CHANGELOG.jp.md` in lockstep.
+
+HTML runbooks in `docs/*.html` are optional presentation mirrors of the `.md`
+source. The `.md` file is canonical; the HTML may lag.

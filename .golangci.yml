@@ -15,6 +15,16 @@ linters:
     - gosec
     - revive
     - gocritic
+    - forbidigo
+  settings:
+    forbidigo:
+      forbid:
+        - pattern: "^os\\.Environ$"
+          msg: "use the env allowlist via the adapter envList, not full os.Environ"
+        - pattern: "^exec\\.Command\\(\"(sh|bash|zsh)\""
+          msg: "do not shell-out to sh/bash/zsh; invoke binaries directly"
+      analyze-types: false
+      exclude-godoc-examples: true
   exclusions:
     paths:
       - .toolchain

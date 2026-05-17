@@ -1,0 +1,1 @@
+internal/skills/rallish-operator/scripts/install-binary.sh

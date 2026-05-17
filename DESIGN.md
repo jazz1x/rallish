@@ -7,7 +7,7 @@
 
 ## 0. Implementation
 
-**Language: Go 1.22+** (locked in)
+**Language: Go 1.25+** (locked in)
 
 Why Go:
 - We are a CLI orchestrator that spawns other CLIs over OS pipes and serves a local HTTP/SSE broker. This is the exact category Go was built for: `gh`, `kubectl`, `terraform`, `docker`, `lazygit`, `claude-squad` all live here.
@@ -19,7 +19,7 @@ Toolchain:
 
 | Tool | Purpose |
 |---|---|
-| Go 1.22+ | language; pin minor in `go.mod` |
+| Go 1.25+ | language; pin minor in `go.mod` |
 | `golangci-lint` | lint aggregator (config in `.golangci.yml`) |
 | `goreleaser` | cross-platform release builds + Homebrew tap |
 | `make` | developer entrypoint (`make test`, `make build`, `make check`) |
@@ -348,7 +348,11 @@ Adapters register in `internal/adapter/adapter.go`'s registry by name. Adding a 
 ## 13. CLI surface
 
 ```
-rallish start [--preset NAME] [--task FILE|"inline task"] [--session-id ID]
+rallish squash [--preset NAME] [--task FILE|"inline task"] [--session-id ID]
+rallish rally new --participants A,B [--task TEXT]
+rallish rally join --session-id ID --as NAME
+rallish rally done --session-id ID --as NAME [--note TEXT]
+rallish rally status --session-id ID
 rallish attach <session-id>           # follow live SSE stream in terminal
 rallish status [<session-id>]         # show all running / recent sessions
 rallish stop <session-id> [--reason]
@@ -359,7 +363,7 @@ rallish daemon                        # explicit foreground broker (rarely used)
 rallish version                       # version + commit + go runtime
 ```
 
-Daemon mode: `rallish start` will auto-spawn a daemon (background broker) if none is running. CLI commands talk to it over Unix socket at `~/.rallish/sock`. The broker also listens on `127.0.0.1:<port>` (port written to `~/.rallish/port`) — kept simple for adapter introspection.
+Daemon mode: `rallish squash` will auto-spawn a daemon (background broker) if none is running. CLI commands talk to it over Unix socket at `~/.rallish/sock`. The broker also listens on `127.0.0.1:<port>` (port written to `~/.rallish/port`) — kept simple for adapter introspection.
 
 ---
 
@@ -410,7 +414,7 @@ Each phase is a runnable cut. Do not bundle.
 
 ### Phase 0 — Draft + scaffold
 - [x] `DESIGN.md` (this file)
-- [ ] `go.mod` (`module github.com/<owner>/rallish`, `go 1.22`)
+- [ ] `go.mod` (`module github.com/<owner>/rallish`, `go 1.25`)
 - [ ] Directory skeleton per §4 with `doc.go` stubs
 - [ ] `Makefile` (`build`, `test`, `check`, `run`, `lint`, `tidy`)
 - [ ] `.golangci.yml` — enable: `gofmt, govet, errcheck, staticcheck, ineffassign, gosimple, unused, forbidigo, gosec, revive, gocritic`
@@ -435,7 +439,7 @@ Each phase is a runnable cut. Do not bundle.
 - [ ] `rallish doctor` verifies each adapter binary
 
 ### Phase 3 — Loop runner & presets
-- [ ] `rallish start` boots broker (if not running) + registers adapter goroutines per role
+- [ ] `rallish squash` boots broker (if not running) + registers adapter goroutines per role
 - [ ] Preset loader integration
 - [ ] ExitEvaluator with `turns_exhausted`, `tests_pass` (shell), `reviewer_approved`
 - [ ] Ship presets: `pair-review`, `solo-ralph` (embedded via `//go:embed`)

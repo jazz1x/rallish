@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>런북 · Unix Domain Socket IPC</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --c-bg: oklch(98% 0.005 250);
+      --c-surface: oklch(100% 0 0);
+      --c-text: oklch(20% 0.02 250);
+      --c-muted: oklch(50% 0.05 250);
+      --c-border: oklch(85% 0.03 250);
+      --c-accent: oklch(60% 0.15 45);
+      --c-accent-soft: oklch(96% 0.03 45);
+      --c-code-bg: oklch(95% 0.01 250);
+      --c-success: oklch(55% 0.12 145);
+      --c-success-soft: oklch(97% 0.02 145);
+      --c-warn: oklch(65% 0.12 85);
+      --c-warn-soft: oklch(97% 0.02 85);
+      --c-danger: oklch(55% 0.15 25);
+      --ff-display: "Noto Serif KR", Georgia, "Times New Roman", serif;
+      --ff-body: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", sans-serif;
+      --ff-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    }
+    [data-theme="dark"] {
+      --c-bg: oklch(18% 0.02 250);
+      --c-surface: oklch(22% 0.02 250);
+      --c-text: oklch(92% 0.02 250);
+      --c-muted: oklch(65% 0.05 250);
+      --c-border: oklch(35% 0.04 250);
+      --c-accent: oklch(70% 0.15 45);
+      --c-accent-soft: oklch(30% 0.05 45);
+      --c-code-bg: oklch(28% 0.02 250);
+      --c-success: oklch(65% 0.12 145);
+      --c-success-soft: oklch(25% 0.03 145);
+      --c-warn: oklch(75% 0.12 85);
+      --c-warn-soft: oklch(25% 0.03 85);
+      --c-danger: oklch(65% 0.15 25);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--ff-body);
+      background: var(--c-bg);
+      color: var(--c-text);
+      line-height: 1.7;
+      text-wrap: pretty;
+      padding: 0;
+    }
+
+    /* Progress */
+    .progress-bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: var(--c-border);
+      z-index: 1000;
+    }
+    .progress-bar > div {
+      height: 100%;
+      width: 0%;
+      background: var(--c-accent);
+      transition: width 0.3s ease;
+    }
+
+    /* Header */
+    .site-header {
+      border-bottom: 1px solid var(--c-border);
+      background: var(--c-surface);
+      position: sticky;
+      top: 3px;
+      z-index: 100;
+    }
+    .site-header-inner {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 1.25rem 1.5rem;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .site-header h1 {
+      font-family: var(--ff-display);
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+    }
+    .site-header .meta {
+      font-family: var(--ff-mono);
+      font-size: 0.6875rem;
+      color: var(--c-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .theme-toggle {
+      background: none;
+      border: 1px solid var(--c-border);
+      color: var(--c-muted);
+      padding: 0.375rem 0.75rem;
+      font-size: 0.75rem;
+      font-family: var(--ff-mono);
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    .theme-toggle:hover {
+      border-color: var(--c-accent);
+      color: var(--c-accent);
+    }
+
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 2.5rem 1.5rem 4rem;
+    }
+
+    /* Hero */
+    .hero {
+      margin-bottom: 3rem;
+    }
+    .hero h2 {
+      font-family: var(--ff-display);
+      font-size: 2.25rem;
+      font-weight: 700;
+      line-height: 1.15;
+      letter-spacing: -0.03em;
+      margin-bottom: 0.75rem;
+    }
+    .hero .lead {
+      font-size: 1.0625rem;
+      color: var(--c-muted);
+      max-width: 540px;
+    }
+
+    /* Steps */
+    .step {
+      border-top: 1px solid var(--c-border);
+      padding: 2rem 0;
+      display: grid;
+      grid-template-columns: 2.5rem 1fr;
+      gap: 1rem;
+    }
+    @media (max-width: 560px) {
+      .step { grid-template-columns: 1fr; gap: 0.5rem; }
+    }
+    .step-num {
+      font-family: var(--ff-display);
+      font-size: 2rem;
+      font-weight: 400;
+      font-style: italic;
+      color: var(--c-accent);
+      line-height: 1;
+      opacity: 0.6;
+    }
+    .step-body h3 {
+      font-family: var(--ff-display);
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.01em;
+    }
+    .step-body p {
+      color: var(--c-muted);
+      margin-bottom: 0.75rem;
+      font-size: 0.9375rem;
+    }
+
+    /* Checklist */
+    .check {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      margin: 0.375rem 0;
+      font-size: 0.875rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .check input[type="checkbox"] {
+      accent-color: var(--c-accent);
+      width: 1rem;
+      height: 1rem;
+      margin-top: 0.125rem;
+      flex-shrink: 0;
+    }
+    .check.done { opacity: 0.45; }
+    .check.done span { text-decoration: line-through; }
+
+    /* Code */
+    .code-block {
+      position: relative;
+      background: var(--c-code-bg);
+      border-radius: 6px;
+      margin: 0.75rem 0;
+      overflow: hidden;
+    }
+    .code-block pre {
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      font-family: var(--ff-mono);
+      font-size: 0.8125rem;
+      line-height: 1.6;
+      color: var(--c-text);
+    }
+    .copy-btn {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      padding: 0.25rem 0.625rem;
+      font-size: 0.6875rem;
+      font-weight: 500;
+      font-family: var(--ff-mono);
+      background: var(--c-surface);
+      border: 1px solid var(--c-border);
+      border-radius: 4px;
+      cursor: pointer;
+      color: var(--c-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .copy-btn:hover {
+      border-color: var(--c-accent);
+      color: var(--c-accent);
+    }
+    .copy-btn.copied {
+      border-color: var(--c-success);
+      color: var(--c-success);
+    }
+
+    /* Expected */
+    .expected {
+      background: var(--c-success-soft);
+      border-left: 2px solid var(--c-success);
+      padding: 0.875rem 1rem;
+      margin-top: 0.75rem;
+      font-family: var(--ff-mono);
+      font-size: 0.8125rem;
+      white-space: pre-wrap;
+      line-height: 1.6;
+      border-radius: 0 4px 4px 0;
+    }
+    .expected-label {
+      font-family: var(--ff-body);
+      font-weight: 600;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.375rem;
+      color: var(--c-success);
+    }
+
+    /* Warn */
+    .warn {
+      background: var(--c-warn-soft);
+      border-left: 2px solid var(--c-warn);
+      padding: 0.875rem 1rem;
+      margin: 0.75rem 0;
+      font-size: 0.875rem;
+      border-radius: 0 4px 4px 0;
+    }
+    .warn strong {
+      display: flex;
+      align-items: center;
+      gap: 0.375rem;
+      margin-bottom: 0.25rem;
+      font-weight: 600;
+      color: var(--c-warn);
+    }
+
+    /* Table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.75rem;
+      font-size: 0.8125rem;
+    }
+    th, td {
+      padding: 0.625rem 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid var(--c-border);
+    }
+    th {
+      font-weight: 600;
+      color: var(--c-muted);
+      text-transform: uppercase;
+      font-size: 0.6875rem;
+      letter-spacing: 0.06em;
+      font-family: var(--ff-mono);
+    }
+    tr:last-child td { border-bottom: none; }
+    code {
+      font-family: var(--ff-mono);
+      font-size: 0.85em;
+      background: var(--c-code-bg);
+      padding: 0.125rem 0.375rem;
+      border-radius: 3px;
+    }
+
+    /* Refs */
+    .refs { margin-top: 0.75rem; }
+    .refs a {
+      display: block;
+      color: var(--c-accent);
+      text-decoration: none;
+      font-family: var(--ff-mono);
+      font-size: 0.8125rem;
+      padding: 0.25rem 0;
+    }
+    .refs a:hover { text-decoration: underline; }
+
+    /* Inline badge */
+    .badge {
+      display: inline-block;
+      padding: 0.125rem 0.5rem;
+      border-radius: 3px;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      font-family: var(--ff-mono);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-right: 0.375rem;
+      background: var(--c-accent-soft);
+      color: var(--c-accent);
+    }
+
+    @media (max-width: 560px) {
+      .hero h2 { font-size: 1.75rem; }
+      .container { padding: 1.5rem 1rem 3rem; }
+      .site-header-inner { flex-wrap: wrap; }
+    }
+  </style>
+</head>
+<body>
+  <div class="progress-bar"><div id="progress"></div></div>
+
+  <header class="site-header">
+    <div class="site-header-inner">
+      <div>
+        <h1>런북</h1>
+        <div class="meta">Unix Domain Socket IPC · feat/ipc-unix-socket · 42e21ad</div>
+      </div>
+      <button class="theme-toggle" onclick="toggleTheme()">◐ 테마</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <h2>Unix Domain Socket IPC<br>수동 검증 가이드</h2>
+      <p class="lead">
+        사전 준비: Go 1.25+, macOS/Linux, <code>~/.rallish/</code> 디렉토리 쓰기 권한.<br>
+        각 단계별로 명령어를 복사-붙여넣기 할 수 있으며, 예상 출력 결과를 함께 확인합니다.
+      </p>
+    </section>
+
+    <!-- 0 -->
+    <article class="step" id="step-0">
+      <div class="step-num">0</div>
+      <div class="step-body">
+        <h3>원샷 전체 검증</h3>
+        <p>아래 전체 블록을 복사-붙여넣기 하면 빌드 → 데몬 실행 → 모든 검증 → SIGTERM → 클린업까지 한 번에 진행됩니다.</p>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">복사</button>
+          <pre>cd /path/to/rallish
+make build
+rm -rf ~/.rallish
+
+(
+  cd "$(pwd)"
+  ./dist/rallish daemon &amp;
+  DAEMON_PID=$!
+  sleep 2
+
+  echo "=== 1. 유닉스 소켓 존재 확인 ==="
+  ls -la ~/.rallish/rallish.sock
+
+  echo "=== 2. 소켓 경로 파일 확인 ==="
+  cat ~/.rallish/socket
+
+  echo "=== 3. 포트 파일 확인 ==="
+  cat ~/.rallish/port
+
+  echo "=== 4. 유닉스 소켓으로 A2A discovery ==="
+  SOCKET=$(cat ~/.rallish/socket)
+  curl --unix-socket "$SOCKET" -s http://rallish.local/.well-known/agent.json | head -c 200
+  echo
+
+  echo "=== 5. TCP로 A2A discovery ==="
+  PORT=$(cat ~/.rallish/port)
+  curl -s "http://127.0.0.1:${PORT}/.well-known/agent.json" | head -c 200
+  echo
+
+  echo "=== 6. SIGTERM 그레이스풀 셧다운 ==="
+  kill -TERM "$DAEMON_PID"
+  wait "$DAEMON_PID"
+  EXIT=$?
+  echo "Exit: $EXIT"
+
+  echo "=== 7. 잔여 파일 클린업 확인 ==="
+  ls ~/.rallish/rallish.sock 2&gt;/dev/null &amp;&amp; echo "FAIL socket" || echo "OK socket"
+  ls ~/.rallish/socket    2&gt;/dev/null &amp;&amp; echo "FAIL socket file" || echo "OK socket file"
+  ls ~/.rallish/port      2&gt;/dev/null &amp;&amp; echo "FAIL port" || echo "OK port"
+
+  [ "$EXIT" -eq 0 ] &amp;&amp; echo "✅ 통과" || echo "❌ 실패"
+)</pre>
+        </div>
+        <div class="expected">
+          <div class="expected-label">예상 출력</div>
+Exit: 0
+OK socket
+OK socket file
+OK port
+✅ 통과
+        </div>
+        <div class="warn">
+          <strong>⚠ 주의</strong>
+          <div><code>cd /path &amp;&amp; ./dist/rallish daemon &amp;</code> 형태로 실행하면 bash의 <code>$!</code>가 <strong>서브셸 PID</strong>를 가리킵니다. 데몬 PID를 올바르게 얻으려면 위 예시처럼 <code>cd</code>와 <code>./dist/rallish daemon &amp;</code>를 분리하거나 <code>(...)</code> 서브셸 안에서 실행하세요.</div>
+        </div>
+      </div>
+    </article>
+
+    <!-- 1 -->
+    <article class="step" id="step-1">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h3>빌드</h3>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">복사</button>
+          <pre>cd /path/to/rallish
+make build</pre>
+        </div>
+        <div class="check"><input type="checkbox" data-key="s1" onchange="saveCheck(this)"><span><code>dist/rallish</code> 파일이 존재하고 최신 시간인지 확인</span></div>
+      </div>
+    </article>
+
+    <!-- 2 -->
+    <article class="step" id="step-2">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h3>데몬 실행</h3>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">복사</button>
+          <pre>rm -rf ~/.rallish
+./dist/rallish daemon &amp;
+DAEMON_PID=$!
+sleep 2</pre>
+        </div>
+        <div class="check"><input type="checkbox" data-key="s2" onchange="saveCheck(this)"><span>로그에 TCP와 Unix 소켓 두 리스너 모두 표시됨</span></div>
+      </div>
+    </article>
+
+    <!-- 3 -->
+    <article class="step" id="step-3">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h3>유닉스 소켓 파일 확인</h3>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">복사</button>
+          <pre>ls -la ~/.rallish/rallish.sock</pre>
+        </div>
+        <div class="expected">
+          <div class="expected-label">예상 결과</div>
+srwxr-xr-x ... /Users/.../.rallish/rallish.sock
+        </div>
+        <div class="check"><input type="checkbox" data-key="s3" onchange="saveCheck(this)"><span>파일 타입이 <code>s</code>(소켓)인지 확인</span></div>
+      </div>
+    </article>
+
+    <!-- 4 -->
+    <article class="step" id="step-4">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <h3>소켓 경로 파일 확인</h3>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">복사</button>
+          <pre>cat ~/.rallish/socket</pre>
+        </div>
+        <div class="expected">
+          <div class="expected-label">예상 결과</div>
+/Users/&lt;사용자&gt;/.rallish/rallish.sock
+        </div>
+        <div class="check"><input type="checkbox" data-key="s4" onchange="saveCheck(this)"><span>소켓 파일의 절대 경로가 출력됨</span></div>
+      </div>
+    </article>
+
+    <!-- 5 -->
+    <article class="step" id="step-5">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <h3>포트 파일 확인 (하위 호환)</h3>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">복사</button>
+          <pre>cat ~/.rallish/port</pre>
+        </div>
+        <div class="expected">
+          <div class="expected-label">예상 결과</div>
+62345
+        </div>
+        <div class="check"><input type="checkbox" data-key="s5" onchange="saveCheck(this)"><span>임시 포트 번호가 출력됨</span></div>
+      </div>
+    </article>
+
+    <!-- 6 -->
+    <article class="step" id="step-6">
+      <div class="step-num">6</div>
+      <div class="step-body">
+        <h3>유닉스 소켓으로 A2A Discovery</h3>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">복사</button>
+          <pre>SOCKET=$(cat ~/.rallish/socket)
+curl --unix-socket "$SOCKET" -s http://rallish.local/.well-known/agent.json</pre>
+        </div>
+        <div class="expected">
+          <div class="expected-label">예상 결과</div>
+{"name":"rallish", ... }
+        </div>
+        <div class="check"><input type="checkbox" data-key="s6" onchange="saveCheck(this)"><span><code>name: "rallish"</code>가 포함된 JSON 응답</span></div>
+      </div>
+    </article>
+
+    <!-- 7 -->
+    <article class="step" id="step-7">
+      <div class="step-num">7</div>
+      <div class="step-body">
+        <h3>TCP로 A2A Discovery</h3>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">복사</button>
+          <pre>PORT=$(cat ~/.rallish/port)
+curl -s "http://127.0.0.1:${PORT}/.well-known/agent.json"</pre>
+        </div>
+        <div class="check"><input type="checkbox" data-key="s7" onchange="saveCheck(this)"><span>6단계와 동일한 JSON 응답</span></div>
+      </div>
+    </article>
+
+    <!-- 8 -->
+    <article class="step" id="step-8">
+      <div class="step-num">8</div>
+      <div class="step-body">
+        <h3>SIGTERM 그레이스풀 셧다운</h3>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">복사</button>
+          <pre>kill -TERM "$DAEMON_PID"
+wait "$DAEMON_PID"
+echo "Exit: $?"</pre>
+        </div>
+        <div class="expected">
+          <div class="expected-label">예상 결과</div>
+Exit: 0
+        </div>
+        <div class="check"><input type="checkbox" data-key="s8" onchange="saveCheck(this)"><span>Exit 코드가 0 (143이 아님)</span></div>
+      </div>
+    </article>
+
+    <!-- 9 -->
+    <article class="step" id="step-9">
+      <div class="step-num">9</div>
+      <div class="step-body">
+        <h3>잔여 파일 클린업 확인</h3>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">복사</button>
+          <pre>ls ~/.rallish/rallish.sock 2&gt;/dev/null &amp;&amp; echo "FAIL" || echo "OK: 소켓 제거됨"
+ls ~/.rallish/socket    2&gt;/dev/null &amp;&amp; echo "FAIL" || echo "OK: 소켓 파일 제거됨"
+ls ~/.rallish/port      2&gt;/dev/null &amp;&amp; echo "FAIL" || echo "OK: 포트 파일 제거됨"</pre>
+        </div>
+        <div class="expected">
+          <div class="expected-label">예상 결과</div>
+OK: 소켓 제거됨
+OK: 소켓 파일 제거됨
+OK: 포트 파일 제거됨
+        </div>
+        <div class="check"><input type="checkbox" data-key="s9" onchange="saveCheck(this)"><span>세 파일 모두 제거됨</span></div>
+      </div>
+    </article>
+
+    <!-- 10 -->
+    <article class="step" id="step-10">
+      <div class="step-num">10</div>
+      <div class="step-body">
+        <h3>CLI Start 통합 테스트</h3>
+        <p>데몬이 실행 중일 때:</p>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">복사</button>
+          <pre>./dist/rallish start --task "say hello"</pre>
+        </div>
+        <div class="check"><input type="checkbox" data-key="s10" onchange="saveCheck(this)"><span>CLI가 소켓으로 데몬을 발견하고 세션 생성</span></div>
+      </div>
+    </article>
+
+    <!-- 11 -->
+    <article class="step" id="step-11">
+      <div class="step-num">11</div>
+      <div class="step-body">
+        <h3>회귀 테스트: make check</h3>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">복사</button>
+          <pre>make check</pre>
+        </div>
+        <div class="expected">
+          <div class="expected-label">예상 결과</div>
+0 issues.
+ok  github.com/jazz1x/rallish/...
+        </div>
+        <div class="check"><input type="checkbox" data-key="s11" onchange="saveCheck(this)"><span>go vet + golangci-lint + go test -race 전부 통과</span></div>
+      </div>
+    </article>
+
+    <!-- Troubleshooting -->
+    <article class="step" id="step-trouble">
+      <div class="step-num">!</div>
+      <div class="step-body">
+        <h3>문제 해결</h3>
+        <table>
+          <thead>
+            <tr><th>증상</th><th>원인</th><th>해결</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>Exit: 143</code></td>
+              <td><code>$!</code>이 서브셸 PID를 가리킴</td>
+              <td><code>cd</code>와 <code>./dist/rallish daemon &amp;</code>를 분리 실행</td>
+            </tr>
+            <tr>
+              <td><code>curl: (7)</code></td>
+              <td>데몬이 실행되지 않음</td>
+              <td><code>~/.rallish/socket</code> 내용과 로그 확인</td>
+            </tr>
+            <tr>
+              <td>golangci-lint 실패</td>
+              <td>v1 설정 스키마</td>
+              <td>본 저장소는 v2 사용 — 다운그레이드 금지</td>
+            </tr>
+            <tr>
+              <td>포트 파일 누락</td>
+              <td>TCP 리스너 실패</td>
+              <td>데몬 로그에서 <code>listen:</code> 에러 확인</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <!-- Reference -->
+    <article class="step" id="step-ref">
+      <div class="step-num">ℹ</div>
+      <div class="step-body">
+        <h3>참고</h3>
+        <div class="refs">
+          <a href="./prd-ipc-unix-socket.md">📄 PRD: Unix Domain Socket IPC</a>
+          <a href="../pkg/contract/a2a.go">📄 A2A 타입 — pkg/contract/a2a.go</a>
+          <a href="../internal/ipc/">📁 IPC 패키지 — internal/ipc/</a>
+          <a href="../internal/cli/daemon.go">📄 데몬 — internal/cli/daemon.go</a>
+          <a href="../internal/cli/start.go">📄 CLI Start — internal/cli/start.go</a>
+        </div>
+      </div>
+    </article>
+  </main>
+
+  <script>
+    // 테마
+    const savedTheme = localStorage.getItem('rb-theme');
+    if (savedTheme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    else if (savedTheme === 'light') document.documentElement.removeAttribute('data-theme');
+    else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+    function toggleTheme() {
+      const isDark = document.documentElement.hasAttribute('data-theme');
+      if (isDark) { document.documentElement.removeAttribute('data-theme'); localStorage.setItem('rb-theme', 'light'); }
+      else { document.documentElement.setAttribute('data-theme', 'dark'); localStorage.setItem('rb-theme', 'dark'); }
+    }
+
+    // 복사
+    function copyCode(btn) {
+      const pre = btn.nextElementSibling;
+      navigator.clipboard.writeText(pre.innerText).then(() => {
+        btn.classList.add('copied');
+        btn.textContent = '복사됨';
+        setTimeout(() => { btn.classList.remove('copied'); btn.textContent = '복사'; }, 1200);
+      });
+    }
+
+    // 체크리스트 + 진행률
+    function saveCheck(el) {
+      localStorage.setItem('rb-' + el.dataset.key, el.checked ? '1' : '0');
+      updateProgress();
+      el.closest('.check').classList.toggle('done', el.checked);
+    }
+    function loadChecks() {
+      document.querySelectorAll('.check input').forEach(el => {
+        const v = localStorage.getItem('rb-' + el.dataset.key);
+        if (v === '1') { el.checked = true; el.closest('.check').classList.add('done'); }
+      });
+      updateProgress();
+    }
+    function updateProgress() {
+      const all = document.querySelectorAll('.check input');
+      const done = document.querySelectorAll('.check input:checked');
+      const pct = all.length ? (done.length / all.length * 100) : 0;
+      document.getElementById('progress').style.width = pct + '%';
+    }
+    loadChecks();
+  </script>
+</body>
+</html>

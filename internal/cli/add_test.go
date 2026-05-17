@@ -47,7 +47,7 @@ func TestAdd_Preset_Local(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(data), "name: solo-ralph")
 	require.Contains(t, out.String(), "Installed preset solo-ralph")
-	require.Contains(t, out.String(), "rallish start --preset solo-ralph")
+	require.Contains(t, out.String(), "rallish squash --preset solo-ralph")
 }
 
 func TestAdd_Preset_Global(t *testing.T) {

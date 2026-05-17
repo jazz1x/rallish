@@ -176,7 +176,7 @@ func runAdd(ctx context.Context, opts AddOptions, args []string) error {
 
 	switch typ {
 	case "preset":
-		usage = fmt.Sprintf("rallish start --preset %s", name)
+		usage = fmt.Sprintf("rallish squash --preset %s", name)
 	case "adapter":
 		usage = fmt.Sprintf("Use runtime %q in your presets", name)
 	case "skill":

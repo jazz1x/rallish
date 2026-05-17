@@ -16,29 +16,37 @@
 
 | 機能 | 説明 |
 |------|------|
-| **ターン制実行** | 共有ブローカーを介してエージェントが交互に実行 |
+| **Squash（ヘッドレス）** | `rallish squash` でヘッドレスプリセットセッションを実行（`solo-ralph`、`pair-review`）; ブローカーがアダプターを自動スポーン |
+| **Rally（インタラクティブ）** | `rallish rally` で 2 つ以上の人間ターミナル間のライブバトン受け渡し; SSE による排他的ホルダー強制 |
 | **A2A プロトコル** | `/.well-known/agent.json`, JSON-RPC 2.0 タスク, SSE ストリーミング |
 | **トークン予算** | セッションごとのトークン、ターン数、時間の上限を強制 |
 | **スクラッチパッド** | 自動圧縮(compaction)が適用されたローリング共有スクラッチ |
 | **プリセット** | 役割、ルーティング、終了条件を定義した YAML テンプレート |
+| **Unix ソケット IPC** | CLI↔Daemon が `~/.rallish/rallish.sock`(`0600`) 経由。A2A 外部クライアントと Windows フォールバック用に TCP ループバックを保持 |
+| **自動デーモン** | `rallish squash` がブローカー未起動時に自動スポーン。`rallish doctor` がソケット到達性を報告 |
 | **セキュリティ** | パストラバーサル防御、シークレットマスキング、最小限の環境変数許可リスト |
 
 ## アーキテクチャ
 
 ```
 ┌──────────────────────────────────────────┐
-│  rallish ブローカー (Go, 127.0.0.1)      │
+│  rallish ブローカー (Go)                 │
 │  POST /sessions                          │
 │  GET  /sessions/:id/next?as=<role> (SSE) │
 │  POST /sessions/:id/turn                 │
 │  GET  /.well-known/agent.json            │
 │  POST /a2a                               │
-└────────▲─────────────────────▲───────────┘
-         │                     │
-   ┌─────┴──────┐       ┌─────┴──────┐
-   │  エージェントA │       │  エージェントB │
-   └────────────┘       └────────────┘
+└──┬───────────────┬───────────────────┬───┘
+   │ unix socket   │ unix socket       │ tcp ループバック
+   │ ~/.rallish/   │ ~/.rallish/       │ 127.0.0.1:<port>
+   │ rallish.sock  │ rallish.sock      │ (A2A + フォールバック)
+┌──┴─────────┐   ┌─┴────────┐      ┌──┴───────────┐
+│エージェントA│   │エージェントB│      │ 外部 A2A     │
+│  (CLI)     │   │  (CLI)   │      │ クライアント │
+└────────────┘   └──────────┘      └──────────────┘
 ```
+
+同じブローカーが両トランスポートを同時に提供します。CLI(`rallish squash`, `rallish rally`, `rallish doctor`) は Unix ソケットを優先し、外部 A2A クライアントは TCP ループバックを使用します。
 
 ## 前提条件
 
@@ -54,42 +62,82 @@ which claude      # $PATH 上のサポート対象アダプターバイナリ
 
 ## インストール
 
-### オプション 1 — ソースからビルド (開発用に推奨)
+コマンド 1 つ:
 
 ```bash
-git clone https://github.com/jazz1x/rallish.git
-cd rallish
-make build
+npx skills add jazz1x/rallish
 ```
 
-バイナリは `./dist/rallish` に生成されます。
+スキルバンドル (SKILL.md + バイナリインストーラ) を
+`~/.claude/skills/rallish-operator/` に配置します。
+[skills.sh](https://www.skills.sh) 経由で解決。
 
-### オプション 2 — Homebrew (初回リリース以降)
+任意のプロジェクトで Claude Code (またはスキル対応の他のコーディング CLI)
+を開き、`랠리보낼 준비해` / `let's serve` と入力。初回使用時にバンドル済み
+のプラットフォーム検出スクリプト (`scripts/install-binary.sh`) で `rallish`
+バイナリを自動インストール (最新 GitHub Release → `/usr/local/bin` または
+`~/.local/bin`)。
 
-```bash
-brew tap jazz1x/rallish
-brew install rallish
-```
+<details>
+<summary><b>パワーユーザー向け (バンドルをバイパス)</b></summary>
 
-### オプション 3 — go install
+| 方法 | コマンド |
+|---|---|
+| **Homebrew tap** (macOS) | `brew install jazz1x/rallish/rallish` <br>または `brew tap jazz1x/rallish && brew install rallish` |
+| **curl** (Unix 全般) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
+| **ソースビルド** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
+| **`go install`** | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
 
-```bash
-go install github.com/jazz1x/rallish@latest
-```
+バイナリが `$PATH` にあれば `rallish bootstrap` (冪等) がスキルバンドル
+インストールとデーモン検証を行います。
+</details>
 
 ## クイックスタート
 
 ```bash
-# 環境チェック
+# 環境チェック (アダプター有無 + デーモン到達性を報告)
 ./dist/rallish doctor
 
-# ターン制実行セッションを開始
-./dist/rallish start \
+# 同梱アダプター/プリセット一覧
+./dist/rallish add --list
+
+# ヘッドレスプリセットセッションを開始 (デーモン自動スポーン)
+./dist/rallish squash \
   --preset pair-review \
   --task "OAuth2 サポートを追加" \
   --repo ./my-project
 
-# A2A discovery
+# 実アダプターなしでスモークテスト (fake / 決定論的, 3 ターン)
+cat > ~/.rallish/presets/fake-demo.yaml <<'EOF'
+name: fake-demo
+roles:
+  - {id: ralph, runtime: fake, model: fake-1}
+routing: round_robin
+budget: {max_turns: 3, max_tokens: 10000, deadline_minutes: 5}
+exit_when: [turns_exhausted]
+scratch: {max_kb: 16}
+EOF
+./dist/rallish squash --preset fake-demo --task "smoke test" --repo /tmp
+
+# 2 ターミナル テニスラリー (ライブバトン受け渡し)
+# skills/rallish-operator による自然言語 UX を推奨 —
+# エージェント (Claude Code, Cursor など) がすべての rally コマンドを代行します。
+# ターミナル A のコーディング CLI セッション:        "랠리보낼 준비해"
+# エージェント: → rally new + role=server, SID を出力。
+# ターミナル B のコーディング CLI セッション:        "랠리받을 준비해 <SID>"
+# エージェント: → rally status + role=returner, 待機。
+# 再びターミナル A:                                "시작"
+# エージェント: 最初のターンをサーブし、要約 note 付きで rally done。
+# ターミナル B:                                    "내 차례"
+# エージェント: バトンを受け取り、リターンして rally done。
+# どちらでも、終了時:                              "끝"
+#
+# Raw CLI (スキルが内部呼び出し / スクリプト用):
+SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-up rally")
+./dist/rallish rally status --session-id $SESSION
+./dist/rallish rally done   --session-id $SESSION --as server --note "draft v1"
+
+# A2A discovery (外部クライアントは TCP ループバックを使用)
 curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent.json
 
 # A2A タスク送信
@@ -98,15 +146,48 @@ curl -X POST http://127.0.0.1:$(cat ~/.rallish/port)/a2a \
   -d '{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"Hello"}]}}}'
 ```
 
+ターンごとのリクエスト/レスポンスは `~/.rallish/sessions/<id>/log.jsonl` に記録されます。
+
 ## 使い方
 
-### 1. セッションを開始
+### 1. ヘッドレスセッションを開始
 
 ```bash
-rallish start --preset <name> --task "<説明>" --repo <パス>
+rallish squash --preset <name> --task "<説明>" --repo <パス>
 ```
 
 プリセットは `internal/preset/presets/` (同梱) または `~/.rallish/presets/` (カスタム) にあります。プリセットの作成方法は [docs/handbook.md](docs/handbook.md) を参照してください。
+
+### 1b. インタラクティブラリーセッションを開始
+
+**エージェント主導 (推奨).** スキルを自動検出するコーディング CLI
+(Claude Code, Cursor など) でこのリポを開くと、
+[`skills/rallish-operator`](skills/rallish-operator/SKILL.md) スキルが
+以下の自然言語トリガーでロードされます:
+
+| 発話 | エージェント動作 |
+|---|---|
+| `랠리보낼 준비해` / `let's serve` | `rally new` 実行、ROLE=`server`、SID 出力 |
+| `랠리받을 준비해 <SID>` / `let's return` | `rally status` 実行、ROLE=`returner`、待機 |
+| `시작` / `go` (サーバー側) | 最初のターンをサーブ後、要約 note 付きで `rally done` |
+| `내 차례` / `is it my turn` (レシーバー側) | `rally status`; 自分のターンなら前 note を読み作業後 `rally done` |
+| `끝` / `match over` | クリーン終了 |
+
+`시작` / `go` / `끝` / `내 차례` のような短いトリガーは、直前の prep
+トリガーで ROLE+SID が既に設定された場合にのみ有効化 — 無関係な汎用語は
+無視されます。
+
+**Raw CLI (スクリプトやスキル未対応クライアント用):**
+
+```bash
+rallish rally new    --participants <a>,<b> [--task "<説明>"]
+rallish rally join   --session-id <id> --as <名前>           # SSE ブロック
+rallish rally done   --session-id <id> --as <名前> [--note "<サマリ>"] [--handoff-to <名前>]
+rallish rally status --session-id <id>
+```
+
+完全な 2 ターミナルウォークスルーは [docs/runbook-rally-mode.md](docs/runbook-rally-mode.md)
+を参照してください。
 
 ### 2. A2A 連携
 
@@ -127,21 +208,46 @@ Claude 2 つ、Kimi 2 つ、または任意の組み合わせも可能です。�
 
 予算（トークン、ターン数、デッドライン）はセッションごとに強制されます。予算が尽きると、ブローカーは `410 Gone` を返し、再開できるようにスクラッチパッドを保存します。
 
-### 4. カスタムプリセット
+### 5. カスタムプリセット
 
 `~/.rallish/presets/<name>.yaml` に YAML ファイルを配置してください:
 
 ```yaml
 name: my-preset
+description: 任意の 1 行サマリ。
 roles:
-  planner:
-    adapter: claude
-    model: claude-3-5-sonnet-20241022
-routing:
-  - planner
-exit:
-  maxTurns: 10
+  - id: planner
+    runtime: claude
+    model: opus
+  - id: executor
+    runtime: kimi
+    model: kimi-k2
+routing: handoff_then_round_robin    # または round_robin
+budget:
+  max_turns: 20
+  max_tokens: 400000
+  deadline_minutes: 60
+exit_when: [tests_pass, reviewer_approved, turns_exhausted]
+scratch:
+  max_kb: 64
+  summarize_with: claude-haiku
 ```
+
+### 6. デーモンのライフサイクル
+
+```bash
+rallish daemon &                            # 明示起動 (任意 — squash が自動スポーン)
+ls ~/.rallish/                              # rallish.sock (0600), socket, port, sessions/
+kill -TERM $(pgrep -f "rallish daemon")     # graceful 終了で 3 ファイル全て削除
+```
+
+`rallish doctor` で到達性確認:
+
+```
+daemon reachable via unix socket path=/Users/<you>/.rallish/rallish.sock perm=-rw-------
+```
+
+Windows ではブローカーは TCP ループバックのみを使用します (Unix ソケットスタブが `ErrUnsupported` を返却)。
 
 ## セキュリティ
 
