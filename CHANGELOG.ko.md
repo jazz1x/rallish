@@ -7,6 +7,8 @@
 
 ## [미발표]
 
+## [0.1.1] - 2026-05-17
+
 ### 변경됨
 
 - `.goreleaser.yaml`의 `brews:` 블록을 임시 비활성. Homebrew tap 리포
