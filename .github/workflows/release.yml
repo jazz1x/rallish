@@ -6,9 +6,8 @@ on:
       - "v*"
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: write     # publish GitHub Release
+  id-token: write     # cosign keyless signing (sigstore OIDC)
 
 jobs:
   release:
