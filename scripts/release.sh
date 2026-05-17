@@ -132,7 +132,27 @@ fi
 echo "$NEW" > "$VERSION_FILE"
 bash "$ROOT_DIR/scripts/update-version.sh"
 
-git add VERSION README.md README.ko.md README.jp.md
+# Rotate the CHANGELOG header: "## [Unreleased]" → "## [Unreleased]\n\n## [X.Y.Z] - YYYY-MM-DD"
+# Done in-place across the 3 language files. Uses today's UTC date.
+RELEASE_DATE="$(date -u +%Y-%m-%d)"
+for f in CHANGELOG.md CHANGELOG.ko.md CHANGELOG.jp.md; do
+  if [ -f "$ROOT_DIR/$f" ]; then
+    # macOS sed (-i '') + GNU sed both accept the empty-string form via a tmpfile dance.
+    awk -v new="$NEW" -v date="$RELEASE_DATE" '
+      /^## \[Unreleased\]$|^## \[미발표\]$|^## \[未発表\]$/ && !seen {
+        print
+        print ""
+        print "## [" new "] - " date
+        seen = 1
+        next
+      }
+      { print }
+    ' "$ROOT_DIR/$f" > "$ROOT_DIR/$f.tmp"
+    mv "$ROOT_DIR/$f.tmp" "$ROOT_DIR/$f"
+  fi
+done
+
+git add VERSION README.md README.ko.md README.jp.md CHANGELOG.md CHANGELOG.ko.md CHANGELOG.jp.md
 git commit -m "release: v$NEW"
 git tag -a "v$NEW" -m "Release v$NEW"
 
