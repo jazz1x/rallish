@@ -14,6 +14,7 @@ import (
 	"github.com/jazz1x/rallish/internal/adapter/claude"
 	"github.com/jazz1x/rallish/internal/adapter/kimi"
 	"github.com/jazz1x/rallish/internal/ipc"
+	"github.com/jazz1x/rallish/internal/safepath"
 )
 
 type pathReporter interface {
@@ -90,31 +91,42 @@ func checkDaemon(ctx context.Context, logger *slog.Logger, homeDir string) {
 
 	switch {
 	case perr == nil && socketPath != "":
-		info, serr := os.Stat(socketPath)
+		// Guard: the pointer file is user-owned but its content could be
+		// tampered. Refuse paths that escape ~/.rallish/ before touching them.
+		if uerr := safepath.UnderRoot(socketPath, sockDir); uerr != nil {
+			logger.Warn("daemon socket pointer escapes rallish home; ignoring", "pointer", pointer, "path", socketPath, "error", uerr)
+			break
+		}
+		safePath, cerr := safepath.Clean(socketPath)
+		if cerr != nil {
+			logger.Warn("daemon socket pointer invalid", "pointer", pointer, "path", socketPath, "error", cerr)
+			break
+		}
+		info, serr := os.Stat(safePath)
 		if serr != nil {
-			logger.Warn("daemon socket pointer present but socket file missing", "pointer", pointer, "path", socketPath, "error", serr)
+			logger.Warn("daemon socket pointer present but socket file missing", "pointer", pointer, "path", safePath, "error", serr)
 			break
 		}
 		mode := info.Mode()
 		if mode&fs.ModeSocket == 0 {
-			logger.Warn("daemon socket pointer references non-socket file", "path", socketPath, "mode", mode.String())
+			logger.Warn("daemon socket pointer references non-socket file", "path", safePath, "mode", mode.String())
 			break
 		}
 		perm := mode.Perm()
 		if perm&0o077 != 0 {
-			logger.Warn("daemon socket has loose permissions; expected 0600", "path", socketPath, "perm", perm.String())
+			logger.Warn("daemon socket has loose permissions; expected 0600", "path", safePath, "perm", perm.String())
 		}
 
 		dialCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
 		defer cancel()
-		s := ipc.Socket{Path: socketPath}
+		s := ipc.Socket{Path: safePath}
 		conn, derr := s.Dial(dialCtx)
 		if derr != nil {
-			logger.Warn("daemon unix socket not reachable", "path", socketPath, "error", derr)
+			logger.Warn("daemon unix socket not reachable", "path", safePath, "error", derr)
 			break
 		}
 		_ = conn.Close()
-		logger.Info("daemon reachable via unix socket", "path", socketPath, "perm", perm.String())
+		logger.Info("daemon reachable via unix socket", "path", safePath, "perm", perm.String())
 		return
 	case errors.Is(perr, fs.ErrNotExist):
 		// Fall through to port check.
