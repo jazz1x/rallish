@@ -7,6 +7,18 @@
 
 ## [미발표]
 
+### 추가됨
+
+- **랠리 패턴** — 랠리 프리미티브 위에 레이어된 세 가지 동작 패턴:
+  **cycle** (플래너 ↔ 익스큐터, `[plan]`/`[result]`/`[review]` 노트 컨벤션),
+  **discuss** (피어 ↔ 피어, 상호 `[agree]`로 수렴하는 설계 토론), **help**
+  (오너 ↔ 헬퍼, `[stuck]`/`[hint]`/`[try]`/`[resolved]` 짧은 비대칭 교환).
+  패턴은 서버 준비 시 자연어 큐로 선택 (`"사이클로 가자"`, `"논의 랠리"`,
+  `"막혔어 도와줘"`). 브로커 / CLI / 컨트랙트 변경 없음; rallish-operator
+  스킬 본문에 컨벤션으로 인코딩 (v0.1.0 → v0.2.0). 참고:
+  [docs/prd-rally-patterns.md](docs/prd-rally-patterns.md) 및
+  [docs/runbook-rally-mode.md#rally-patterns](docs/runbook-rally-mode.md#rally-patterns).
+
 ## [0.1.1] - 2026-05-17
 
 ### 변경됨

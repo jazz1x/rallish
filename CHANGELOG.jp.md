@@ -7,6 +7,19 @@
 
 ## [未発表]
 
+### 追加
+
+- **ラリーパターン** — ラリープリミティブの上にレイヤーされた 3 つの動作
+  パターン: **cycle** (プランナー ↔ エグゼキューター、`[plan]`/`[result]`/
+  `[review]` ノート規約)、**discuss** (ピア ↔ ピア、相互 `[agree]` に収束
+  する設計議論)、**help** (オーナー ↔ ヘルパー、`[stuck]`/`[hint]`/`[try]`/
+  `[resolved]` による短い非対称交換)。パターンはサーバー準備時に自然言語
+  キューで選択 (`"사이클로 가자"`、`"논의 랠리"`、`"막혔어 도와줘"`)。
+  ブローカー / CLI / コントラクト変更なし; rallish-operator スキル本体に
+  規約としてエンコード (v0.1.0 → v0.2.0)。参照:
+  [docs/prd-rally-patterns.md](docs/prd-rally-patterns.md) および
+  [docs/runbook-rally-mode.md#rally-patterns](docs/runbook-rally-mode.md#rally-patterns)。
+
 ## [0.1.1] - 2026-05-17
 
 ### 変更
