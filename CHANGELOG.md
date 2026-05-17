@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Disable the `brews:` block in `.goreleaser.yaml` temporarily. The
+  Homebrew tap repo (`jazz1x/homebrew-rallish`) and `TAP_GITHUB_TOKEN`
+  secret are not yet provisioned; v0.1.0's release pipeline failed at
+  the brew publish step. Until the tap is set up, install via the curl
+  one-liner, `npx skills add`, or source build. Brew returns in a
+  follow-up release.
+
 ## [0.1.0] - 2026-05-17
 
 Adds rally mode (live baton-passing between two interactive coding-CLI

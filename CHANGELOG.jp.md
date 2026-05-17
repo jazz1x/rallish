@@ -7,6 +7,15 @@
 
 ## [未発表]
 
+### 変更
+
+- `.goreleaser.yaml` の `brews:` ブロックを一時的に無効化。Homebrew
+  tap リポジトリ (`jazz1x/homebrew-rallish`) と `TAP_GITHUB_TOKEN`
+  シークレットがまだ未設定で、v0.1.0 のリリースパイプラインが brew
+  publish ステップで失敗。tap セットアップまでは curl ワンライナー、
+  `npx skills add`、またはソースビルドで使用。Homebrew は次のリリースで
+  復活予定。
+
 ## [0.1.0] - 2026-05-17
 
 2 つのライブコーディング CLI セッション間のライブバトン受け渡し

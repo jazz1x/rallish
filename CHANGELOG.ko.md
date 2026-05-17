@@ -7,6 +7,14 @@
 
 ## [미발표]
 
+### 변경됨
+
+- `.goreleaser.yaml`의 `brews:` 블록을 임시 비활성. Homebrew tap 리포
+  (`jazz1x/homebrew-rallish`)와 `TAP_GITHUB_TOKEN` 시크릿이 아직 미설정
+  상태로, v0.1.0 릴리즈 파이프라인이 brew publish 단계에서 실패함. tap
+  셋업 전까지는 curl 원라이너, `npx skills add`, 또는 소스 빌드로 설치.
+  Homebrew 는 후속 릴리즈에서 복구.
+
 ## [0.1.0] - 2026-05-17
 
 두 라이브 코딩 CLI 세션 사이의 라이브 바톤 전달(랠리 모드) 추가, 운용
