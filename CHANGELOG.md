@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-05-17
+
 Adds rally mode (live baton-passing between two interactive coding-CLI
 sessions), packages the operator playbook as a vendor-neutral skill
 bundle, hardens IPC + tag pipeline. Will land as v0.1.0 once tagged.
