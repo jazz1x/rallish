@@ -467,6 +467,123 @@ are unaware of the switch; it is a pure convention between the two agents.
 
 ---
 
+## Autoflow (v0.3+)
+
+Starting with `rallish-operator` v0.3.0 and the matching CLI additions, both
+sides of a rally can run fully autonomously after a **single setup trigger per
+side**. The user types one sentence (server: `랠리보낼 준비해`; returner:
+`랠리받을 준비해 <SID>`), and the agent handles every subsequent turn — composing
+notes, calling `rally done`, waiting for the baton, and repeating — until a
+pattern-specific exit signal or the user types `끝`.
+
+What changed versus v0.2.0: the server no longer needs a phantom SSE join to
+claim the baton (replaced by `rally new --first server`), and the returner no
+longer needs to type `내 차례` between every turn (replaced by `rally join
+--once --timeout 5m` blocking in a loop). Manual triggers (`내 차례`, `끝`, etc.)
+remain supported at any time for override or fallback.
+
+### Server-side (autoflow)
+
+The user types:
+
+```
+랠리보낼 준비해 — 사이클로 가자
+```
+
+The agent runs `rallish doctor`, then creates the session with the baton
+pre-assigned:
+
+```sh
+SID=$(rallish rally new \
+      --participants server,returner \
+      --first server \
+      --task "[pattern:cycle] OAuth2 PKCE 도입")
+```
+
+Because of `--first server`, the session is immediately in `server_turn` /
+`holder=server` / `turnN=1` — no SSE join is needed to claim the baton.
+
+The agent tells the user:
+
+```
+🎾 Server 준비 완료. Session ID: rly_1747382400000_a3f9
+다른 터미널에서 "랠리받을 준비해 rly_1747382400000_a3f9" 라고 말해줘.
+```
+
+The agent then composes and sends the first turn immediately:
+
+```sh
+rallish rally done \
+      --session-id "$SID" \
+      --as server \
+      --note "[plan] step 1: add OAuth2 PKCE client config"
+```
+
+And enters the auto-loop — waiting for the baton, responding, and repeating
+without further user input.
+
+### Receiver-side (autoflow)
+
+In the second terminal the user types:
+
+```
+랠리받을 준비해 rly_1747382400000_a3f9
+```
+
+The agent confirms the session:
+
+```sh
+rallish rally status --session-id rly_1747382400000_a3f9
+```
+
+It parses the `[pattern:cycle]` prefix from the `task` field, sets its own
+`PATTERN=cycle`, frames itself as executor, and immediately enters the
+auto-loop. **No `내 차례` trigger is required.** The first iteration of the loop
+is:
+
+```sh
+rallish rally join \
+      --session-id rly_1747382400000_a3f9 \
+      --as returner \
+      --once \
+      --timeout 5m
+```
+
+This blocks until the baton arrives (exit 0) or 5 minutes pass with no baton
+(exit 2). On exit 0 the agent reads the cue, composes its response, calls
+`rally done`, checkpoints to the user with a one-liner, then loops back to
+`rally join --once` for the next turn.
+
+### Behaviour reference
+
+| Aspect | Detail |
+|---|---|
+| **discuss** exit | Both sides emit `[agree]` within the last two turns (mutual convergence). |
+| **cycle** exit | Planner emits `[review] approved` and there are no pending `[plan]` items in history. |
+| **help** exit | Owner emits `[resolved] …` (helper detects this and stops the loop). |
+| **Timeout fallback** | If no baton arrives within 5 minutes, the agent checkpoints to the user: `"🎾 5분간 baton 없음. 계속 대기할까(엔터)? 끝낼까(끝)?"`. Default: loop again on silence; break on `끝`. |
+| **Hard ceiling** | After 20 iterations without an exit signal the agent pauses and asks the user whether to continue: `"🎾 20턴 넘었어. 정리할까?"`. |
+| **User interruption** | The agent yields to the user between every `rally done` and the next `rally join --once`. If the user types anything during that window — including `끝` — the loop honours it. Silence = continue. |
+
+### When to fall back to manual mode
+
+The auto-loop requires the agent process to remain active between turns. If the
+loop blocks unexpectedly (network blip, broker restart, or long agent
+compaction), the user can always type `내 차례` and the v0.2.0 manual flow
+resumes without any setup change:
+
+```sh
+rallish rally status --session-id $SID   # confirm it's your turn
+rallish rally done   --session-id $SID \
+                     --as returner \
+                     --note "[result] …"
+```
+
+The two flows are compatible with the same session; switching between auto and
+manual mid-session is safe.
+
+---
+
 ## Reference
 
 - PRD: [`docs/prd-rally-mode.md`](./prd-rally-mode.md)

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Rally autoflow — agents now self-loop the baton ping-pong after one
+  setup trigger per side. Two new CLI affordances unlock it:
+  - `rally new --first <name>` — pre-assigns the baton at create time;
+    no SSE phantom-join trick required.
+  - `rally join --once [--timeout <dur>]` — exits cleanly after the
+    first baton event, with exit code 2 on timeout. Default behaviour
+    (block forever, multi-event) preserved when flags absent.
+  Skill bumped to v0.3.0 with an `## Auto-Loop` body section detailing
+  the join → read → work → done → repeat cycle plus pattern-specific
+  exit signals (mutual `[agree]`, final `[review] approved`,
+  `[resolved]`). Backwards-compatible: v0.2.0 sessions and CLI calls
+  unchanged.
+
 ## [0.1.2] - 2026-05-17
 
 ### Added

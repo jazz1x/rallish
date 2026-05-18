@@ -199,6 +199,16 @@ for full walkthroughs and
 [docs/prd-rally-patterns.md](prd-rally-patterns.md) for the design
 rationale.
 
+**Autoflow (v0.3+):** by default the rallish-operator skill v0.3.0
+drives both sides autonomously after a single setup trigger per
+side. Each agent uses `rally new --first <name>` (server) and
+`rally join --once --timeout 5m` (both sides) so the baton ping-pongs
+without user intervention between turns. The loop exits on
+pattern-specific signals (mutual `[agree]`, final `[review] approved`,
+or `[resolved]`) or the user typing `끝`. See
+[docs/runbook-rally-mode.md#autoflow-v03](runbook-rally-mode.md#autoflow-v03)
+and [docs/prd-rally-autoflow.md](prd-rally-autoflow.md).
+
 ## Security
 
 - Daemon binds Unix socket at `~/.rallish/rallish.sock` (mode `0600`)
@@ -230,3 +240,4 @@ rationale.
 | `adapter not found: claude` | CLI binary not on `$PATH` | Install the `claude` CLI and ensure `which claude` succeeds. |
 | Budget exceeded early | Token-count drift between adapter & broker | Verify `model:` in your preset matches the model the adapter actually invokes. |
 | `Error: Skill not found: rallish-operator` in Claude Code | Skill bundle not installed globally | `npx skills add jazz1x/rallish` or `rallish skill install` |
+| `rally join` exits with code 2 | `--timeout` fired (default 5 m of no baton) | Normal — the auto-loop will checkpoint to user; either wait, or type `끝`. |
