@@ -6,8 +6,9 @@ description: >
   prep, returner prep, serving the first turn, picking up subsequent turns,
   and clean shutdown. Also covers squash mode (headless preset orchestration).
   Supports three behavioural patterns layered on top of the baton: cycle (plan/execute/review), discuss (multi-perspective), and help (stuck-help).
+  v0.3 ships an autonomous loop: after a single setup trigger per side, both agents self-poll on `rally join --once` and ping-pong without user prompts between turns.
   Triggers: "랠리보낼 준비해", "let's serve", "serve prep", "rally prep — serving", "서브 준비", "랠리받을 준비해", "let's return", "returner prep", "rally prep — returning", "리턴 준비", "시작", "serve!", "go", "start rally", "내 차례", "내 차례 됐어?", "is it my turn", "ready", "ready to return", "끝", "match over", "stop rally", "랠리 끝", "cycle", "plan-execute-review", "사이클로 가자", "discuss", "discussion rally", "논의 랠리", "여러 시선으로", "stuck rally", "help me out", "막혔어 도와줘", "한 번만 봐줘"
-version: 0.2.0
+version: 0.3.0
 ssl:
   scheduling:
     anti_triggers:
@@ -17,7 +18,7 @@ ssl:
       - "Skill audit / SSL inspection — use galmuri:audit"
       - "Short triggers '시작' / 'go' / '끝' / '내 차례' are STATE-GATED. Match only when conversation already holds ROLE and SID (set by a prior 'serve prep' or 'returner prep' trigger). Bare 'go' / '시작' / '끝' in unrelated context must be ignored — treat as normal language, not a rally signal."
   structural:
-    scenes: [ServerPrep, PatternSelect, ReceiverPrep, Serve, Return, Continue, MatchOver]
+    scenes: [ServerPrep, PatternSelect, ReceiverPrep, Serve, Return, Continue, AutoLoop, MatchOver]
     resumable: true
     branches:
       - "ServerPrep: daemon not running → run `rallish daemon &` in background before `rally new`"
@@ -36,6 +37,10 @@ ssl:
       - "pattern discuss → both sides peer; convergence detected by mutual [agree] within 2 turns OR user '끝'"
       - "pattern help → owner stays driving; helper provides at most ~3 [hint] turns; owner's [resolved] ends session"
       - "mid-rally switch → [switch-pattern:<name>] proposed, acked next turn by [switch-ack:<name>]"
+      - "server prep uses `rally new --first server` so the baton is pre-assigned (no SSE phantom-join trick needed)"
+      - "between turns each side runs `rally join --once --timeout 5m --as <ROLE>` which blocks until the next baton arrives or the timeout fires (exit 2)"
+      - "join exit 2 (timeout) → checkpoint user '5분간 baton 없음. 계속 대기할까 혹은 끝낼까?'; default behaviour: loop again unless user types `끝`"
+      - "pattern-specific exit signal hit → agent emits a final user-facing summary and stops the loop"
   logical:
     tools: [Bash, Read]
     side_effects:
@@ -85,20 +90,40 @@ Refer to the chosen path as `$RALLISH` for the rest of this skill.
 - PHASE: prep / serving / returning / done
 - RALLISH: resolved binary path (see above)
 - PATTERN: cycle | discuss | help | freeform (default; set by Trigger A or by mid-rally switch)
+- LAST_HOLDER: who the agent last saw as holder (used to detect baton arrival)
+- EXIT_REASON: filled on loop exit ('mutual-agree', 'review-approved', 'resolved', 'user-끝', 'timeout-abandoned')
 
 ## Trigger A — "랠리보낼 준비해" (or English equivalents)
 The agent on this side becomes the server.
 
 1. Run `rallish doctor` to confirm broker reachable. If daemon not running,
    run `rallish daemon &` in the background.
-2. Run `SID=$(rallish rally new --participants server,returner --task "TBD")`.
-   Parse SID from stdout.
+2. Run rally new with the new --first server flag:
+
+   ```sh
+   SID=$(rallish rally new --participants server,returner --first server \
+         --task "[pattern:$PATTERN] $TASK_TEXT")
+   ```
+
+   Because of --first, the session is immediately in server_turn / holder=server /
+   turnN=1 — no SSE join needed to claim the baton.
+
 3. Save state: SID, ROLE=server, PHASE=prep.
 3a. Pattern selection. Scan the user's original "랠리보낼 준비해" message for a pattern cue (see "Rally Patterns" section below). If a cue is present, set PATTERN accordingly. Otherwise ask once: "패턴 선택 — cycle (계획/실행/검토), discuss (다관점 논의), help (막힐 때 짧은 조언), freeform (자유)?" with a 1-turn timeout to default freeform. Encode the chosen pattern as a `[pattern:<name>]` prefix in `rally new --task`, e.g. `--task "[pattern:cycle] OAuth2 PKCE 도입"`. The receiver side parses this prefix from `rally status`.
 4. Tell user:
    > Server 준비 완료. Session ID: <SID>.
    > 다른 터미널에서 "랠리받을 준비해 <SID>" 라고 말해줘.
-   > 받는 쪽 준비되면 여기에 "시작" 이라고 해.
+
+5a. **Serve the first turn yourself.** Compose your first note per the
+    selected PATTERN:
+    - cycle: `[plan] step 1: <one-line directive>`
+    - discuss: `[opinion] <stance + rationale>`
+    - help: `[stuck] symptom: …, tried: …`
+
+    Run: `rallish rally done --session-id $SID --as server --note "<above>"`.
+    Status now: returner_turn.
+
+5b. **Enter the auto-loop** (see "Auto-Loop" section below).
 
 ## Trigger B — "랠리받을 준비해 <SID>" (or English equivalents)
 The agent on this side becomes the returner.
@@ -110,7 +135,10 @@ The agent on this side becomes the returner.
 3a. Detect pattern. From `rally status` output, parse the leading `[pattern:<name>]` token off the `task` field. Set local PATTERN = that name (or `freeform` if absent). Mirror the role framing in §Rally Patterns below.
 4. Tell user:
    > Returner 준비 완료. 서버가 서브할 때까지 대기 중.
-   > 서버가 넘겼다고 알려주면 그냥 "내 차례" 라고 말해.
+
+4a. **Enter the auto-loop** (see "Auto-Loop" section below). The
+    receiver does NOT wait for a `내 차례` user trigger — the
+    `rally join --once` call blocks until baton arrives.
 
 ## Trigger C — "시작" (server side, after prep)
 The agent serves the first turn.
@@ -125,6 +153,11 @@ The agent serves the first turn.
    > 상대 터미널에서 "내 차례" 라고 말하면 받을 거야.
 
 ## Trigger D — "내 차례" (any input after prep, on receiver side)
+
+**Note (v0.3+):** the auto-loop replaces the need for `내 차례` between
+turns. This trigger remains supported for manual override or when
+the loop is paused.
+
 The agent picks up the baton if it's its turn.
 
 1. Run `rallish rally status --session-id $SID`.
@@ -143,6 +176,69 @@ Clean shutdown.
 1. Tell user: "랠리 종료. 데몬은 살아있어 — 다음 세션도 같은 데몬 씀.
    완전히 끄려면 `kill -TERM $(pgrep -f 'rallish daemon')` 직접 실행."
 2. Forget state.
+
+## Auto-Loop (both sides)
+
+After Trigger A's first turn (server) or Trigger B's prep (returner),
+each side runs the same loop. The user does not need to type any
+trigger between turns.
+
+```
+while true:
+    cue = bash("rallish rally join --session-id $SID --as $ROLE --once --timeout 5m")
+    exit_code = $?
+
+    if exit_code == 2:
+        # timeout — broker quiet for 5 minutes
+        tell user: "🎾 5분간 baton 없음. 계속 대기할까(엔터)? 끝낼까(끝)?"
+        if user typed 끝: break with EXIT_REASON=timeout-abandoned
+        else: continue   # loop again
+
+    # baton arrived — parse the cue line for turn + from + note
+    parse_cue(cue) → TURN, FROM, NOTE
+
+    # detect pattern-specific exit
+    if PATTERN == discuss and last_two_history_notes_are("[agree]", "[agree]"):
+        EXIT_REASON = mutual-agree; tell user "🎾 양쪽 [agree]. 랠리 종료."; break
+    if PATTERN == cycle and NOTE.startswith("[review] approved") and no_pending_plan_in_history():
+        EXIT_REASON = review-approved; tell user "🎾 사이클 완료."; break
+    if PATTERN == help and NOTE.startswith("[resolved]") and ROLE == helper:
+        EXIT_REASON = resolved; tell user "🎾 owner가 [resolved]. 도움 랠리 종료."; break
+
+    # compose a response per PATTERN + previous NOTE
+    new_note = compose_response(PATTERN, NOTE, history)
+    bash("rallish rally done --session-id $SID --as $ROLE --note '$new_note'")
+
+    # checkpoint to user (one-liner)
+    tell user: "🎾 보냈어: <new_note 첫 60자>. 다음 차례 대기 중."
+
+    # before looping, yield: if the user typed anything during the
+    # checkpoint window, honour it. user '끝' breaks the loop:
+    if user_message_pending and contains_끝:
+        EXIT_REASON = user-끝; tell user "랠리 종료."; break
+```
+
+**Heuristics inside the loop:**
+- `compose_response(discuss, NOTE, history)` — if NOTE was `[opinion]`,
+  emit `[counter]` or `[agree]` based on the agent's own view; if
+  NOTE was `[question]`, emit `[opinion]` answering it.
+- `compose_response(cycle, NOTE, history)` — if ROLE==executor and
+  NOTE was `[plan]`, do the work and emit `[result]`; if ROLE==planner
+  and NOTE was `[result]`, emit `[review] approved` (or `change
+  request: …`) followed by the next `[plan]` slice.
+- `compose_response(help, NOTE, history)` — helper emits `[hint]`;
+  owner emits `[try]` after each hint and `[resolved]` when the
+  blocker is gone. Helper still refuses to emit more than three
+  consecutive `[hint]` turns without an intervening `[try]`.
+
+**User interruption rule:** between any `rally done` and the next
+`rally join --once`, the agent yields to the user. If a user message
+arrives during this brief window, the loop processes it (e.g., user
+says `끝`, or "잠깐, 방향 바꿔줘"). Silence = continue.
+
+**Hard ceiling:** if the loop runs more than 20 iterations without
+hitting an exit signal, the agent should checkpoint to user with
+`"🎾 20턴 넘었어. 정리할까?"` and pause.
 
 ## Rally Patterns
 
@@ -247,6 +343,8 @@ The agent's lifecycle is per-message, not persistent. Background SSE would
 require process supervision that goes beyond what this skill should impose.
 `rally status` is cheap (one HTTP GET) and the user-driven turn cadence is
 already explicit, so polling on "내 차례" is the right level of automation.
+In v0.3 the agent uses `rally join --once --timeout <dur>` to combine
+short blocking SSE waits with explicit deadlines — best of both worlds.
 
 ## Reference
 - PRD: docs/prd-rally-mode.md
