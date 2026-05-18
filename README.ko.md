@@ -68,7 +68,7 @@ which claude      # $PATH에 있는 지원 어댑터 바이너리
 npx skills add jazz1x/rallish
 ```
 
-스킬 번들(SKILL.md + 바이너리 인스톨러)을 `~/.claude/skills/rallish-operator/`
+스킬 번들(SKILL.md + 바이너리 인스톨러)을 `~/.claude/skills/rallish/`
 에 깔아둡니다. [skills.sh](https://www.skills.sh) 경유로 해석.
 
 어떤 프로젝트든 Claude Code (또는 다른 스킬 인식 코딩 CLI) 열고
@@ -124,7 +124,7 @@ EOF
 ./dist/rallish squash --preset fake-demo --task "smoke test" --repo /tmp
 
 # 두 터미널 테니스 랠리 (라이브 바톤 전달)
-# skills/rallish-operator 기반 자연어 UX를 권장합니다 —
+# skills/rallish 기반 자연어 UX를 권장합니다 —
 # 에이전트(Claude Code, Cursor 등)가 모든 rally 명령을 대신 실행합니다.
 # 터미널 A 의 코딩 CLI 세션:                   "랠리보낼 준비해 — 사이클로 가자"
 # 에이전트: rally new --first server + role=server, SID 출력, 첫 턴 서브, yield.
@@ -164,7 +164,7 @@ rallish squash --preset <name> --task "<설명>" --repo <경로>
 ### 1b. 인터랙티브 랠리 세션 시작
 
 **에이전트 주도 (권장).** 스킬을 자동 발견하는 코딩 CLI(Claude Code, Cursor
-등)에서 이 리포를 열면 [`skills/rallish-operator`](skills/rallish-operator/SKILL.md)
+등)에서 이 리포를 열면 [`skills/rallish`](skills/rallish/SKILL.md)
 스킬이 다음 자연어 트리거로 로드됩니다:
 
 | 발화 | 에이전트 동작 |

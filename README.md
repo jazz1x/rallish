@@ -69,7 +69,7 @@ npx skills add jazz1x/rallish
 ```
 
 That delivers the skill bundle (SKILL.md + bundled binary installer) to
-`~/.claude/skills/rallish-operator/`. Resolves via [skills.sh](https://www.skills.sh).
+`~/.claude/skills/rallish/`. Resolves via [skills.sh](https://www.skills.sh).
 
 Open any project in Claude Code (or another skill-aware coding CLI) and say
 `랠리보낼 준비해` / `let's serve`. On first use the skill self-installs the
@@ -125,7 +125,7 @@ EOF
 ./dist/rallish squash --preset fake-demo --task "smoke test" --repo /tmp
 
 # Two-terminal tennis rally (live baton-passing between human sessions)
-# Prefer the natural-language UX driven by skills/rallish-operator —
+# Prefer the natural-language UX driven by skills/rallish —
 # the agent (Claude Code, Cursor, …) runs all rally commands for you.
 # In Terminal A's coding-CLI session you say:    "랠리보낼 준비해 — 사이클로 가자"
 # Agent: rally new --first server + role=server, prints SID, serves first turn, yields.
@@ -166,7 +166,7 @@ Presets live in `internal/preset/presets/` (built-ins) or `~/.rallish/presets/` 
 
 **Agent-driven (recommended).** Open this repo in any coding CLI that
 auto-discovers skills (Claude Code, Cursor, …). The
-[`skills/rallish-operator`](skills/rallish-operator/SKILL.md) skill loads
+[`skills/rallish`](skills/rallish/SKILL.md) skill loads
 on these natural-language triggers:
 
 | You say | The agent does |

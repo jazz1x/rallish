@@ -21,7 +21,7 @@ One command via [skills.sh](https://www.skills.sh):
 npx skills add jazz1x/rallish
 ```
 
-That installs the `rallish-operator` skill (SKILL.md + bundled
+That installs the `rallish` skill (SKILL.md + bundled
 `scripts/install-binary.sh`). Open any project in Claude Code (or
 another skill-aware coding CLI) and say `랠리보낼 준비해` /
 `let's serve`; on first trigger the agent self-installs the `rallish`
@@ -57,7 +57,7 @@ After the binary is on `$PATH`:
 rallish bootstrap
 ```
 
-Idempotent. Materializes the skill at `~/.claude/skills/rallish-operator/`
+Idempotent. Materializes the skill at `~/.claude/skills/rallish/`
 (if not already there) and verifies the daemon is reachable.
 
 ### Prerequisites
@@ -108,7 +108,7 @@ rallish daemon &
 
 ### Skill discovery
 
-`~/.claude/skills/rallish-operator/` (installed by `rallish bootstrap`
+`~/.claude/skills/rallish/` (installed by `rallish bootstrap`
 or `npx skills add jazz1x/rallish`) contains:
 
 ```
@@ -221,13 +221,13 @@ for full walkthroughs and
 [docs/prd-rally-patterns.md](prd-rally-patterns.md) for the design
 rationale.
 
-**Cross-vendor:** the rallish-operator skill is auto-discovered by any
+**Cross-vendor:** the `rallish` skill is auto-discovered by any
 skill-aware coding CLI — Claude Code, Kimi, Codex, Cursor, etc. — via
 the brand-group convention at `~/.claude/skills/`. No per-vendor setup
 is needed. Live validation: a discuss-pattern rally between Claude Code
 and Kimi reached mutual `[agree]` in 4 turns.
 
-**Autoflow (v0.2.0+):** by default the rallish-operator skill drives both
+**Autoflow (v0.2.0+):** by default the `rallish` skill drives both
 sides autonomously after a single setup trigger per side. The skill uses a
 yield-first design: on entry it emits a status poll and yields back to the
 user rather than holding the agent in a long wait. This eliminates idle token
@@ -255,7 +255,7 @@ cd /any/project/dir
 랠리보낼 준비해
 ```
 
-The agent discovers the skill from `~/.claude/skills/rallish-operator/`
+The agent discovers the skill from `~/.claude/skills/rallish/`
 regardless of cwd, and the daemon binds globally at `~/.rallish/`. The
 `--repo` flag passed in `rallish squash` commands is session metadata
 only — it scopes the broker's working-directory context for that
@@ -302,5 +302,5 @@ See [Installation](#installation) for the one-time setup.
 | daemon refuses to start with "already running" | a previous daemon is alive on the same socket | kill it with `kill -TERM $(pgrep -f "rallish daemon")` then retry |
 | `adapter not found: claude` | CLI binary not on `$PATH` | Install the `claude` CLI and ensure `which claude` succeeds. |
 | Budget exceeded early | Token-count drift between adapter & broker | Verify `model:` in your preset matches the model the adapter actually invokes. |
-| `Error: Skill not found: rallish-operator` in Claude Code | Skill bundle not installed globally | `npx skills add jazz1x/rallish` or `rallish skill install` |
+| `Error: Skill not found: rallish` in Claude Code | Skill bundle not installed globally | `npx skills add jazz1x/rallish` or `rallish skill install` |
 | `rally join` exits with code 2 | `--timeout` fired (default 5 m of no baton) | Normal — the auto-loop will checkpoint to user; either wait, or type `끝`. |
