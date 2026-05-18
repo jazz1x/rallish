@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Skill rename: `rallish-operator` → `rallish`.** The skill bundle's
+  identifier, install directory, and frontmatter `name:` field were
+  collapsed from `rallish-operator` to plain `rallish` — the
+  `-operator` suffix added no signal once the project's vendor-neutral
+  identity was settled. Existing installs at
+  `~/.claude/skills/rallish-operator/` are not auto-migrated; users
+  should run `rm -rf ~/.claude/skills/rallish-operator/ && rallish
+  bootstrap` after upgrading. Trigger phrases (`랠리보낼 준비해`,
+  `let's serve`, …) are unchanged; agents that resolve the skill by
+  frontmatter `name:` or trigger string will continue to work
+  immediately after re-bootstrap. The `go:embed` path,
+  `defaultSkillTarget()`, and the repo-root `skills/rallish` symlink
+  are all aligned.
+
 ## [0.2.0] - 2026-05-18
 
 ### Added

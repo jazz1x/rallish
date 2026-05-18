@@ -95,13 +95,13 @@ func daemonCmd(shutdown chan struct{}, isDaemon *bool) *cobra.Command {
 }
 
 // defaultSkillTarget returns the default install directory for the
-// rallish-operator skill: ~/.claude/skills/rallish-operator.
+// rallish skill: ~/.claude/skills/rallish.
 func defaultSkillTarget() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("get home dir: %w", err)
 	}
-	return filepath.Join(home, ".claude", "skills", "rallish-operator"), nil
+	return filepath.Join(home, ".claude", "skills", "rallish"), nil
 }
 
 // skillCmd returns the `skill` parent command.
@@ -119,7 +119,7 @@ func skillInstallCmd() *cobra.Command {
 	var target string
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Install the rallish-operator skill to ~/.claude/skills/rallish-operator",
+		Short: "Install the rallish skill to ~/.claude/skills/rallish",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir := target
 			if dir == "" {
@@ -141,7 +141,7 @@ func skillInstallCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&target, "target", "", "Install directory (default: ~/.claude/skills/rallish-operator)")
+	cmd.Flags().StringVar(&target, "target", "", "Install directory (default: ~/.claude/skills/rallish)")
 	return cmd
 }
 
@@ -149,7 +149,7 @@ func skillInstallCmd() *cobra.Command {
 func bootstrapCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "bootstrap",
-		Short: "Install the rallish-operator skill and verify the daemon in one step",
+		Short: "Install the rallish skill and verify the daemon in one step",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
 
@@ -158,7 +158,7 @@ func bootstrapCmd() *cobra.Command {
 				return fmt.Errorf("get home dir: %w", err)
 			}
 
-			skillDir := filepath.Join(home, ".claude", "skills", "rallish-operator")
+			skillDir := filepath.Join(home, ".claude", "skills", "rallish")
 
 			// 1. Install skill.
 			results, err := skills.Install(skillDir)

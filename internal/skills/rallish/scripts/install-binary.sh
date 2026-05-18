@@ -81,4 +81,4 @@ case ":$PATH:" in
     ;;
 esac
 echo
-echo "Next: run 'rallish bootstrap' once to install the rallish-operator skill."
+echo "Next: run 'rallish bootstrap' once to install the rallish skill."

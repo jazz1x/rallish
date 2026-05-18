@@ -7,6 +7,21 @@
 
 ## [미발표]
 
+### 변경됨
+
+- **스킬 이름 변경: `rallish-operator` → `rallish`.** 스킬 번들의
+  식별자, 설치 디렉토리, 프론트매터 `name:` 필드가 `rallish-operator`에서
+  간결한 `rallish`로 통합되었습니다 — 프로젝트의 벤더 중립적 정체성이
+  확립된 이후 `-operator` 접미사가 더 이상 의미를 더하지 않았습니다.
+  `~/.claude/skills/rallish-operator/`에 기존 설치가 있는 경우 자동
+  마이그레이션되지 않습니다; 업그레이드 후 `rm -rf
+  ~/.claude/skills/rallish-operator/ && rallish bootstrap` 을 실행하세요.
+  트리거 문구(`랠리보낼 준비해`, `let's serve`, …)는 변경되지 않았습니다;
+  프론트매터 `name:` 또는 트리거 문자열로 스킬을 해석하는 에이전트는
+  재부트스트랩 후 즉시 계속 작동합니다. `go:embed` 경로,
+  `defaultSkillTarget()`, 리포 루트의 `skills/rallish` 심볼릭 링크가
+  모두 정렬되었습니다.
+
 ## [0.2.0] - 2026-05-18
 
 ### 추가됨

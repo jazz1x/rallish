@@ -1,5 +1,5 @@
 ---
-name: rallish-operator
+name: rallish
 description: >
   에이전트 주도 테니스 스타일 랠리 플레이북. 에이전트가 rallish CLI 명령을
   직접 실행하며, 사용자는 세 가지 자연어 트리거만 입력하면 됩니다. 서버
@@ -58,7 +58,7 @@ ssl:
     rollback: null
 ---
 
-# rallish-operator — 테니스 랠리 플레이북
+# rallish — 테니스 랠리 플레이북
 
 이 스킬은 rallish 브로커를 통해 두 코딩 CLI 세션 사이의 라이브 테니스
 스타일 랠리를 에이전트가 직접 구동합니다. 사용자는 세 가지만 입력하면
@@ -70,7 +70,7 @@ ssl:
 가 실패하면 번들 스크립트를 실행하세요:
 
 ```sh
-sh ~/.claude/skills/rallish-operator/scripts/install-binary.sh
+sh ~/.claude/skills/rallish/scripts/install-binary.sh
 ```
 
 현재 OS/아키텍처에 맞는 최신 GitHub 릴리즈 바이너리를 받아
@@ -233,7 +233,7 @@ on every "내 차례" trigger OR any user message after the agent has yielded:
 
 ## 크로스벤더 호환성
 
-이 스킬은 `~/.claude/skills/rallish-operator/` 에 위치합니다. 이 경로는
+이 스킬은 `~/.claude/skills/rallish/` 에 위치합니다. 이 경로는
 다음 클라이언트에서 자동 발견됩니다:
 
 - **Claude Code** — brand group 직접 경로.

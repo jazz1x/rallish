@@ -1,5 +1,5 @@
 ---
-name: rallish-operator
+name: rallish
 description: >
   Agent-driven tennis-style rally playbook. The agent runs all rallish CLI
   commands; the user only types three natural-language triggers. Covers server
@@ -58,7 +58,7 @@ ssl:
     rollback: null
 ---
 
-# rallish-operator — Tennis Rally Playbook
+# rallish — Tennis Rally Playbook
 
 This skill drives a live tennis-style rally between two coding-CLI sessions
 through the rallish broker. The user types three things; the agent does the
@@ -70,7 +70,7 @@ The skill bundles a platform-detecting installer. If `command -v rallish`
 fails, run the bundled script:
 
 ```sh
-sh ~/.claude/skills/rallish-operator/scripts/install-binary.sh
+sh ~/.claude/skills/rallish/scripts/install-binary.sh
 ```
 
 That fetches the latest GitHub Release binary for the current OS/arch
@@ -236,7 +236,7 @@ hitting an exit signal, the agent should checkpoint to user with
 
 ## Cross-vendor compatibility
 
-The skill lives at `~/.claude/skills/rallish-operator/`. This path is
+The skill lives at `~/.claude/skills/rallish/`. This path is
 discovered by:
 
 - **Claude Code** — directly under its brand group.

@@ -9,7 +9,7 @@ import (
 )
 
 // embeddedFiles lists relative paths (from install target root) expected to be
-// installed. Must match the files in rallish-operator/ exactly.
+// installed. Must match the files in rallish/ exactly.
 var embeddedFiles = []string{
 	"SKILL.md",
 	"SKILL.ko.md",

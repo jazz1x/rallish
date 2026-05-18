@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-//go:embed all:rallish-operator
+//go:embed all:rallish
 var embedded embed.FS
 
 // InstallResult reports what happened to one file during Install.
@@ -19,8 +19,8 @@ type InstallResult struct {
 	Action string // "written", "unchanged", or "created"
 }
 
-// Install writes the embedded rallish-operator skill files to targetDir.
-// targetDir is typically ~/.claude/skills/rallish-operator. It is created
+// Install writes the embedded rallish skill files to targetDir.
+// targetDir is typically ~/.claude/skills/rallish. It is created
 // (mode 0755) if missing. Existing files are overwritten only when their
 // content actually differs (so re-running is cheap and quiet).
 //
@@ -36,7 +36,7 @@ func Install(targetDir string) ([]InstallResult, error) {
 
 	var results []InstallResult
 
-	err := fs.WalkDir(embedded, "rallish-operator", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(embedded, "rallish", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -49,8 +49,8 @@ func Install(targetDir string) ([]InstallResult, error) {
 			return fmt.Errorf("read embedded %q: %w", path, readErr)
 		}
 
-		// Strip leading "rallish-operator/" prefix to get relative dest path.
-		rel := strings.TrimPrefix(path, "rallish-operator/")
+		// Strip leading "rallish/" prefix to get relative dest path.
+		rel := strings.TrimPrefix(path, "rallish/")
 
 		destPath := filepath.Join(targetDir, rel)
 

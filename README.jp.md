@@ -69,7 +69,7 @@ npx skills add jazz1x/rallish
 ```
 
 スキルバンドル (SKILL.md + バイナリインストーラ) を
-`~/.claude/skills/rallish-operator/` に配置します。
+`~/.claude/skills/rallish/` に配置します。
 [skills.sh](https://www.skills.sh) 経由で解決。
 
 任意のプロジェクトで Claude Code (またはスキル対応の他のコーディング CLI)
@@ -128,7 +128,7 @@ EOF
 ./dist/rallish squash --preset fake-demo --task "smoke test" --repo /tmp
 
 # 2 ターミナル テニスラリー (ライブバトン受け渡し)
-# skills/rallish-operator による自然言語 UX を推奨 —
+# skills/rallish による自然言語 UX を推奨 —
 # エージェント (Claude Code, Cursor など) がすべての rally コマンドを代行します。
 # ターミナル A のコーディング CLI セッション:        "랠리보낼 준비해 — 사이클로 가자"
 # エージェント: rally new --first server + role=server, SID 出力, 初回ターンをサーブ, yield。
@@ -168,7 +168,7 @@ rallish squash --preset <name> --task "<説明>" --repo <パス>
 
 **エージェント主導 (推奨).** スキルを自動検出するコーディング CLI
 (Claude Code, Cursor など) でこのリポを開くと、
-[`skills/rallish-operator`](skills/rallish-operator/SKILL.md) スキルが
+[`skills/rallish`](skills/rallish/SKILL.md) スキルが
 以下の自然言語トリガーでロードされます:
 
 | 発話 | エージェント動作 |

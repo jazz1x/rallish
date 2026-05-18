@@ -292,7 +292,7 @@ make check
 
 ## Rally Patterns
 
-The `rallish-operator` skill (v0.2.0) layers three behavioural patterns on top
+The `rallish` skill (v0.2.0) layers three behavioural patterns on top
 of the baton primitive. Pattern is selected at server-prep time; no broker or
 CLI changes are required — the pattern is encoded in the `--task` field and
 read back by the returner from `rally status`.
@@ -468,8 +468,8 @@ are unaware of the switch; it is a pure convention between the two agents.
 
 ## Autoflow (v0.2.0+)
 
-Starting with `rallish` v0.2.0 and the matching `rallish-operator`
-skill, both sides of a rally run autonomously after a **single setup
+Starting with `rallish` v0.2.0 and the `rallish` skill,
+both sides of a rally run autonomously after a **single setup
 trigger per side**.
 
 - Server-side: user types `랠리보낼 준비해 — <pattern>`. The agent runs

@@ -7,6 +7,20 @@
 
 ## [未発表]
 
+### 変更
+
+- **スキル名変更: `rallish-operator` → `rallish`.** スキルバンドルの
+  識別子、インストールディレクトリ、フロントマター `name:` フィールドが
+  `rallish-operator` からシンプルな `rallish` に統一されました —
+  プロジェクトのベンダー中立な名前が確立された時点で `-operator` サフィックスは
+  不要になりました。`~/.claude/skills/rallish-operator/` の既存インストールは
+  自動マイグレーションされません; アップグレード後に `rm -rf
+  ~/.claude/skills/rallish-operator/ && rallish bootstrap` を実行してください。
+  トリガーフレーズ (`랠리보낼 준비해`、`let's serve`、…) は変更なし; フロントマター
+  `name:` またはトリガー文字列でスキルを解決するエージェントは再ブートストラップ後に
+  すぐ動作し続けます。`go:embed` パス、`defaultSkillTarget()`、リポルートの
+  `skills/rallish` シンボリックリンクはすべて整合しています。
+
 ## [0.2.0] - 2026-05-18
 
 ### 追加
