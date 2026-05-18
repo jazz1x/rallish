@@ -20,7 +20,7 @@ fi
 for f in README.md README.ko.md README.jp.md; do
     path="${ROOT_DIR}/${f}"
     if [[ -f "$path" ]]; then
-        sed -i.bak "s/version-[0-9]\+\.[0-9]\+\.[0-9]\+/version-${VERSION}/g" "$path"
+        sed -i.bak -E "s/version-[0-9]+\.[0-9]+\.[0-9]+/version-${VERSION}/g" "$path"
         rm -f "${path}.bak"
         echo "Updated $f -> ${VERSION}"
     fi
