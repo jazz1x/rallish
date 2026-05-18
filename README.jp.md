@@ -2,7 +2,7 @@
 
 > マルチエージェントのターン制実行のためのローカルブローカー、A2A対応。
 
-![version](https://img.shields.io/badge/version-0.1.2-blue)
+![version](https://img.shields.io/badge/version-0.2.0-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![go](https://img.shields.io/badge/go-1.25+-blue)
 
