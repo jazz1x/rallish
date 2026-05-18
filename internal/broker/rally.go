@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -20,25 +21,26 @@ import (
 // It is protected by a single mutex; all state mutations must hold that lock.
 type rallyStore struct {
 	mu       sync.Mutex
-	sessions map[string]*rallySession
+	sessions map[contract.SessionID]*rallySession
 }
 
 // rallySession is the broker-internal state for a single rally session.
 type rallySession struct {
-	id           string
-	participants []string        // ordered list
+	id           contract.SessionID
+	participants []contract.ParticipantName // ordered list
 	repo         string
 	task         string
-	holder       string          // name of current baton holder
+	pattern      contract.Pattern
+	holder       contract.ParticipantName // name of current baton holder
 	turnN        int
 	status       contract.RallyState
-	lastSeen     map[string]int64
+	lastSeen     map[contract.ParticipantName]int64
 	history      []contract.BatonHandoff
 	createdAt    int64
 
 	// streams maps participant name → channel that receives BatonEvents.
 	// Nil channel means the participant is not currently connected.
-	streams map[string]chan contract.BatonEvent
+	streams map[contract.ParticipantName]chan contract.BatonEvent
 
 	// staleThreshold is how many milliseconds without a heartbeat before a
 	// participant is considered stale. Defaults to 30 000 ms; overrideable
@@ -48,12 +50,12 @@ type rallySession struct {
 
 // newRallyStore creates an empty store.
 func newRallyStore() *rallyStore {
-	return &rallyStore{sessions: make(map[string]*rallySession)}
+	return &rallyStore{sessions: make(map[contract.SessionID]*rallySession)}
 }
 
 // nextParticipant returns the next participant after `current` using round-robin
 // over the ordered participants list. Returns "" if none found (shouldn't happen).
-func (rs *rallySession) nextParticipant(current string, preferredNext string) string {
+func (rs *rallySession) nextParticipant(current contract.ParticipantName, preferredNext contract.ParticipantName) contract.ParticipantName {
 	if preferredNext != "" {
 		for _, p := range rs.participants {
 			if p == preferredNext {
@@ -72,12 +74,12 @@ func (rs *rallySession) nextParticipant(current string, preferredNext string) st
 }
 
 // generateRallyID creates a session ID of the form rly_<unixmillis>_<rand4hex>.
-func generateRallyID() (string, error) {
+func generateRallyID() (contract.SessionID, error) {
 	b := make([]byte, 2)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("rly_%d_%s", time.Now().UnixMilli(), hex.EncodeToString(b)), nil
+	return contract.SessionID(fmt.Sprintf("rly_%d_%s", time.Now().UnixMilli(), hex.EncodeToString(b))), nil
 }
 
 // toPublic converts a rallySession to the public contract type for wire serialisation.
@@ -85,24 +87,26 @@ func generateRallyID() (string, error) {
 func (rs *rallySession) toPublic(nowMS int64) contract.RallySession {
 	lastSeen := make(map[string]int64, len(rs.lastSeen))
 	for k, v := range rs.lastSeen {
-		lastSeen[k] = v
+		lastSeen[k.String()] = v
 	}
 
 	history := make([]contract.BatonHandoff, len(rs.history))
 	copy(history, rs.history)
 
 	parts := make([]string, len(rs.participants))
-	copy(parts, rs.participants)
+	for i, p := range rs.participants {
+		parts[i] = p.String()
+	}
 
 	// Compute stale flags and append to LastSeen (already a copy).
 	_ = nowMS // stale is advisory and exposed via the status response separately.
 
 	return contract.RallySession{
-		ID:           rs.id,
+		ID:           rs.id.String(),
 		Participants: parts,
 		Repo:         rs.repo,
 		Task:         rs.task,
-		Holder:       rs.holder,
+		Holder:       rs.holder.String(),
 		TurnN:        rs.turnN,
 		Status:       rs.status,
 		LastSeen:     lastSeen,
@@ -135,6 +139,25 @@ func requireJSON(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// writeRallyError maps a typed contract error to the appropriate HTTP status
+// and writes the error message body. All rally handler error paths funnel here.
+func writeRallyError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, contract.ErrSessionNotFound):
+		http.Error(w, err.Error(), http.StatusNotFound)
+	case errors.Is(err, contract.ErrNotHolder):
+		http.Error(w, err.Error(), http.StatusConflict)
+	case errors.Is(err, contract.ErrInvalidName),
+		errors.Is(err, contract.ErrInvalidSessionID),
+		errors.Is(err, contract.ErrInvalidPattern),
+		errors.Is(err, contract.ErrDuplicateName),
+		errors.Is(err, contract.ErrTooFewParticipants):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	default:
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 // handleRallyCreate handles POST /rally/sessions.
 func (s *Server) handleRallyCreate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -151,38 +174,44 @@ func (s *Server) handleRallyCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate participants.
+	// Validate participants — must be ≥2, all valid names, no duplicates.
 	if len(req.Participants) < 2 {
-		http.Error(w, "at least 2 participants required", http.StatusBadRequest)
+		writeRallyError(w, fmt.Errorf("need at least 2 participants: %w", contract.ErrTooFewParticipants))
 		return
 	}
-	seen := make(map[string]bool)
-	for _, name := range req.Participants {
-		if !contract.ParticipantNameRe.MatchString(name) {
-			http.Error(w, fmt.Sprintf("invalid participant name %q: must match ^[a-zA-Z0-9_-]{1,16}$", name), http.StatusBadRequest)
+	seen := make(map[contract.ParticipantName]struct{})
+	names := make([]contract.ParticipantName, 0, len(req.Participants))
+	for _, raw := range req.Participants {
+		pn, err := contract.NewParticipantName(raw)
+		if err != nil {
+			writeRallyError(w, err)
 			return
 		}
-		if seen[name] {
-			http.Error(w, fmt.Sprintf("duplicate participant name %q", name), http.StatusBadRequest)
+		if _, dup := seen[pn]; dup {
+			writeRallyError(w, fmt.Errorf("participant %q: %w", raw, contract.ErrDuplicateName))
 			return
 		}
-		seen[name] = true
+		seen[pn] = struct{}{}
+		names = append(names, pn)
 	}
 
 	// Validate first_holder if provided.
+	var firstHolder contract.ParticipantName
 	if req.FirstHolder != "" {
-		found := false
-		for _, p := range req.Participants {
-			if p == req.FirstHolder {
-				found = true
-				break
-			}
+		fh, err := contract.NewParticipantName(req.FirstHolder)
+		if err != nil {
+			writeRallyError(w, err)
+			return
 		}
-		if !found {
+		if _, ok := seen[fh]; !ok {
 			http.Error(w, fmt.Sprintf("first_holder %q is not in participants", req.FirstHolder), http.StatusBadRequest)
 			return
 		}
+		firstHolder = fh
 	}
+
+	// Parse pattern from task prefix (advisory; stored internally only).
+	pattern, _, _ := contract.ParsePattern(req.Task)
 
 	id, err := generateRallyID()
 	if err != nil {
@@ -194,23 +223,24 @@ func (s *Server) handleRallyCreate(w http.ResponseWriter, r *http.Request) {
 	nowMS := time.Now().UnixMilli()
 	sess := &rallySession{
 		id:             id,
-		participants:   req.Participants,
+		participants:   names,
 		repo:           req.Repo,
 		task:           req.Task,
+		pattern:        pattern,
 		status:         contract.RallyStateIdle,
-		lastSeen:       make(map[string]int64),
+		lastSeen:       make(map[contract.ParticipantName]int64),
 		history:        []contract.BatonHandoff{},
 		createdAt:      nowMS,
-		streams:        make(map[string]chan contract.BatonEvent),
+		streams:        make(map[contract.ParticipantName]chan contract.BatonEvent),
 		staleThreshold: 30_000,
 	}
 
 	// Apply first_holder pre-assignment if provided.
-	if req.FirstHolder != "" {
-		sess.holder = req.FirstHolder
-		sess.status = contract.RallyTurnState(req.FirstHolder)
+	if firstHolder != "" {
+		sess.holder = firstHolder
+		sess.status = contract.RallyTurnState(firstHolder.String())
 		sess.turnN = 1
-		sess.lastSeen[req.FirstHolder] = nowMS
+		sess.lastSeen[firstHolder] = nowMS
 	}
 
 	rallies.mu.Lock()
@@ -232,10 +262,17 @@ func (s *Server) handleRallyBaton(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := slog.With("handler", "rally_baton")
 
-	id := r.PathValue("id")
-	as := r.URL.Query().Get("as")
-	if !contract.ParticipantNameRe.MatchString(as) {
-		http.Error(w, fmt.Sprintf("invalid participant name %q: must match ^[a-zA-Z0-9_-]{1,16}$", as), http.StatusBadRequest)
+	rawID := r.PathValue("id")
+	id, err := contract.NewSessionID(rawID)
+	if err != nil {
+		writeRallyError(w, err)
+		return
+	}
+
+	asRaw := r.URL.Query().Get("as")
+	as, err := contract.NewParticipantName(asRaw)
+	if err != nil {
+		writeRallyError(w, err)
 		return
 	}
 
@@ -243,7 +280,7 @@ func (s *Server) handleRallyBaton(w http.ResponseWriter, r *http.Request) {
 	sess, ok := rallies.sessions[id]
 	if !ok {
 		rallies.mu.Unlock()
-		http.Error(w, "rally session not found", http.StatusNotFound)
+		writeRallyError(w, fmt.Errorf("session %q: %w", rawID, contract.ErrSessionNotFound))
 		return
 	}
 
@@ -272,10 +309,10 @@ func (s *Server) handleRallyBaton(w http.ResponseWriter, r *http.Request) {
 	if sess.status == contract.RallyStateIdle && sess.participants[0] == as {
 		sess.turnN++
 		sess.holder = as
-		sess.status = contract.RallyTurnState(as)
+		sess.status = contract.RallyTurnState(as.String())
 		evt := contract.BatonEvent{TurnN: sess.turnN, From: ""}
 		immediateEvent = &evt
-	} else if sess.status == contract.RallyTurnState(as) {
+	} else if sess.status == contract.RallyTurnState(as.String()) {
 		// Session already in this participant's turn (reconnect or late-join).
 		// Derive "from"/"note" from the last history entry; sess.holder is
 		// already `as` so we cannot read it there.
@@ -395,7 +432,7 @@ func writeSSEEvent(w http.ResponseWriter, rc *http.ResponseController, evt contr
 }
 
 // cleanupStream removes the SSE channel registration for a participant.
-func cleanupStream(sessionID, participant string) {
+func cleanupStream(sessionID contract.SessionID, participant contract.ParticipantName) {
 	rallies.mu.Lock()
 	defer rallies.mu.Unlock()
 	if sess, ok := rallies.sessions[sessionID]; ok {
@@ -412,10 +449,17 @@ func (s *Server) handleRallyDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
-	as := r.URL.Query().Get("as")
-	if !contract.ParticipantNameRe.MatchString(as) {
-		http.Error(w, fmt.Sprintf("invalid participant name %q: must match ^[a-zA-Z0-9_-]{1,16}$", as), http.StatusBadRequest)
+	rawID := r.PathValue("id")
+	id, err := contract.NewSessionID(rawID)
+	if err != nil {
+		writeRallyError(w, err)
+		return
+	}
+
+	asRaw := r.URL.Query().Get("as")
+	as, err := contract.NewParticipantName(asRaw)
+	if err != nil {
+		writeRallyError(w, err)
 		return
 	}
 
@@ -427,47 +471,53 @@ func (s *Server) handleRallyDone(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate optional handoff_to name.
-	if req.HandoffTo != "" && !contract.ParticipantNameRe.MatchString(req.HandoffTo) {
-		http.Error(w, fmt.Sprintf("invalid handoff_to name %q: must match ^[a-zA-Z0-9_-]{1,16}$", req.HandoffTo), http.StatusBadRequest)
-		return
+	var handoffTo contract.ParticipantName
+	if req.HandoffTo != "" {
+		ht, herr := contract.NewParticipantName(req.HandoffTo)
+		if herr != nil {
+			writeRallyError(w, herr)
+			return
+		}
+		handoffTo = ht
 	}
 
 	rallies.mu.Lock()
 	sess, ok := rallies.sessions[id]
 	if !ok {
 		rallies.mu.Unlock()
-		http.Error(w, "rally session not found", http.StatusNotFound)
+		writeRallyError(w, fmt.Errorf("session %q: %w", rawID, contract.ErrSessionNotFound))
 		return
 	}
 
 	// Only the current holder may call done.
 	if sess.holder != as {
 		rallies.mu.Unlock()
-		http.Error(w, fmt.Sprintf("participant %q is not the current baton holder (holder: %q)", as, sess.holder), http.StatusConflict)
+		writeRallyError(w, fmt.Errorf("participant %q is not the current baton holder (holder: %q): %w",
+			as, sess.holder, contract.ErrNotHolder))
 		return
 	}
 
 	// Determine next participant.
-	next := sess.nextParticipant(as, req.HandoffTo)
+	next := sess.nextParticipant(as, handoffTo)
 	nowMS := time.Now().UnixMilli()
 
 	// Record handoff in history.
 	sess.turnN++
 	handoff := contract.BatonHandoff{
-		From:  as,
-		To:    next,
+		From:  as.String(),
+		To:    next.String(),
 		TurnN: sess.turnN,
 		Note:  req.Note,
 		At:    nowMS,
 	}
 	sess.history = append(sess.history, handoff)
 	sess.holder = next
-	sess.status = contract.RallyTurnState(next)
+	sess.status = contract.RallyTurnState(next.String())
 
 	// Deliver baton event to next participant's stream if connected.
 	evt := contract.BatonEvent{
 		TurnN: sess.turnN,
-		From:  as,
+		From:  as.String(),
 		Note:  req.Note,
 	}
 	nextCh := sess.streams[next]
@@ -506,13 +556,18 @@ func (s *Server) handleRallyStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := slog.With("handler", "rally_status")
 
-	id := r.PathValue("id")
+	rawID := r.PathValue("id")
+	id, err := contract.NewSessionID(rawID)
+	if err != nil {
+		writeRallyError(w, err)
+		return
+	}
 
 	rallies.mu.Lock()
 	sess, ok := rallies.sessions[id]
 	if !ok {
 		rallies.mu.Unlock()
-		http.Error(w, "rally session not found", http.StatusNotFound)
+		writeRallyError(w, fmt.Errorf("session %q: %w", rawID, contract.ErrSessionNotFound))
 		return
 	}
 	nowMS := time.Now().UnixMilli()
@@ -528,7 +583,7 @@ func (s *Server) handleRallyStatus(w http.ResponseWriter, r *http.Request) {
 // isParticipantStale reports whether a participant's last_seen timestamp
 // is older than staleThreshold milliseconds.
 // Caller must hold no locks.
-func isParticipantStale(sessionID, name string, nowMS int64) bool {
+func isParticipantStale(sessionID contract.SessionID, name contract.ParticipantName, nowMS int64) bool {
 	rallies.mu.Lock()
 	defer rallies.mu.Unlock()
 	sess, ok := rallies.sessions[sessionID]
@@ -543,7 +598,7 @@ func isParticipantStale(sessionID, name string, nowMS int64) bool {
 }
 
 // setRallyStaleThreshold overrides the stale threshold for a session (test helper).
-func setRallyStaleThreshold(sessionID string, thresholdMS int64) {
+func setRallyStaleThreshold(sessionID contract.SessionID, thresholdMS int64) {
 	rallies.mu.Lock()
 	defer rallies.mu.Unlock()
 	if sess, ok := rallies.sessions[sessionID]; ok {

@@ -62,9 +62,10 @@ func TestNameRegex(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := contract.ParticipantNameRe.MatchString(c.name)
+			_, err := contract.NewParticipantName(c.name)
+			got := err == nil
 			if got != c.ok {
-				t.Fatalf("contract.ParticipantNameRe.MatchString(%q) = %v want %v", c.name, got, c.ok)
+				t.Fatalf("contract.NewParticipantName(%q) ok=%v want %v", c.name, got, c.ok)
 			}
 		})
 	}
@@ -75,14 +76,14 @@ func TestNameRegex(t *testing.T) {
 func TestRallyNewClientSideValidation(t *testing.T) {
 	t.Run("less than two participants", func(t *testing.T) {
 		err := runRallyNew(context.Background(), t.TempDir(), "alice", "", "", "", &bytes.Buffer{})
-		if err == nil || !strings.Contains(err.Error(), "at least 2") {
-			t.Fatalf("expected at-least-2 error, got %v", err)
+		if err == nil || !errors.Is(err, contract.ErrTooFewParticipants) {
+			t.Fatalf("expected ErrTooFewParticipants, got %v", err)
 		}
 	})
 	t.Run("invalid name rejected", func(t *testing.T) {
 		err := runRallyNew(context.Background(), t.TempDir(), "alice,bad name", "", "", "", &bytes.Buffer{})
-		if err == nil || !strings.Contains(err.Error(), "invalid participant name") {
-			t.Fatalf("expected invalid-name error, got %v", err)
+		if err == nil || !errors.Is(err, contract.ErrInvalidName) {
+			t.Fatalf("expected ErrInvalidName, got %v", err)
 		}
 	})
 }
@@ -90,7 +91,7 @@ func TestRallyNewClientSideValidation(t *testing.T) {
 // TestRallyNewHappyPath wires runRallyNew against an httptest broker stub and
 // confirms it prints the session id returned by the broker.
 func TestRallyNewHappyPath(t *testing.T) {
-	want := contract.RallySession{ID: "rly_test_0001"}
+	want := contract.RallySession{ID: "rly_1000000000000_abcd"}
 
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/rally/sessions" {
@@ -140,7 +141,7 @@ func TestRallyDoneNonHolder(t *testing.T) {
 		t.Fatalf("write port file: %v", err)
 	}
 
-	err := runRallyDone(context.Background(), homeDir, "rly_x", "bob", "", "", &bytes.Buffer{})
+	err := runRallyDone(context.Background(), homeDir, "rly_1000000000000_abcd", "bob", "", "", &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("expected error for 409, got nil")
 	}
@@ -198,7 +199,7 @@ func TestRallyJoinReceivesBaton(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	err = runRallyJoin(context.Background(), homeDir, "rly_test_0001", "alice", false, 0, &out, &bytes.Buffer{})
+	err = runRallyJoin(context.Background(), homeDir, "rly_1000000000001_abcd", "alice", false, 0, &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("runRallyJoin returned error: %v", err)
 	}
@@ -213,7 +214,7 @@ func TestRallyJoinReceivesBaton(t *testing.T) {
 // and history entries from a stub broker.
 func TestRallyStatusFormatting(t *testing.T) {
 	sess := contract.RallySession{
-		ID:           "rly_test_0002",
+		ID:           "rly_1000000000002_abcd",
 		Status:       contract.RallyState("alice_turn"),
 		Holder:       "alice",
 		TurnN:        2,
@@ -256,7 +257,7 @@ func TestRallyStatusFormatting(t *testing.T) {
 // "ok — baton passed to <next>" line when the broker returns 200.
 func TestRallyDoneHappyPath(t *testing.T) {
 	nextSess := contract.RallySession{
-		ID:     "rly_test_0003",
+		ID:     "rly_1000000000003_abcd",
 		Holder: "bob",
 		TurnN:  2,
 		Status: contract.RallyState("bob_turn"),
@@ -321,6 +322,7 @@ func TestRallyNewWithRepo(t *testing.T) {
 		t.Fatalf("broker received repo %q, want %q", capturedRepo, repoDir)
 	}
 }
+
 
 // TestRallyNewWithBadRepo tests that runRallyNew rejects a non-existent repo path.
 func TestRallyNewWithBadRepo(t *testing.T) {
@@ -443,7 +445,7 @@ func TestRallyJoinOnce(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	err = runRallyJoin(context.Background(), homeDir, "rly_test_once", "server", true, 0, &out, &bytes.Buffer{})
+	err = runRallyJoin(context.Background(), homeDir, "rly_1000000000004_abcd", "server", true, 0, &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("runRallyJoin --once returned error: %v", err)
 	}
@@ -476,7 +478,7 @@ func TestRallyJoinTimeout(t *testing.T) {
 	}
 
 	var out, errBuf bytes.Buffer
-	err := runRallyJoin(context.Background(), homeDir, "rly_test_timeout", "server", true, 100*time.Millisecond, &out, &errBuf)
+	err := runRallyJoin(context.Background(), homeDir, "rly_1000000000005_abcd", "server", true, 100*time.Millisecond, &out, &errBuf)
 	if !errors.Is(err, ErrTimeoutWaitingForBaton) {
 		t.Fatalf("expected ErrTimeoutWaitingForBaton, got: %v", err)
 	}

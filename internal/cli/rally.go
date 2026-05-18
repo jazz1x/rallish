@@ -145,14 +145,17 @@ func RallyStatusCmd() *cobra.Command {
 
 func runRallyNew(ctx context.Context, homeDir, participants, repo, task, firstHolder string, out io.Writer) error {
 	// Parse and validate participants.
-	names := splitParticipants(participants)
-	if len(names) < 2 {
-		return fmt.Errorf("--participants requires at least 2 comma-separated names")
+	rawNames := splitParticipants(participants)
+	if len(rawNames) < 2 {
+		return fmt.Errorf("--participants requires at least 2 comma-separated names: %w", contract.ErrTooFewParticipants)
 	}
-	for _, name := range names {
-		if !contract.ParticipantNameRe.MatchString(name) {
-			return fmt.Errorf("invalid participant name %q: must match ^[a-zA-Z0-9_-]{1,16}$", name)
+	names := make([]string, 0, len(rawNames))
+	for _, raw := range rawNames {
+		pn, err := contract.NewParticipantName(raw)
+		if err != nil {
+			return err
 		}
+		names = append(names, pn.String())
 	}
 
 	// Validate --repo if supplied: must be an existing directory with no traversal.
@@ -214,8 +217,11 @@ func runRallyNew(ctx context.Context, homeDir, participants, repo, task, firstHo
 }
 
 func runRallyJoin(ctx context.Context, homeDir, sessionID, as string, once bool, timeout time.Duration, out io.Writer, errOut io.Writer) error {
-	if !contract.ParticipantNameRe.MatchString(as) {
-		return fmt.Errorf("invalid participant name %q: must match ^[a-zA-Z0-9_-]{1,16}$", as)
+	if _, err := contract.NewSessionID(sessionID); err != nil {
+		return err
+	}
+	if _, err := contract.NewParticipantName(as); err != nil {
+		return err
 	}
 
 	// Use a connect timeout but no read timeout — waiting for a turn can be
@@ -361,11 +367,16 @@ func handleBatonEvent(data, sessionID, as string, out io.Writer) error {
 }
 
 func runRallyDone(ctx context.Context, homeDir, sessionID, as, note, handoffTo string, out io.Writer) error {
-	if !contract.ParticipantNameRe.MatchString(as) {
-		return fmt.Errorf("invalid participant name %q: must match ^[a-zA-Z0-9_-]{1,16}$", as)
+	if _, err := contract.NewSessionID(sessionID); err != nil {
+		return err
 	}
-	if handoffTo != "" && !contract.ParticipantNameRe.MatchString(handoffTo) {
-		return fmt.Errorf("invalid handoff-to name %q: must match ^[a-zA-Z0-9_-]{1,16}$", handoffTo)
+	if _, err := contract.NewParticipantName(as); err != nil {
+		return err
+	}
+	if handoffTo != "" {
+		if _, err := contract.NewParticipantName(handoffTo); err != nil {
+			return err
+		}
 	}
 
 	bc, err := resolveBrokerClient(homeDir, 30*time.Second)
@@ -416,6 +427,9 @@ func runRallyDone(ctx context.Context, homeDir, sessionID, as, note, handoffTo s
 }
 
 func runRallyStatus(ctx context.Context, homeDir, sessionID string, out io.Writer) error {
+	if _, err := contract.NewSessionID(sessionID); err != nil {
+		return err
+	}
 	bc, err := resolveBrokerClient(homeDir, 30*time.Second)
 	if err != nil {
 		return err

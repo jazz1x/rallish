@@ -4,11 +4,156 @@
 // and CLI for interactive multi-participant sessions.
 package contract
 
-import "regexp"
+import (
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"strings"
+)
 
-// ParticipantNameRe is the regex every component uses to validate
-// rally participant names.
-var ParticipantNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,16}$`)
+// participantNameRe is the validation regex for participant names.
+// It is an implementation detail of NewParticipantName; callers should use
+// the constructor rather than this regex directly.
+var participantNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,16}$`)
+
+// sessionIDRe validates the rly_<unixms>_<rand4hex> session-id format.
+var sessionIDRe = regexp.MustCompile(`^rly_[0-9]+_[0-9a-f]{4}$`)
+
+// ParticipantName is a validated rally participant name.
+// Construct via NewParticipantName; the zero value is invalid.
+type ParticipantName string
+
+// NewParticipantName returns a validated ParticipantName.
+// Returns ErrInvalidName if s does not match ^[a-zA-Z0-9_-]{1,16}$.
+func NewParticipantName(s string) (ParticipantName, error) {
+	if !participantNameRe.MatchString(s) {
+		return "", fmt.Errorf("participant %q: %w", s, ErrInvalidName)
+	}
+	return ParticipantName(s), nil
+}
+
+// String renders the name back to its plain string form.
+func (p ParticipantName) String() string { return string(p) }
+
+// MarshalJSON encodes ParticipantName as a plain JSON string.
+func (p ParticipantName) MarshalJSON() ([]byte, error) {
+	return json.Marshal(string(p))
+}
+
+// UnmarshalJSON decodes a JSON string into a ParticipantName, validating the
+// format via NewParticipantName. Returns an error wrapping ErrInvalidName if
+// the string fails validation.
+func (p *ParticipantName) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	np, err := NewParticipantName(s)
+	if err != nil {
+		return err
+	}
+	*p = np
+	return nil
+}
+
+// SessionID is a validated rally session id of the form rly_<unixms>_<rand4hex>.
+// Construct via NewSessionID; the zero value is invalid.
+type SessionID string
+
+// NewSessionID returns a validated SessionID.
+// Returns ErrInvalidSessionID if s does not match rly_<unixms>_<rand4hex>.
+func NewSessionID(s string) (SessionID, error) {
+	if !sessionIDRe.MatchString(s) {
+		return "", fmt.Errorf("session id %q: %w", s, ErrInvalidSessionID)
+	}
+	return SessionID(s), nil
+}
+
+// String renders the session id back to its plain string form.
+func (id SessionID) String() string { return string(id) }
+
+// MarshalJSON encodes SessionID as a plain JSON string.
+func (id SessionID) MarshalJSON() ([]byte, error) {
+	return json.Marshal(string(id))
+}
+
+// UnmarshalJSON decodes a JSON string into a SessionID, validating the format
+// via NewSessionID. Returns an error wrapping ErrInvalidSessionID on failure.
+func (id *SessionID) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	nid, err := NewSessionID(s)
+	if err != nil {
+		return err
+	}
+	*id = nid
+	return nil
+}
+
+// Pattern is one of the rally-pattern conventions encoded in rally task strings
+// as [pattern:<name>].
+type Pattern int
+
+const (
+	// PatternUnknown indicates an unrecognised [pattern:…] tag.
+	PatternUnknown Pattern = iota
+	// PatternFreeform is the default pattern when no [pattern:…] tag is present.
+	PatternFreeform
+	// PatternCycle is the plan/execute/review pattern.
+	PatternCycle
+	// PatternDiscuss is the multi-perspective discussion pattern.
+	PatternDiscuss
+	// PatternHelp is the short stuck-help pattern.
+	PatternHelp
+)
+
+// String returns the canonical lowercase name for the pattern.
+func (p Pattern) String() string {
+	switch p {
+	case PatternFreeform:
+		return "freeform"
+	case PatternCycle:
+		return "cycle"
+	case PatternDiscuss:
+		return "discuss"
+	case PatternHelp:
+		return "help"
+	default:
+		return "unknown"
+	}
+}
+
+// ParsePattern parses an optional [pattern:<name>] prefix from a task string.
+//
+//   - "[pattern:cycle] rest" → (PatternCycle, "rest", nil)
+//   - "no prefix here"       → (PatternFreeform, "no prefix here", nil)
+//   - "[pattern:bad] …"      → (PatternUnknown, "", ErrInvalidPattern)
+func ParsePattern(taskPrefix string) (Pattern, string, error) {
+	if !strings.HasPrefix(taskPrefix, "[pattern:") {
+		return PatternFreeform, taskPrefix, nil
+	}
+	end := strings.Index(taskPrefix, "]")
+	if end < 0 {
+		return PatternUnknown, "", fmt.Errorf("unclosed [pattern: tag: %w", ErrInvalidPattern)
+	}
+	name := taskPrefix[len("[pattern:"):end]
+	rest := strings.TrimLeft(taskPrefix[end+1:], " ")
+
+	switch name {
+	case "freeform":
+		return PatternFreeform, rest, nil
+	case "cycle":
+		return PatternCycle, rest, nil
+	case "discuss":
+		return PatternDiscuss, rest, nil
+	case "help":
+		return PatternHelp, rest, nil
+	default:
+		return PatternUnknown, "", fmt.Errorf("pattern %q: %w", name, ErrInvalidPattern)
+	}
+}
 
 // RallyState is the current lifecycle state of a rally session.
 type RallyState string
