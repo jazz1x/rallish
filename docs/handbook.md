@@ -9,8 +9,9 @@
 3. [Presets](#presets)
 4. [A2A Integration](#a2a-integration)
 5. [Rally vs Squash](#rally-vs-squash)
-6. [Security](#security)
-7. [Troubleshooting](#troubleshooting)
+6. [Using rallish from any project](#using-rallish-from-any-project)
+7. [Security](#security)
+8. [Troubleshooting](#troubleshooting)
 
 ## Installation
 
@@ -83,6 +84,27 @@ rallish stores runtime state in `~/.rallish/`:
 The daemon removes `rallish.sock`, `socket`, and `port` on SIGTERM. If
 it was killed `-9`, run `rm -f ~/.rallish/{rallish.sock,socket,port}`
 before relaunching to clear the stale files.
+
+### Single-instance daemon
+
+rallish enforces a single daemon per user. When you run `rallish daemon`
+and a daemon is already bound to `~/.rallish/rallish.sock`, the second
+invocation exits immediately with:
+
+```
+rallish daemon already running at /Users/<you>/.rallish/rallish.sock — not starting a second instance
+```
+
+This prevents the silent "orphan" bug where a second daemon would
+unlink the live socket file and leave the first daemon stranded. If the
+error appears unexpectedly (e.g. after a crash where the socket file
+was not cleaned up), recover with:
+
+```bash
+kill -TERM $(pgrep -f "rallish daemon")
+# wait a moment for the socket file to be removed, then:
+rallish daemon &
+```
 
 ### Skill discovery
 
@@ -199,6 +221,12 @@ for full walkthroughs and
 [docs/prd-rally-patterns.md](prd-rally-patterns.md) for the design
 rationale.
 
+**Cross-vendor:** the rallish-operator skill is auto-discovered by any
+skill-aware coding CLI — Claude Code, Kimi, Codex, Cursor, etc. — via
+the brand-group convention at `~/.claude/skills/`. No per-vendor setup
+is needed. Live validation: a discuss-pattern rally between Claude Code
+and Kimi reached mutual `[agree]` in 4 turns.
+
 **Autoflow (v0.3+):** by default the rallish-operator skill v0.3.0
 drives both sides autonomously after a single setup trigger per
 side. Each agent uses `rally new --first <name>` (server) and
@@ -208,6 +236,46 @@ pattern-specific signals (mutual `[agree]`, final `[review] approved`,
 or `[resolved]`) or the user typing `끝`. See
 [docs/runbook-rally-mode.md#autoflow-v03](runbook-rally-mode.md#autoflow-v03)
 and [docs/prd-rally-autoflow.md](prd-rally-autoflow.md).
+
+**Autoflow v0.3.1 — yield-friendly polling:** skill v0.3.1 replaces the
+blocking `rally join --once --timeout 5m` inner call with a yield-first
+design. On entry the skill emits a status poll and yields back to the
+user rather than holding the agent in a 5-minute wait. This eliminates
+idle token spend on the waiting side while the active side works; the
+`WAIT_MODE` state in the skill body documents the trade-off. Behaviour
+for users is unchanged — the agent picks up automatically on the next
+interaction.
+
+## Using rallish from any project
+
+rallish is installed once, globally. Nothing in the skill bundle,
+daemon, or binary is tied to the rallish source tree. After the
+one-time install (`npx skills add jazz1x/rallish` + first-trigger
+self-install of the binary) you can rally from any directory on your
+machine:
+
+```bash
+# In a totally unrelated project
+cd /any/project/dir
+# Open Claude Code (or Kimi, Cursor, Codex …) and say:
+랠리보낼 준비해
+```
+
+The agent discovers the skill from `~/.claude/skills/rallish-operator/`
+regardless of cwd, and the daemon binds globally at `~/.rallish/`. The
+`--repo` flag passed in `rallish squash` commands is session metadata
+only — it scopes the broker's working-directory context for that
+session, but does not change where the skill or daemon live.
+
+```bash
+# Cross-project squash example
+rallish squash \
+  --preset pair-review \
+  --task "Audit the auth module" \
+  --repo /work/other-company/backend
+```
+
+See [Installation](#installation) for the one-time setup.
 
 ## Security
 
@@ -237,6 +305,7 @@ and [docs/prd-rally-autoflow.md](prd-rally-autoflow.md).
 | `not your turn (holder: <name>)` on `rally done` | Stale state or wrong `--as` | Confirm with `rally status`; retry with the correct holder name. |
 | Stale socket files after crash | Daemon killed `-9` (not `-TERM`) | `rm -f ~/.rallish/{rallish.sock,socket,port}` then relaunch. |
 | `bind: address already in use` | Another rallish daemon running | `pkill -TERM -f "rallish daemon"` |
+| daemon refuses to start with "already running" | a previous daemon is alive on the same socket | kill it with `kill -TERM $(pgrep -f "rallish daemon")` then retry |
 | `adapter not found: claude` | CLI binary not on `$PATH` | Install the `claude` CLI and ensure `which claude` succeeds. |
 | Budget exceeded early | Token-count drift between adapter & broker | Verify `model:` in your preset matches the model the adapter actually invokes. |
 | `Error: Skill not found: rallish-operator` in Claude Code | Skill bundle not installed globally | `npx skills add jazz1x/rallish` or `rallish skill install` |

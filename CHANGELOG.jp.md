@@ -9,6 +9,37 @@
 
 ### 追加
 
+- **yield-friendly 自動ループ** (スキル v0.3.0 → v0.3.1): 自動ループ内の
+  デフォルト最初待機が、ブロッキング 5 分 `rally join --once --timeout 5m`
+  呼び出しから yield に変更されました。スキル本体に `WAIT_MODE` 状態と
+  トレードオフを文書化: 待機エージェントがアクティブ側の作業中にアイドル
+  トークンを消費しませんが、再開に追加のユーザー操作が必要です。パターン
+  終了シグナル (`[agree]`、`[review] approved`、`[resolved]`) の動作は変更
+  なし。
+- **クロスベンダー互換性を検証**: rallish-operator スキルがブランドグループ
+  パス `~/.claude/skills/` を通じて Claude Code、Kimi、Codex、Cursor などの
+  スキル対応 CLI で自動検出されます。ベンダーごとの設定は不要。ライブ検証:
+  Claude Code と Kimi 間の discuss パターンラリーが 4 ターンで相互 `[agree]`
+  に到達。スキル本体とハンドブックにクロスベンダーの callout を追加。
+- **どのプロジェクトからでも使用可能**: rallish スキル、デーモン、バイナリ
+  はすべてグローバル (`~/.claude/skills/`、`~/.rallish/`、`/usr/local/bin`)
+  に配置されます。初回インストール後はソースツリーへの依存がありません。
+  新しいハンドブックセクション
+  [どのプロジェクトからでも rallish を使う](docs/handbook.md#using-rallish-from-any-project)
+  と README の callout でプロジェクト非依存ワークフローを文書化。
+  `rallish squash` の `--repo` フラグはセッションメタデータのみで、スキルや
+  デーモンの場所とは無関係。
+
+### 変更
+
+- **シングルインスタンスデーモン保護**: `rallish daemon` が
+  `~/.rallish/rallish.sock` に既にバインドされているインスタンスがある場合、
+  起動を拒否して以下を出力し非正常終了します:
+  `rallish daemon already running at <path> — not starting a second instance`
+  以前は 2 回目の呼び出しがライブデーモンのソケットファイルを静かに unlink
+  して最初のデーモンを孤立させていました。復旧: `kill -TERM $(pgrep -f
+  "rallish daemon")` 後に再起動。
+
 - ラリー自動ループ — 両サイドともセットアップトリガー 1 回で
   エージェントがバトンのピンポンを自律的にループします。
   これを可能にする新しい CLI オプション 2 つ:

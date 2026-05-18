@@ -91,6 +91,12 @@ After the binary is on `$PATH`, `rallish bootstrap` (idempotent) installs the
 skill bundle and verifies the daemon.
 </details>
 
+> ✓ rallish runs once per user (not per project). After the one-time
+> install you can rally from any directory — no need to be inside the
+> rallish source tree. The daemon is global at `~/.rallish/`. See
+> [docs/handbook.md#using-rallish-from-any-project](docs/handbook.md#using-rallish-from-any-project)
+> for the project-agnostic workflow.
+
 ## Quickstart
 
 ```bash
