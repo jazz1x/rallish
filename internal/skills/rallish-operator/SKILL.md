@@ -6,10 +6,9 @@ description: >
   prep, returner prep, serving the first turn, picking up subsequent turns,
   and clean shutdown. Also covers squash mode (headless preset orchestration).
   Supports three behavioural patterns layered on top of the baton: cycle (plan/execute/review), discuss (multi-perspective), and help (stuck-help).
-  v0.3 ships an autonomous loop: after a single setup trigger per side, both agents self-poll on `rally join --once` and ping-pong without user prompts between turns.
-  v0.3.1 makes the auto-loop yield-friendly by default — short 30 s first wait, then yield to the user; works across coding-CLI vendors (Claude Code, Kimi, …) since the skill lives at the cross-vendor `~/.claude/skills/` brand-group path.
+  v0.2.0 ships an autonomous loop: after a single setup trigger per side, both agents self-loop the baton ping-pong without user prompts between turns. Default WAIT_MODE=yield: each side status-checks on every user prompt and continues if it's its turn. Works across coding-CLI vendors (Claude Code, Kimi, …) since the skill lives at the cross-vendor `~/.claude/skills/` brand-group path.
   Triggers: "랠리보낼 준비해", "let's serve", "serve prep", "rally prep — serving", "서브 준비", "랠리받을 준비해", "let's return", "returner prep", "rally prep — returning", "리턴 준비", "시작", "serve!", "go", "start rally", "내 차례", "내 차례 됐어?", "is it my turn", "ready", "ready to return", "끝", "match over", "stop rally", "랠리 끝", "cycle", "plan-execute-review", "사이클로 가자", "discuss", "discussion rally", "논의 랠리", "여러 시선으로", "stuck rally", "help me out", "막혔어 도와줘", "한 번만 봐줘"
-version: 0.3.1
+version: 0.2.0
 ssl:
   scheduling:
     anti_triggers:
@@ -39,10 +38,10 @@ ssl:
       - "pattern help → owner stays driving; helper provides at most ~3 [hint] turns; owner's [resolved] ends session"
       - "mid-rally switch → [switch-pattern:<name>] proposed, acked next turn by [switch-ack:<name>]"
       - "server prep uses `rally new --first server` so the baton is pre-assigned (no SSE phantom-join trick needed)"
-      - "between turns each side runs `rally join --once --timeout 5m --as <ROLE>` which blocks until the next baton arrives or the timeout fires (exit 2)"
-      - "join exit 2 (timeout) → checkpoint user '5분간 baton 없음. 계속 대기할까 혹은 끝낼까?'; default behaviour: loop again unless user types `끝`"
+      - "default WAIT_MODE=yield: after each `rally done` the agent yields; on the next user message it runs `rally status` and continues if it's its turn, otherwise reports the current holder and yields again"
+      - "WAIT_MODE=block (opt-in): each side runs `rally join --once --timeout 5m --as <ROLE>` blocking until the next baton arrives or the timeout fires (exit 2); used only when both sides are known to be ready"
+      - "join exit 2 (timeout) → checkpoint user '5분간 baton 없음. 계속 대기할까 혹은 끝낼까?'; loop again unless user types `끝`"
       - "pattern-specific exit signal hit → agent emits a final user-facing summary and stops the loop"
-      - "server-side first done → yield to user (no long blocking); user pings server back when receiver is ready → status-check + continue"
       - "cross-vendor: skill auto-discovered by kimi via brand-group fallback (kimi → claude → codex), and by other Anthropic-skill-format clients (Cursor, etc.) — same trigger surface"
   logical:
     tools: [Bash, Read]
@@ -95,7 +94,7 @@ Refer to the chosen path as `$RALLISH` for the rest of this skill.
 - PATTERN: cycle | discuss | help | freeform (default; set by Trigger A or by mid-rally switch)
 - LAST_HOLDER: who the agent last saw as holder (used to detect baton arrival)
 - EXIT_REASON: filled on loop exit ('mutual-agree', 'review-approved', 'resolved', 'user-끝', 'timeout-abandoned')
-- WAIT_MODE: "yield" (default in v0.3.1) | "block" (legacy v0.3.0 blocking auto-loop, only when both sides are known to be ready)
+- WAIT_MODE: "yield" (default) | "block" (opt-in blocking auto-loop, only when both sides are known to be ready)
 
 ## Trigger A — "랠리보낼 준비해" (or English equivalents)
 The agent on this side becomes the server.
@@ -143,8 +142,9 @@ The agent on this side becomes the returner.
    > Returner 준비 완료. 서버가 서브할 때까지 대기 중.
 
 4a. **Enter the auto-loop** (see "Auto-Loop" section below). The
-    receiver does NOT wait for a `내 차례` user trigger — the
-    `rally join --once` call blocks until baton arrives.
+    receiver does NOT wait for a `내 차례` user trigger — on the next
+    user message it runs `rally status`, and if it's its turn it
+    picks up immediately.
 
 ## Trigger C — "시작" (server side, after prep)
 The agent serves the first turn.
@@ -160,7 +160,7 @@ The agent serves the first turn.
 
 ## Trigger D — "내 차례" (any input after prep, on receiver side)
 
-**Note (v0.3+):** the auto-loop replaces the need for `내 차례` between
+**Note (v0.2.0+):** the auto-loop replaces the need for `내 차례` between
 turns. This trigger remains supported for manual override or when
 the loop is paused.
 
@@ -210,7 +210,7 @@ on every "내 차례" trigger OR any user message after the agent has yielded:
     return  # yield to user — do NOT block
 ```
 
-**Why yield instead of `rally join --once`?** Live testing of v0.3.0 showed that the blocking auto-loop burns ~5 k tokens per timeout window (default 5 min) when the receiver isn't yet ready. The yield-friendly pattern uses `rally status` (one cheap HTTP GET) on every user prod, which costs tens of tokens and lets the user pace the rally naturally. Use `rally join --once --timeout <short>` only when you have a known-ready receiver and want a sub-30-second hand-off (e.g. cycle pattern with both sides primed).
+**Why yield is the default.** Yield is token-efficient: the agent costs only a lightweight `rally status` HTTP GET per user prompt (tens of tokens), while the other side composes its response the agent is idle at zero cost. Use `WAIT_MODE=block` (`rally join --once --timeout <short>`) only when both sides are known-ready and you want a sub-30-second hand-off (e.g. cycle pattern with both terminals primed).
 
 **Heuristics inside the loop:**
 - `compose_response(discuss, NOTE, history)` — if NOTE was `[opinion]`,
@@ -226,7 +226,7 @@ on every "내 차례" trigger OR any user message after the agent has yielded:
   consecutive `[hint]` turns without an intervening `[try]`.
 
 **User interruption rule:** between any `rally done` and the next
-`rally join --once`, the agent yields to the user. If a user message
+status check, the agent yields to the user. If a user message
 arrives during this brief window, the loop processes it (e.g., user
 says `끝`, or "잠깐, 방향 바꿔줘"). Silence = continue.
 
@@ -396,9 +396,10 @@ original v0.1.x rally behaviour for users who don't want patterns.
 The agent's lifecycle is per-message, not persistent. Background SSE would
 require process supervision that goes beyond what this skill should impose.
 `rally status` is cheap (one HTTP GET) and the user-driven turn cadence is
-already explicit, so polling on "내 차례" is the right level of automation.
-In v0.3 the agent uses `rally join --once --timeout <dur>` to combine
-short blocking SSE waits with explicit deadlines — best of both worlds.
+already explicit, so status-polling on every user message is the right level
+of automation. `WAIT_MODE=block` (`rally join --once --timeout <dur>`) is
+available as an opt-in when both sides are known-ready and sub-30-second
+hand-offs are desired.
 
 ## Reference
 - PRD: docs/prd-rally-mode.md

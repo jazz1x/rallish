@@ -17,7 +17,7 @@
 | 기능 | 설명 |
 |------|------|
 | **Squash (헤드리스)** | `rallish squash`로 헤드리스 프리셋 세션 실행(`solo-ralph`, `pair-review`); 브로커가 어댑터를 자동으로 스폰 |
-| **Rally (인터랙티브)** | `rallish rally`로 두 개 이상의 인간 터미널 간 라이브 바톤 전달; SSE를 통한 독점 홀더 강제 |
+| **Rally (인터랙티브)** | `rallish rally`로 두 코딩 CLI 세션 간 라이브 바톤 전달; 에이전트가 핑퐁을 자율 루프 (턴마다 사용자 트리거 불필요); SSE를 통한 독점 홀더 강제 |
 | **A2A 프로토콜** | `/.well-known/agent.json`, JSON-RPC 2.0 태스크, SSE 스트리밍 |
 | **토큰 예산** | 세션당 토큰, 턴 수, 시간의 상한선을 강제 |
 | **스크래치패드** | 자동 압축(compaction)이 적용된 롤링 공유 스크래치 |
@@ -126,15 +126,14 @@ EOF
 # 두 터미널 테니스 랠리 (라이브 바톤 전달)
 # skills/rallish-operator 기반 자연어 UX를 권장합니다 —
 # 에이전트(Claude Code, Cursor 등)가 모든 rally 명령을 대신 실행합니다.
-# 터미널 A 의 코딩 CLI 세션:                   "랠리보낼 준비해"
-# 에이전트: → rally new + role=server, SID 출력.
+# 터미널 A 의 코딩 CLI 세션:                   "랠리보낼 준비해 — 사이클로 가자"
+# 에이전트: rally new --first server + role=server, SID 출력, 첫 턴 서브, yield.
 # 터미널 B 의 코딩 CLI 세션:                   "랠리받을 준비해 <SID>"
-# 에이전트: → rally status + role=returner, 대기.
-# 다시 터미널 A:                              "시작"
-# 에이전트: 첫 턴 서브, rally done 으로 요약 note 와 함께 넘김.
-# 터미널 B:                                   "내 차례"
-# 에이전트: 바톤 받아 리턴 후 rally done.
-# 어느 쪽이든, 끝낼 때:                       "끝"
+# 에이전트: 패턴 파싱, role=returner, 즉시 바톤 수신, yield.
+# 각 쪽이 턴을 마치면 에이전트가 사용자에게 제어권을 넘기고,
+# 다음 사용자 메시지에 status를 확인해 자기 차례면 계속 진행합니다.
+# 턴마다 "내 차례" 트리거 불필요.
+# 어느 쪽이든, 언제든지 끝낼 때:               "끝"
 #
 # Raw CLI (스킬이 내부적으로 호출 / 스크립트에서 사용):
 SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-up rally")

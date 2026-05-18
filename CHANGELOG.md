@@ -9,14 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Yield-friendly autoflow** (skill v0.3.0 → v0.3.1): the default
-  first-wait inside the auto-loop is now a yield rather than a blocking
-  5-minute `rally join --once --timeout 5m` call. The skill body
-  documents the `WAIT_MODE` state and the trade-off: yielding back to
-  the user costs zero idle tokens on the waiting agent while the active
-  side works, at the expense of needing one more user interaction to
-  resume. Behaviour for pattern exit signals (`[agree]`, `[review]
-  approved`, `[resolved]`) is unchanged.
+- **Rally autoflow** — the skill drives both sides of a rally
+  autonomously after a single setup trigger per side. Server-side uses
+  `rally new --first server` to pre-assign the baton (no SSE
+  phantom-join trick required). Receiver-side picks up the baton on
+  the first `rally status` poll. Default `WAIT_MODE=yield`: the agent
+  yields back to the user after every `rally done`, status-checks on
+  the next user message, and continues if it's its turn. Opt-in
+  `WAIT_MODE=block` available via `rally join --once --timeout <dur>`
+  for known-ready sessions. Pattern-specific exit signals end the
+  loop automatically.
 - **Cross-vendor compatibility validated**: the rallish-operator skill
   is auto-discovered by Claude Code, Kimi, Codex, Cursor, and any other
   skill-aware CLI via the brand-group path `~/.claude/skills/`. No
@@ -43,18 +45,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in-flight sessions to lose IPC. Recovery: `kill -TERM $(pgrep -f
   "rallish daemon")` then re-launch.
 
-- Rally autoflow — agents now self-loop the baton ping-pong after one
-  setup trigger per side. Two new CLI affordances unlock it:
+- Two new CLI affordances unlock the autoflow:
   - `rally new --first <name>` — pre-assigns the baton at create time;
     no SSE phantom-join trick required.
   - `rally join --once [--timeout <dur>]` — exits cleanly after the
     first baton event, with exit code 2 on timeout. Default behaviour
     (block forever, multi-event) preserved when flags absent.
-  Skill bumped to v0.3.0 with an `## Auto-Loop` body section detailing
-  the join → read → work → done → repeat cycle plus pattern-specific
-  exit signals (mutual `[agree]`, final `[review] approved`,
-  `[resolved]`). Backwards-compatible: v0.2.0 sessions and CLI calls
-  unchanged.
+  Backwards-compatible: existing sessions and CLI calls unchanged.
 
 ## [0.1.2] - 2026-05-17
 

@@ -466,20 +466,26 @@ are unaware of the switch; it is a pure convention between the two agents.
 
 ---
 
-## Autoflow (v0.3+)
+## Autoflow (v0.2.0+)
 
-Starting with `rallish-operator` v0.3.0 and the matching CLI additions, both
-sides of a rally can run fully autonomously after a **single setup trigger per
-side**. The user types one sentence (server: `랠리보낼 준비해`; returner:
-`랠리받을 준비해 <SID>`), and the agent handles every subsequent turn — composing
-notes, calling `rally done`, waiting for the baton, and repeating — until a
-pattern-specific exit signal or the user types `끝`.
+Starting with `rallish` v0.2.0 and the matching `rallish-operator`
+skill, both sides of a rally run autonomously after a **single setup
+trigger per side**.
 
-What changed versus v0.2.0: the server no longer needs a phantom SSE join to
-claim the baton (replaced by `rally new --first server`), and the returner no
-longer needs to type `내 차례` between every turn (replaced by `rally join
---once --timeout 5m` blocking in a loop). Manual triggers (`내 차례`, `끝`, etc.)
-remain supported at any time for override or fallback.
+- Server-side: user types `랠리보낼 준비해 — <pattern>`. The agent runs
+  `rally new --first server …`, serves the first turn (`rally done`),
+  then yields back to the user.
+- Receiver-side: user types `랠리받을 준비해 <SID>`. The agent parses
+  the pattern, status-checks, and yields.
+- Between turns: each agent runs `rally status` on every user prompt.
+  If it is now its turn, it picks up the baton, composes the response,
+  calls `rally done`, and yields. No per-turn `내 차례` trigger needed.
+
+The default `WAIT_MODE=yield` is token-efficient: the agent costs only
+the lightweight `rally status` HTTP GET per user prompt. For sessions
+where both sides are known to be ready and you want sub-30-second
+hand-offs, set `WAIT_MODE=block` in the skill invocation; the agent
+will use `rally join --once --timeout 5m` to block on the SSE cue.
 
 ### Server-side (autoflow)
 
@@ -518,8 +524,10 @@ rallish rally done \
       --note "[plan] step 1: add OAuth2 PKCE client config"
 ```
 
-And enters the auto-loop — waiting for the baton, responding, and repeating
-without further user input.
+After `rally done` the agent yields back to the user. On the next user
+message it runs `rally status` — if the returner has replied (holder flipped
+back to server), it reads the note and continues. Otherwise it reports the
+current holder and yields again.
 
 ### Receiver-side (autoflow)
 
@@ -536,9 +544,15 @@ rallish rally status --session-id rly_1747382400000_a3f9
 ```
 
 It parses the `[pattern:cycle]` prefix from the `task` field, sets its own
-`PATTERN=cycle`, frames itself as executor, and immediately enters the
-auto-loop. **No `내 차례` trigger is required.** The first iteration of the loop
-is:
+`PATTERN=cycle`, frames itself as executor, and yields. **No `내 차례` trigger
+is required.** On every subsequent user message, the agent runs `rally status`
+— if it is now the returner's turn it reads the latest note, composes its
+response, calls `rally done`, and yields again.
+
+#### WAIT_MODE=block (opt-in)
+
+For known-ready sessions where both terminals are active and you want
+sub-30-second hand-offs, the agent can use:
 
 ```sh
 rallish rally join \
@@ -560,16 +574,20 @@ This blocks until the baton arrives (exit 0) or 5 minutes pass with no baton
 | **discuss** exit | Both sides emit `[agree]` within the last two turns (mutual convergence). |
 | **cycle** exit | Planner emits `[review] approved` and there are no pending `[plan]` items in history. |
 | **help** exit | Owner emits `[resolved] …` (helper detects this and stops the loop). |
-| **Timeout fallback** | If no baton arrives within 5 minutes, the agent checkpoints to the user: `"🎾 5분간 baton 없음. 계속 대기할까(엔터)? 끝낼까(끝)?"`. Default: loop again on silence; break on `끝`. |
 | **Hard ceiling** | After 20 iterations without an exit signal the agent pauses and asks the user whether to continue: `"🎾 20턴 넘었어. 정리할까?"`. |
-| **User interruption** | The agent yields to the user between every `rally done` and the next `rally join --once`. If the user types anything during that window — including `끝` — the loop honours it. Silence = continue. |
+| **User interruption** | The agent yields to the user after every `rally done`. If the user types anything on the next message — including `끝` — the loop honours it. Silence = continue. |
+
+#### WAIT_MODE=block behaviour
+
+| Aspect | Detail |
+|---|---|
+| **Timeout fallback** | If no baton arrives within 5 minutes, the agent checkpoints to the user: `"🎾 5분간 baton 없음. 계속 대기할까(엔터)? 끝낼까(끝)?"`. Default: loop again on silence; break on `끝`. |
 
 ### When to fall back to manual mode
 
-The auto-loop requires the agent process to remain active between turns. If the
-loop blocks unexpectedly (network blip, broker restart, or long agent
-compaction), the user can always type `내 차례` and the v0.2.0 manual flow
-resumes without any setup change:
+If the auto-loop is interrupted (network blip, broker restart, or long agent
+compaction), the user can always type `내 차례` and the manual flow resumes
+without any setup change:
 
 ```sh
 rallish rally status --session-id $SID   # confirm it's your turn
