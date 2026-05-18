@@ -66,8 +66,8 @@ type checker interface {
 
 // CheckAll calls Check() on every adapter that implements it.
 // For adapters without a Check method it records a nil error.
-func (r *Registry) CheckAll(ctx context.Context) map[string]error {
-	_ = ctx
+// ctx is intentionally omitted: the Check interface is synchronous and context-free.
+func (r *Registry) CheckAll() map[string]error {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	results := make(map[string]error, len(r.adapters))

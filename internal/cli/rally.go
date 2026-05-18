@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -24,9 +23,6 @@ import (
 // ErrTimeoutWaitingForBaton is returned by runRallyJoin when --timeout elapses
 // before any baton event arrives. The top-level main maps this to exit code 2.
 var ErrTimeoutWaitingForBaton = errors.New("rally join: timeout waiting for baton")
-
-// nameRe mirrors the broker's participant name validation (PRD §6).
-var nameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,16}$`)
 
 // RallyCmd returns the parent `rally` cobra command with subcommands registered.
 func RallyCmd() *cobra.Command {
@@ -154,7 +150,7 @@ func runRallyNew(ctx context.Context, homeDir, participants, repo, task, firstHo
 		return fmt.Errorf("--participants requires at least 2 comma-separated names")
 	}
 	for _, name := range names {
-		if !nameRe.MatchString(name) {
+		if !contract.ParticipantNameRe.MatchString(name) {
 			return fmt.Errorf("invalid participant name %q: must match ^[a-zA-Z0-9_-]{1,16}$", name)
 		}
 	}
@@ -218,7 +214,7 @@ func runRallyNew(ctx context.Context, homeDir, participants, repo, task, firstHo
 }
 
 func runRallyJoin(ctx context.Context, homeDir, sessionID, as string, once bool, timeout time.Duration, out io.Writer, errOut io.Writer) error {
-	if !nameRe.MatchString(as) {
+	if !contract.ParticipantNameRe.MatchString(as) {
 		return fmt.Errorf("invalid participant name %q: must match ^[a-zA-Z0-9_-]{1,16}$", as)
 	}
 
@@ -365,10 +361,10 @@ func handleBatonEvent(data, sessionID, as string, out io.Writer) error {
 }
 
 func runRallyDone(ctx context.Context, homeDir, sessionID, as, note, handoffTo string, out io.Writer) error {
-	if !nameRe.MatchString(as) {
+	if !contract.ParticipantNameRe.MatchString(as) {
 		return fmt.Errorf("invalid participant name %q: must match ^[a-zA-Z0-9_-]{1,16}$", as)
 	}
-	if handoffTo != "" && !nameRe.MatchString(handoffTo) {
+	if handoffTo != "" && !contract.ParticipantNameRe.MatchString(handoffTo) {
 		return fmt.Errorf("invalid handoff-to name %q: must match ^[a-zA-Z0-9_-]{1,16}$", handoffTo)
 	}
 

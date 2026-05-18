@@ -473,7 +473,7 @@ func TestRallyStaleParticipant(t *testing.T) {
 	sessionID := sess.ID
 
 	// Set stale threshold to 100 ms for this test.
-	SetRallyStaleThreshold(sessionID, 100)
+	setRallyStaleThreshold(sessionID, 100)
 
 	// Record alice's last_seen manually.
 	rallies.mu.Lock()
@@ -482,13 +482,13 @@ func TestRallyStaleParticipant(t *testing.T) {
 	rallies.mu.Unlock()
 
 	// Not stale yet.
-	require.False(t, IsParticipantStale(sessionID, "alice", time.Now().UnixMilli()))
+	require.False(t, isParticipantStale(sessionID, "alice", time.Now().UnixMilli()))
 
 	// Wait past threshold.
 	time.Sleep(150 * time.Millisecond)
 
 	// Now stale.
-	require.True(t, IsParticipantStale(sessionID, "alice", time.Now().UnixMilli()))
+	require.True(t, isParticipantStale(sessionID, "alice", time.Now().UnixMilli()))
 }
 
 func TestRallySessionNotFound(t *testing.T) {

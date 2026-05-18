@@ -10,15 +10,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"sync"
 	"time"
 
 	"github.com/jazz1x/rallish/pkg/contract"
 )
-
-// nameRe validates participant names per PRD §6.
-var nameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,16}$`)
 
 // rallyStore holds all active rally sessions keyed by session ID.
 // It is protected by a single mutex; all state mutations must hold that lock.
@@ -37,7 +33,6 @@ type rallySession struct {
 	turnN        int
 	status       contract.RallyState
 	lastSeen     map[string]int64
-	joined       map[string]int64
 	history      []contract.BatonHandoff
 	createdAt    int64
 
@@ -163,7 +158,7 @@ func (s *Server) handleRallyCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	seen := make(map[string]bool)
 	for _, name := range req.Participants {
-		if !nameRe.MatchString(name) {
+		if !contract.ParticipantNameRe.MatchString(name) {
 			http.Error(w, fmt.Sprintf("invalid participant name %q: must match ^[a-zA-Z0-9_-]{1,16}$", name), http.StatusBadRequest)
 			return
 		}
@@ -204,7 +199,6 @@ func (s *Server) handleRallyCreate(w http.ResponseWriter, r *http.Request) {
 		task:           req.Task,
 		status:         contract.RallyStateIdle,
 		lastSeen:       make(map[string]int64),
-		joined:         make(map[string]int64),
 		history:        []contract.BatonHandoff{},
 		createdAt:      nowMS,
 		streams:        make(map[string]chan contract.BatonEvent),
@@ -240,7 +234,7 @@ func (s *Server) handleRallyBaton(w http.ResponseWriter, r *http.Request) {
 
 	id := r.PathValue("id")
 	as := r.URL.Query().Get("as")
-	if !nameRe.MatchString(as) {
+	if !contract.ParticipantNameRe.MatchString(as) {
 		http.Error(w, fmt.Sprintf("invalid participant name %q: must match ^[a-zA-Z0-9_-]{1,16}$", as), http.StatusBadRequest)
 		return
 	}
@@ -271,9 +265,6 @@ func (s *Server) handleRallyBaton(w http.ResponseWriter, r *http.Request) {
 	ch := make(chan contract.BatonEvent, 1)
 	sess.streams[as] = ch
 	nowMS := time.Now().UnixMilli()
-	if sess.joined[as] == 0 {
-		sess.joined[as] = nowMS
-	}
 	sess.lastSeen[as] = nowMS
 
 	// If idle and this is the first participant in the ordered list, give them the baton.
@@ -423,7 +414,7 @@ func (s *Server) handleRallyDone(w http.ResponseWriter, r *http.Request) {
 
 	id := r.PathValue("id")
 	as := r.URL.Query().Get("as")
-	if !nameRe.MatchString(as) {
+	if !contract.ParticipantNameRe.MatchString(as) {
 		http.Error(w, fmt.Sprintf("invalid participant name %q: must match ^[a-zA-Z0-9_-]{1,16}$", as), http.StatusBadRequest)
 		return
 	}
@@ -436,7 +427,7 @@ func (s *Server) handleRallyDone(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate optional handoff_to name.
-	if req.HandoffTo != "" && !nameRe.MatchString(req.HandoffTo) {
+	if req.HandoffTo != "" && !contract.ParticipantNameRe.MatchString(req.HandoffTo) {
 		http.Error(w, fmt.Sprintf("invalid handoff_to name %q: must match ^[a-zA-Z0-9_-]{1,16}$", req.HandoffTo), http.StatusBadRequest)
 		return
 	}
@@ -480,6 +471,7 @@ func (s *Server) handleRallyDone(w http.ResponseWriter, r *http.Request) {
 		Note:  req.Note,
 	}
 	nextCh := sess.streams[next]
+	turnN := sess.turnN // snapshot before unlock to avoid data race
 	rallies.mu.Unlock()
 
 	// Send non-blocking to avoid deadlock if the channel is full or participant absent.
@@ -495,7 +487,7 @@ func (s *Server) handleRallyDone(w http.ResponseWriter, r *http.Request) {
 		"session_id", id,
 		"from", as,
 		"to", next,
-		"turn_n", sess.turnN,
+		"turn_n", turnN,
 	)
 
 	rallies.mu.Lock()
@@ -533,10 +525,10 @@ func (s *Server) handleRallyStatus(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// IsParticipantStale reports whether a participant's last_seen timestamp
+// isParticipantStale reports whether a participant's last_seen timestamp
 // is older than staleThreshold milliseconds.
-// Exported for test access; caller must hold no locks.
-func IsParticipantStale(sessionID, name string, nowMS int64) bool {
+// Caller must hold no locks.
+func isParticipantStale(sessionID, name string, nowMS int64) bool {
 	rallies.mu.Lock()
 	defer rallies.mu.Unlock()
 	sess, ok := rallies.sessions[sessionID]
@@ -550,8 +542,8 @@ func IsParticipantStale(sessionID, name string, nowMS int64) bool {
 	return nowMS-ls > sess.staleThreshold
 }
 
-// SetRallyStaleThreshold overrides the stale threshold for a session (test helper).
-func SetRallyStaleThreshold(sessionID string, thresholdMS int64) {
+// setRallyStaleThreshold overrides the stale threshold for a session (test helper).
+func setRallyStaleThreshold(sessionID string, thresholdMS int64) {
 	rallies.mu.Lock()
 	defer rallies.mu.Unlock()
 	if sess, ok := rallies.sessions[sessionID]; ok {

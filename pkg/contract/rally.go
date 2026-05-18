@@ -4,6 +4,12 @@
 // and CLI for interactive multi-participant sessions.
 package contract
 
+import "regexp"
+
+// ParticipantNameRe is the regex every component uses to validate
+// rally participant names.
+var ParticipantNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,16}$`)
+
 // RallyState is the current lifecycle state of a rally session.
 type RallyState string
 
@@ -21,16 +27,6 @@ const (
 // e.g. "alice_turn".
 func RallyTurnState(name string) RallyState {
 	return RallyState(name + "_turn")
-}
-
-// Participant describes a named interactive participant in a rally session.
-type Participant struct {
-	// Name is the unique identifier for this participant (validated against name regex).
-	Name string `json:"name"`
-	// LastSeen is the Unix millisecond timestamp of the last heartbeat from this participant.
-	LastSeen int64 `json:"last_seen"`
-	// Joined is the Unix millisecond timestamp when this participant first joined.
-	Joined int64 `json:"joined"`
 }
 
 // BatonHandoff records a single baton transfer in the session history.

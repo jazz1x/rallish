@@ -62,9 +62,9 @@ func TestNameRegex(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := nameRe.MatchString(c.name)
+			got := contract.ParticipantNameRe.MatchString(c.name)
 			if got != c.ok {
-				t.Fatalf("nameRe.MatchString(%q) = %v want %v", c.name, got, c.ok)
+				t.Fatalf("contract.ParticipantNameRe.MatchString(%q) = %v want %v", c.name, got, c.ok)
 			}
 		})
 	}
