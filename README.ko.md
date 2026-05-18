@@ -2,7 +2,7 @@
 
 > 다중 에이전트 순차 실행을 위한 로컬 브로커, A2A 호환.
 
-![version](https://img.shields.io/badge/version-0.0.1-blue)
+![version](https://img.shields.io/badge/version-0.1.2-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![go](https://img.shields.io/badge/go-1.25+-blue)
 

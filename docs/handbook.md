@@ -227,24 +227,18 @@ the brand-group convention at `~/.claude/skills/`. No per-vendor setup
 is needed. Live validation: a discuss-pattern rally between Claude Code
 and Kimi reached mutual `[agree]` in 4 turns.
 
-**Autoflow (v0.3+):** by default the rallish-operator skill v0.3.0
-drives both sides autonomously after a single setup trigger per
-side. Each agent uses `rally new --first <name>` (server) and
-`rally join --once --timeout 5m` (both sides) so the baton ping-pongs
-without user intervention between turns. The loop exits on
-pattern-specific signals (mutual `[agree]`, final `[review] approved`,
-or `[resolved]`) or the user typing `끝`. See
+**Autoflow (v0.3.1+):** by default the rallish-operator skill drives both
+sides autonomously after a single setup trigger per side. The skill uses a
+yield-first design: on entry it emits a status poll and yields back to the
+user rather than holding the agent in a long wait. This eliminates idle token
+spend on the waiting side while the active side works. The baton ping-pongs
+without user intervention between turns; the loop exits on pattern-specific
+signals (mutual `[agree]`, final `[review] approved`, or `[resolved]`) or
+the user typing `끝`. See
 [docs/runbook-rally-mode.md#autoflow-v03](runbook-rally-mode.md#autoflow-v03)
-and [docs/prd-rally-autoflow.md](prd-rally-autoflow.md).
-
-**Autoflow v0.3.1 — yield-friendly polling:** skill v0.3.1 replaces the
-blocking `rally join --once --timeout 5m` inner call with a yield-first
-design. On entry the skill emits a status poll and yields back to the
-user rather than holding the agent in a 5-minute wait. This eliminates
-idle token spend on the waiting side while the active side works; the
-`WAIT_MODE` state in the skill body documents the trade-off. Behaviour
-for users is unchanged — the agent picks up automatically on the next
-interaction.
+and [docs/prd-rally-autoflow.md](prd-rally-autoflow.md). For cases where both
+sides are known-ready and you prefer a blocking wait, set `WAIT_MODE=block` in
+the skill invocation.
 
 ## Using rallish from any project
 

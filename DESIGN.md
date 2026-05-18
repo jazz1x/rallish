@@ -105,7 +105,7 @@ rallish/
 │   │   ├── claude/              wraps `claude -p`
 │   │   ├── kimi/                wraps kimi headless
 │   │   └── fake/                deterministic test adapter
-│   ├── ipc/                     Unix-socket transport for `rallish attach`
+│   ├── ipc/                     Unix-socket transport for CLI↔Daemon control plane
 │   ├── logx/                    structured logging + secret redaction
 │   ├── safepath/                path-traversal-safe filepath helpers
 │   └── buildinfo/               version / commit / date (injected via ldflags)
@@ -347,23 +347,26 @@ Adapters register in `internal/adapter/adapter.go`'s registry by name. Adding a 
 
 ## 13. CLI surface
 
+Current surface (as of v0.2.0):
+
 ```
+rallish version                       # version + commit + go runtime
+rallish doctor                        # check adapters, paths, perms
+rallish daemon                        # explicit foreground broker (rarely used)
 rallish squash [--preset NAME] [--task FILE|"inline task"] [--session-id ID]
 rallish rally new --participants A,B [--task TEXT]
 rallish rally join --session-id ID --as NAME
 rallish rally done --session-id ID --as NAME [--note TEXT]
 rallish rally status --session-id ID
-rallish attach <session-id>           # follow live SSE stream in terminal
-rallish status [<session-id>]         # show all running / recent sessions
-rallish stop <session-id> [--reason]
-rallish log <session-id> [--turn N]   # pretty-print log.jsonl
-rallish presets                       # list shipped + user presets
-rallish doctor                        # check adapters, paths, perms
-rallish daemon                        # explicit foreground broker (rarely used)
-rallish version                       # version + commit + go runtime
+rallish skill install                 # install / refresh bundled skills globally
+rallish bootstrap                     # one-time skill + daemon setup
+rallish add {…}                       # add presets or other assets
 ```
 
-Daemon mode: `rallish squash` will auto-spawn a daemon (background broker) if none is running. CLI commands talk to it over Unix socket at `~/.rallish/sock`. The broker also listens on `127.0.0.1:<port>` (port written to `~/.rallish/port`) — kept simple for adapter introspection.
+Originally planned (Phase 2–5); not yet shipped as of v0.2.0:
+`rallish attach`, `rallish status`, `rallish stop`, `rallish log`, `rallish presets`.
+
+Daemon mode: `rallish squash` will auto-spawn a daemon (background broker) if none is running. CLI commands talk to it over Unix socket at `~/.rallish/rallish.sock`. The broker also listens on `127.0.0.1:<port>` (port written to `~/.rallish/port`) — kept simple for adapter introspection.
 
 ---
 
@@ -375,8 +378,8 @@ This tool spawns child processes and exposes a local HTTP server. The threat mod
 
 | Threat | Mitigation |
 |---|---|
-| Non-broker local process talks to the broker | Bind `127.0.0.1` **and** require per-session bearer token on every HTTP/SSE request |
-| Token leak via process list | Token lives in `~/.rallish/sock.token` (mode `0600`), never in argv or env |
+| Non-broker local process talks to the broker | Bind `127.0.0.1` **and** require per-session bearer token on every HTTP/SSE request (**NOT YET IMPLEMENTED** — v0 ships with no auth; see README's stated stance) |
+| Token leak via process list | Token lives in `~/.rallish/sock.token` (mode `0600`), never in argv or env (**NOT YET IMPLEMENTED** — no bearer-token auth in v0) |
 | Path traversal via `repo_root` / `ScratchPath` / `artifacts` | `internal/safepath`: `filepath.Clean` + `EvalSymlinks` + `HasPrefix` check against the session's allowed roots; reject anything that escapes |
 | Command injection via preset / task fields | **Never `sh -c`.** Always `exec.Command(name, args...)` with literal arg slices. `forbidigo` lint rule bans `exec.Command("sh"`/`bash` |
 | Malicious YAML preset (unknown keys, type confusion) | `yaml.Decoder.KnownFields(true)`; reject unknown keys; allowlist field types via reflection |

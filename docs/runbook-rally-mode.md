@@ -1,6 +1,5 @@
 # Runbook: Rally Mode — Manual Verification
 
-> **Branch:** `feat/rally-mode`
 > **Prerequisites:** Go 1.25+, macOS/Linux, `~/.rallish/` directory writable, daemon running
 
 ---
