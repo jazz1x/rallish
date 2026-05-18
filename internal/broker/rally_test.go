@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,7 +22,7 @@ import (
 // resetRallies clears the global rally store between tests.
 func resetRallies() {
 	rallies.mu.Lock()
-	rallies.sessions = make(map[string]*rallySession)
+	rallies.sessions = make(map[contract.SessionID]*rallySession)
 	rallies.mu.Unlock()
 }
 
@@ -469,32 +470,36 @@ func TestRallyStaleParticipant(t *testing.T) {
 	ts, _ := newRallyServer(t)
 
 	sess := createSession(t, ts, []string{"alice", "bob"})
-	sessionID := sess.ID
+	sid, err := contract.NewSessionID(sess.ID)
+	require.NoError(t, err)
+	alice, err := contract.NewParticipantName("alice")
+	require.NoError(t, err)
 
 	// Set stale threshold to 100 ms for this test.
-	SetRallyStaleThreshold(sessionID, 100)
+	setRallyStaleThreshold(sid, 100)
 
 	// Record alice's last_seen manually.
 	rallies.mu.Lock()
-	s := rallies.sessions[sessionID]
-	s.lastSeen["alice"] = time.Now().UnixMilli()
+	s := rallies.sessions[sid]
+	s.lastSeen[alice] = time.Now().UnixMilli()
 	rallies.mu.Unlock()
 
 	// Not stale yet.
-	require.False(t, IsParticipantStale(sessionID, "alice", time.Now().UnixMilli()))
+	require.False(t, isParticipantStale(sid, alice, time.Now().UnixMilli()))
 
 	// Wait past threshold.
 	time.Sleep(150 * time.Millisecond)
 
 	// Now stale.
-	require.True(t, IsParticipantStale(sessionID, "alice", time.Now().UnixMilli()))
+	require.True(t, isParticipantStale(sid, alice, time.Now().UnixMilli()))
 }
 
 func TestRallySessionNotFound(t *testing.T) {
 	resetRallies()
 	ts, _ := newRallyServer(t)
 
-	resp, err := http.Get(ts.URL + "/rally/sessions/rly_nonexistent_0000")
+	// rly_0_0000 is a validly-formatted session id that won't exist in the store.
+	resp, err := http.Get(ts.URL + "/rally/sessions/rly_0_0000")
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
@@ -548,6 +553,63 @@ func TestRallyBatonNonMember(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+// TestRallyCreateWithFirstHolder verifies that a session created with
+// first_holder="server" immediately has status=server_turn, holder="server",
+// and turnN=1.
+func TestRallyCreateWithFirstHolder(t *testing.T) {
+	resetRallies()
+	ts, _ := newRallyServer(t)
+
+	req := contract.NewRallyRequest{
+		Participants: []string{"server", "returner"},
+		FirstHolder:  "server",
+	}
+	body, err := json.Marshal(req)
+	require.NoError(t, err)
+	resp := postJSON(t, ts.URL+"/rally/sessions", string(body))
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	var sess contract.RallySession
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&sess))
+	require.Equal(t, contract.RallyTurnState("server"), sess.Status)
+	require.Equal(t, "server", sess.Holder)
+	require.Equal(t, 1, sess.TurnN)
+}
+
+// TestRallyCreateInvalidFirstHolder verifies that supplying a first_holder
+// that is not in participants returns 400 with a message mentioning first_holder.
+func TestRallyCreateInvalidFirstHolder(t *testing.T) {
+	resetRallies()
+	ts, _ := newRallyServer(t)
+
+	req := contract.NewRallyRequest{
+		Participants: []string{"server", "returner"},
+		FirstHolder:  "ghost",
+	}
+	body, err := json.Marshal(req)
+	require.NoError(t, err)
+	resp := postJSON(t, ts.URL+"/rally/sessions", string(body))
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	raw, _ := io.ReadAll(resp.Body)
+	require.Contains(t, string(raw), "first_holder")
+}
+
+// TestRallyCreateWithoutFirstHolder verifies backwards compatibility: omitting
+// first_holder still produces an idle session with turnN=0 and no holder.
+func TestRallyCreateWithoutFirstHolder(t *testing.T) {
+	resetRallies()
+	ts, _ := newRallyServer(t)
+
+	sess := createSession(t, ts, []string{"server", "returner"})
+
+	require.Equal(t, contract.RallyStateIdle, sess.Status)
+	require.Equal(t, "", sess.Holder)
+	require.Equal(t, 0, sess.TurnN)
 }
 
 // TestCloseAllRallies verifies that an active SSE baton stream receives a
@@ -634,8 +696,10 @@ func TestCloseAllRallies(t *testing.T) {
 	}
 
 	// Verify session status is interrupted.
+	sid2, err2 := contract.NewSessionID(sessionID)
+	require.NoError(t, err2)
 	rallies.mu.Lock()
-	status := rallies.sessions[sessionID].status
+	status := rallies.sessions[sid2].status
 	rallies.mu.Unlock()
 	require.Equal(t, contract.RallyStateInterrupted, status)
 }

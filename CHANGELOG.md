@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Yield-friendly autoflow** (skill v0.3.0 → v0.3.1): the default
+  first-wait inside the auto-loop is now a yield rather than a blocking
+  5-minute `rally join --once --timeout 5m` call. The skill body
+  documents the `WAIT_MODE` state and the trade-off: yielding back to
+  the user costs zero idle tokens on the waiting agent while the active
+  side works, at the expense of needing one more user interaction to
+  resume. Behaviour for pattern exit signals (`[agree]`, `[review]
+  approved`, `[resolved]`) is unchanged.
+- **Cross-vendor compatibility validated**: the rallish-operator skill
+  is auto-discovered by Claude Code, Kimi, Codex, Cursor, and any other
+  skill-aware CLI via the brand-group path `~/.claude/skills/`. No
+  per-vendor configuration is required. Live validation: a
+  discuss-pattern rally between Claude Code and Kimi reached mutual
+  `[agree]` in 4 turns. Skill body and handbook updated with a
+  cross-vendor callout.
+- **External-repo usage**: the rallish skill, daemon, and binary are
+  all global (`~/.claude/skills/`, `~/.rallish/`, `/usr/local/bin`).
+  No source-tree dependency exists after the one-time install. New
+  handbook section [Using rallish from any project](docs/handbook.md#using-rallish-from-any-project)
+  and README callouts document the project-agnostic workflow. The
+  `--repo` flag in `rallish squash` is session metadata only — it does
+  not affect where the skill or daemon reside.
+
+### Changed
+
+- **Single-instance daemon protection**: `rallish daemon` now refuses
+  to start when another instance is already bound to
+  `~/.rallish/rallish.sock`, printing:
+  `rallish daemon already running at <path> — not starting a second instance`
+  and exiting non-zero. Previously a second invocation would silently
+  unlink the live daemon's socket file and orphan it, causing all
+  in-flight sessions to lose IPC. Recovery: `kill -TERM $(pgrep -f
+  "rallish daemon")` then re-launch.
+
+- Rally autoflow — agents now self-loop the baton ping-pong after one
+  setup trigger per side. Two new CLI affordances unlock it:
+  - `rally new --first <name>` — pre-assigns the baton at create time;
+    no SSE phantom-join trick required.
+  - `rally join --once [--timeout <dur>]` — exits cleanly after the
+    first baton event, with exit code 2 on timeout. Default behaviour
+    (block forever, multi-event) preserved when flags absent.
+  Skill bumped to v0.3.0 with an `## Auto-Loop` body section detailing
+  the join → read → work → done → repeat cycle plus pattern-specific
+  exit signals (mutual `[agree]`, final `[review] approved`,
+  `[resolved]`). Backwards-compatible: v0.2.0 sessions and CLI calls
+  unchanged.
+
 ## [0.1.2] - 2026-05-17
 
 ### Added

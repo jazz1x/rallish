@@ -7,6 +7,48 @@
 
 ## [미발표]
 
+### 추가됨
+
+- **yield-friendly 자동 루프** (스킬 v0.3.0 → v0.3.1): 자동 루프 내부의
+  기본 첫 번째 대기가 블로킹 5분 `rally join --once --timeout 5m` 호출
+  대신 yield로 전환됩니다. 스킬 본문에 `WAIT_MODE` 상태와 트레이드오프를
+  문서화: 대기 에이전트가 활성 쪽 작업 중 유휴 토큰을 소비하지 않지만,
+  재개에 사용자 인터랙션이 한 번 더 필요합니다. 패턴 종료 신호(`[agree]`,
+  `[review] approved`, `[resolved]`) 동작은 변경 없음.
+- **크로스 벤더 호환성 검증**: rallish-operator 스킬이 브랜드 그룹 경로
+  `~/.claude/skills/`를 통해 Claude Code, Kimi, Codex, Cursor 등 스킬 인식
+  CLI에서 자동 발견됩니다. 벤더별 설정 불필요. 라이브 검증: Claude Code와
+  Kimi 간 discuss 패턴 랠리가 4턴 만에 상호 `[agree]`에 도달. 스킬 본문과
+  핸드북에 크로스 벤더 callout 추가.
+- **외부 리포 사용**: rallish 스킬, 데몬, 바이너리 모두 전역 위치
+  (`~/.claude/skills/`, `~/.rallish/`, `/usr/local/bin`)에 있습니다. 최초
+  설치 후 소스 트리 의존성이 없습니다. 새 핸드북 섹션
+  [어디서든 rallish 사용](docs/handbook.md#using-rallish-from-any-project)과
+  README callout으로 프로젝트 독립 워크플로우를 문서화. `rallish squash`의
+  `--repo` 플래그는 세션 메타데이터 전용으로, 스킬이나 데몬 위치와 무관.
+
+### 변경됨
+
+- **단일 인스턴스 데몬 보호**: `rallish daemon`이 이미 `~/.rallish/rallish.sock`
+  에 바인딩된 인스턴스가 있을 때 시작을 거부하고 다음 메시지 출력 후 비정상
+  종료합니다:
+  `rallish daemon already running at <path> — not starting a second instance`
+  기존에는 두 번째 호출이 라이브 데몬의 소켓 파일을 조용히 unlink하여 첫
+  번째 데몬을 고아로 만들었습니다. 복구: `kill -TERM $(pgrep -f "rallish
+  daemon")` 후 재기동.
+
+- 랠리 자동 루프 — 양측 모두 셋업 트리거 한 번으로 에이전트가 바톤
+  핑퐁을 스스로 루프합니다. 이를 가능하게 하는 새 CLI 옵션 두 가지:
+  - `rally new --first <name>` — 세션 생성 시 바톤을 미리 지정;
+    SSE phantom-join 트릭 불필요.
+  - `rally join --once [--timeout <dur>]` — 첫 번째 바톤 이벤트 후
+    깔끔하게 종료, 타임아웃 시 exit code 2. 플래그 없을 때 기본 동작
+    (무한 블로킹, 다중 이벤트 수신) 유지.
+  스킬을 v0.3.0으로 버전업, `## Auto-Loop` 본문 섹션에
+  join → read → work → done → repeat 사이클 및 패턴별 종료 신호
+  (상호 `[agree]`, 최종 `[review] approved`, `[resolved]`) 상세 기술.
+  하위 호환 유지: v0.2.0 세션 및 CLI 호출 변경 없음.
+
 ## [0.1.2] - 2026-05-17
 
 ### 추가됨

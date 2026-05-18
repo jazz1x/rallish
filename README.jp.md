@@ -2,7 +2,7 @@
 
 > マルチエージェントのターン制実行のためのローカルブローカー、A2A対応。
 
-![version](https://img.shields.io/badge/version-0.0.1-blue)
+![version](https://img.shields.io/badge/version-0.1.2-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![go](https://img.shields.io/badge/go-1.25+-blue)
 
@@ -91,6 +91,14 @@ npx skills add jazz1x/rallish
 バイナリが `$PATH` にあれば `rallish bootstrap` (冪等) がスキルバンドル
 インストールとデーモン検証を行います。
 </details>
+
+> ✓ rallish はプロジェクトごとではなくユーザーごとに一度だけ実行されます。
+> 初回インストール後は rallish ソースツリー内にいる必要はなく、
+> どのプロジェクトディレクトリからでも rally を使用できます。
+> デーモンは `~/.rallish/` にグローバルに配置されます。
+> プロジェクト非依存のワークフローは
+> [docs/handbook.md#using-rallish-from-any-project](docs/handbook.md#using-rallish-from-any-project)
+> を参照してください。
 
 ## クイックスタート
 

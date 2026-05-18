@@ -37,7 +37,7 @@ func TestRegistryCheckAll(t *testing.T) {
 	require.NoError(t, r.Register("ok", &stubAdapter{name: "ok"}))
 	require.NoError(t, r.Register("fail", &stubAdapter{name: "fail", checkErr: errTest}))
 
-	results := r.CheckAll(context.Background())
+	results := r.CheckAll()
 	require.NoError(t, results["ok"])
 	require.ErrorIs(t, results["fail"], errTest)
 }

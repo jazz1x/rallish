@@ -5,8 +5,6 @@
 // Protocol specification (https://github.com/a2aproject/A2A) where applicable.
 package contract
 
-import "time"
-
 // TaskState represents the A2A task lifecycle states.
 type TaskState string
 
@@ -48,7 +46,7 @@ type AgentSkill struct {
 
 // AgentCard is the well-known discovery document for A2A clients.
 // Published at GET /.well-known/agent.json
- type AgentCard struct {
+type AgentCard struct {
 	Name             string          `json:"name"`
 	Description      string          `json:"description"`
 	Version          string          `json:"version"`
@@ -125,11 +123,3 @@ type JSONRPCError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
-// SessionMeta exposes session-level metadata for A2A consumers.
-type SessionMeta struct {
-	ID        string    `json:"id"`
-	PresetName string   `json:"preset_name"`
-	Status    TaskState `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}

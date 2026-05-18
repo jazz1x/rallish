@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jazz1x/rallish/pkg/contract"
 )
@@ -59,9 +62,10 @@ func TestNameRegex(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := nameRe.MatchString(c.name)
+			_, err := contract.NewParticipantName(c.name)
+			got := err == nil
 			if got != c.ok {
-				t.Fatalf("nameRe.MatchString(%q) = %v want %v", c.name, got, c.ok)
+				t.Fatalf("contract.NewParticipantName(%q) ok=%v want %v", c.name, got, c.ok)
 			}
 		})
 	}
@@ -71,15 +75,15 @@ func TestNameRegex(t *testing.T) {
 // participant lists before hitting the broker.
 func TestRallyNewClientSideValidation(t *testing.T) {
 	t.Run("less than two participants", func(t *testing.T) {
-		err := runRallyNew(context.Background(), t.TempDir(), "alice", "", "", &bytes.Buffer{})
-		if err == nil || !strings.Contains(err.Error(), "at least 2") {
-			t.Fatalf("expected at-least-2 error, got %v", err)
+		err := runRallyNew(context.Background(), t.TempDir(), "alice", "", "", "", &bytes.Buffer{})
+		if err == nil || !errors.Is(err, contract.ErrTooFewParticipants) {
+			t.Fatalf("expected ErrTooFewParticipants, got %v", err)
 		}
 	})
 	t.Run("invalid name rejected", func(t *testing.T) {
-		err := runRallyNew(context.Background(), t.TempDir(), "alice,bad name", "", "", &bytes.Buffer{})
-		if err == nil || !strings.Contains(err.Error(), "invalid participant name") {
-			t.Fatalf("expected invalid-name error, got %v", err)
+		err := runRallyNew(context.Background(), t.TempDir(), "alice,bad name", "", "", "", &bytes.Buffer{})
+		if err == nil || !errors.Is(err, contract.ErrInvalidName) {
+			t.Fatalf("expected ErrInvalidName, got %v", err)
 		}
 	})
 }
@@ -87,7 +91,7 @@ func TestRallyNewClientSideValidation(t *testing.T) {
 // TestRallyNewHappyPath wires runRallyNew against an httptest broker stub and
 // confirms it prints the session id returned by the broker.
 func TestRallyNewHappyPath(t *testing.T) {
-	want := contract.RallySession{ID: "rly_test_0001"}
+	want := contract.RallySession{ID: "rly_1000000000000_abcd"}
 
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/rally/sessions" {
@@ -115,7 +119,7 @@ func TestRallyNewHappyPath(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := runRallyNew(context.Background(), homeDir, "alice,bob", "", "smoke", &out); err != nil {
+	if err := runRallyNew(context.Background(), homeDir, "alice,bob", "", "smoke", "", &out); err != nil {
 		t.Fatalf("runRallyNew: %v", err)
 	}
 	if got := strings.TrimSpace(out.String()); got != want.ID {
@@ -137,7 +141,7 @@ func TestRallyDoneNonHolder(t *testing.T) {
 		t.Fatalf("write port file: %v", err)
 	}
 
-	err := runRallyDone(context.Background(), homeDir, "rly_x", "bob", "", "", &bytes.Buffer{})
+	err := runRallyDone(context.Background(), homeDir, "rly_1000000000000_abcd", "bob", "", "", &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("expected error for 409, got nil")
 	}
@@ -195,7 +199,7 @@ func TestRallyJoinReceivesBaton(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	err = runRallyJoin(context.Background(), homeDir, "rly_test_0001", "alice", &out)
+	err = runRallyJoin(context.Background(), homeDir, "rly_1000000000001_abcd", "alice", false, 0, &out, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("runRallyJoin returned error: %v", err)
 	}
@@ -210,7 +214,7 @@ func TestRallyJoinReceivesBaton(t *testing.T) {
 // and history entries from a stub broker.
 func TestRallyStatusFormatting(t *testing.T) {
 	sess := contract.RallySession{
-		ID:           "rly_test_0002",
+		ID:           "rly_1000000000002_abcd",
 		Status:       contract.RallyState("alice_turn"),
 		Holder:       "alice",
 		TurnN:        2,
@@ -253,7 +257,7 @@ func TestRallyStatusFormatting(t *testing.T) {
 // "ok — baton passed to <next>" line when the broker returns 200.
 func TestRallyDoneHappyPath(t *testing.T) {
 	nextSess := contract.RallySession{
-		ID:     "rly_test_0003",
+		ID:     "rly_1000000000003_abcd",
 		Holder: "bob",
 		TurnN:  2,
 		Status: contract.RallyState("bob_turn"),
@@ -311,7 +315,7 @@ func TestRallyNewWithRepo(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := runRallyNew(context.Background(), homeDir, "alice,bob", repoDir, "", &out); err != nil {
+	if err := runRallyNew(context.Background(), homeDir, "alice,bob", repoDir, "", "", &out); err != nil {
 		t.Fatalf("runRallyNew with valid repo: %v", err)
 	}
 	if capturedRepo != repoDir {
@@ -319,10 +323,11 @@ func TestRallyNewWithRepo(t *testing.T) {
 	}
 }
 
+
 // TestRallyNewWithBadRepo tests that runRallyNew rejects a non-existent repo path.
 func TestRallyNewWithBadRepo(t *testing.T) {
 	homeDir := t.TempDir()
-	err := runRallyNew(context.Background(), homeDir, "alice,bob", "/definitely/does/not/exist/12345", "", &bytes.Buffer{})
+	err := runRallyNew(context.Background(), homeDir, "alice,bob", "/definitely/does/not/exist/12345", "", "", &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("expected error for non-existent repo, got nil")
 	}
@@ -373,5 +378,111 @@ func TestHolderDisplayEdgeCases(t *testing.T) {
 	}
 	if got := holderDisplay("alice"); got != "alice" {
 		t.Fatalf("holderDisplay(\"alice\") = %q, want \"alice\"", got)
+	}
+}
+
+// TestRallyNewWithFirstFlag verifies that runRallyNew sends first_holder in the
+// POST body when --first is provided.
+func TestRallyNewWithFirstFlag(t *testing.T) {
+	var capturedFirstHolder string
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/rally/sessions" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		var req contract.NewRallyRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		capturedFirstHolder = req.FirstHolder
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(contract.RallySession{ID: "rly_test_first"})
+	}))
+	t.Cleanup(stub.Close)
+
+	homeDir := t.TempDir()
+	if err := writePortFile(homeDir, stub.URL); err != nil {
+		t.Fatalf("write port file: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := runRallyNew(context.Background(), homeDir, "server,returner", "", "", "server", &out); err != nil {
+		t.Fatalf("runRallyNew: %v", err)
+	}
+	if capturedFirstHolder != "server" {
+		t.Fatalf("broker received first_holder=%q, want %q", capturedFirstHolder, "server")
+	}
+}
+
+// TestRallyJoinOnce verifies that --once causes runRallyJoin to return nil after
+// the first baton event, with stdout containing "your turn".
+func TestRallyJoinOnce(t *testing.T) {
+	evt := contract.BatonEvent{TurnN: 1, From: "start", Note: "x"}
+	evtJSON, err := json.Marshal(evt)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		_, _ = w.Write([]byte("data: " + string(evtJSON) + "\n\n"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		// Keep connection open — --once should exit before we close.
+		<-r.Context().Done()
+	}))
+	t.Cleanup(stub.Close)
+
+	homeDir := t.TempDir()
+	if err := writePortFile(homeDir, stub.URL); err != nil {
+		t.Fatalf("write port file: %v", err)
+	}
+
+	var out bytes.Buffer
+	err = runRallyJoin(context.Background(), homeDir, "rly_1000000000004_abcd", "server", true, 0, &out, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("runRallyJoin --once returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), "your turn") {
+		t.Fatalf("expected 'your turn' in output, got: %q", out.String())
+	}
+}
+
+// TestRallyJoinTimeout verifies that --timeout causes runRallyJoin to return
+// ErrTimeoutWaitingForBaton when no event arrives within the deadline,
+// and that stderr contains "no baton within".
+func TestRallyJoinTimeout(t *testing.T) {
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		// Never send any event — just block until the client disconnects.
+		<-r.Context().Done()
+		// Drain so the handler exits cleanly.
+		_, _ = io.Copy(io.Discard, r.Body)
+	}))
+	t.Cleanup(stub.Close)
+
+	homeDir := t.TempDir()
+	if err := writePortFile(homeDir, stub.URL); err != nil {
+		t.Fatalf("write port file: %v", err)
+	}
+
+	var out, errBuf bytes.Buffer
+	err := runRallyJoin(context.Background(), homeDir, "rly_1000000000005_abcd", "server", true, 100*time.Millisecond, &out, &errBuf)
+	if !errors.Is(err, ErrTimeoutWaitingForBaton) {
+		t.Fatalf("expected ErrTimeoutWaitingForBaton, got: %v", err)
+	}
+	if !strings.Contains(errBuf.String(), "no baton within") {
+		t.Fatalf("expected 'no baton within' in stderr, got: %q", errBuf.String())
 	}
 }

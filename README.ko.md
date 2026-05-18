@@ -2,7 +2,7 @@
 
 > 다중 에이전트 순차 실행을 위한 로컬 브로커, A2A 호환.
 
-![version](https://img.shields.io/badge/version-0.0.1-blue)
+![version](https://img.shields.io/badge/version-0.1.2-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![go](https://img.shields.io/badge/go-1.25+-blue)
 
@@ -89,6 +89,12 @@ npx skills add jazz1x/rallish
 바이너리가 `$PATH`에 있으면 `rallish bootstrap` (멱등)이 스킬 번들 설치 +
 데몬 검증을 수행.
 </details>
+
+> ✓ rallish는 프로젝트별이 아닌 사용자별로 한 번만 실행됩니다. 최초 설치 후
+> rallish 소스 트리 안에 있을 필요 없이 어디서든 rally를 사용할 수 있습니다.
+> 데몬은 `~/.rallish/`에 전역으로 위치합니다. 프로젝트 독립 워크플로우는
+> [docs/handbook.md#using-rallish-from-any-project](docs/handbook.md#using-rallish-from-any-project)
+> 를 참조하세요.
 
 ## 빠른 시작
 

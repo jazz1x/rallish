@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/jazz1x/rallish/internal/cli"
 	"github.com/jazz1x/rallish/internal/doctor"
 	"github.com/jazz1x/rallish/internal/skills"
+	"github.com/jazz1x/rallish/pkg/contract"
 	"github.com/spf13/cobra"
 )
 
@@ -55,8 +57,21 @@ func main() {
 	}()
 
 	if err := root.ExecuteContext(context.Background()); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "Error:", err)
-		exitCode = 1
+		switch {
+		case errors.Is(err, cli.ErrTimeoutWaitingForBaton):
+			exitCode = 2
+		case errors.Is(err, contract.ErrInvalidName),
+			errors.Is(err, contract.ErrInvalidSessionID),
+			errors.Is(err, contract.ErrInvalidPattern):
+			_, _ = fmt.Fprintln(os.Stderr, "Error:", err)
+			exitCode = 64 // EX_USAGE
+		case errors.Is(err, contract.ErrNotHolder):
+			_, _ = fmt.Fprintln(os.Stderr, "Error:", err)
+			exitCode = 1
+		default:
+			_, _ = fmt.Fprintln(os.Stderr, "Error:", err)
+			exitCode = 1
+		}
 	}
 	os.Exit(exitCode) //nolint:gocritic // defer resets signals; exit code must propagate
 }

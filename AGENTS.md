@@ -130,5 +130,5 @@ surface, a new daemon endpoint):
    feature end-to-end.
 4. Update `CHANGELOG.md`, `CHANGELOG.ko.md`, `CHANGELOG.jp.md` in lockstep.
 
-HTML runbooks in `docs/*.html` are optional presentation mirrors of the `.md`
-source. The `.md` file is canonical; the HTML may lag.
+HTML runbooks were experimented with and removed. Use the `.md` runbooks; if a
+presentation-rendered version is needed, generate it on demand.

@@ -9,7 +9,7 @@ We follow [Semantic Versioning 2.0.0](https://semver.org/):
 - `v0.x.x` — Pre-release. The API, CLI flags, and preset schema may change without deprecation.
 - `v1.x.x` — Stable. Breaking changes require a major version bump.
 
-Version numbers are Git tags. There is no `VERSION` file in the repo.
+Version numbers live in the `VERSION` file (managed by `scripts/release.sh`) and are surfaced via git tags; do not edit `VERSION` manually.
 
 ## Prerequisites
 

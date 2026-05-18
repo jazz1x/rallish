@@ -1,7 +1,5 @@
 # Runbook: Unix Domain Socket IPC — Manual Verification
 
-> **Branch:** `feat/ipc-unix-socket`  
-> **Commit:** `42e21ad`  
 > **Prerequisites:** Go 1.25+, macOS/Linux, `~/.rallish/` directory writable
 
 ---
@@ -66,7 +64,7 @@ rm -rf ~/.rallish
 **Expected output:**
 ```
 === 1. Unix socket exists ===
-srwxr-xr-x  ...  /Users/.../.rallish/rallish.sock
+srw-------  ...  /Users/.../.rallish/rallish.sock
 === 2. Socket path file exists ===
 /Users/.../.rallish/rallish.sock
 === 3. Port file exists ===
@@ -125,7 +123,7 @@ time=... level=INFO msg="daemon listening on unix socket" path=/Users/.../.ralli
 ls -la ~/.rallish/rallish.sock
 ```
 
-**Expected:** `srwxr-xr-x` (socket file type `s`).
+**Expected:** `srw-------` (socket file type `s`, mode `0600`).
 
 ---
 
