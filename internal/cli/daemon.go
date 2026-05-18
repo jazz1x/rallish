@@ -69,6 +69,12 @@ func RunDaemon(ctx context.Context, homeDir string, shutdown <-chan struct{}) er
 	unixOK := false
 	us := ipc.Socket{Path: socketPath}
 
+	// Single-instance check: refuse to start if a live daemon already owns
+	// this socket. dialExistingDaemon returns nil iff a daemon answers.
+	if dialExistingDaemon(socketPath, 500*time.Millisecond) == nil {
+		return fmt.Errorf("rallish daemon already running at %s (kill it with `kill -TERM $(pgrep -f \"rallish daemon\")` if you want to take over)", socketPath)
+	}
+
 	if err := us.Remove(); err != nil {
 		slog.Warn("failed to remove stale unix socket", "error", err)
 	}
@@ -116,3 +122,21 @@ func RunDaemon(ctx context.Context, homeDir string, shutdown <-chan struct{}) er
 type realClock struct{}
 
 func (r *realClock) Now() time.Time { return time.Now() }
+
+// dialExistingDaemon returns nil if a daemon is reachable on socketPath within
+// the dial timeout, or a non-nil error otherwise (no file, or stale socket).
+// Callers treat a nil return as "live daemon present — abort".
+func dialExistingDaemon(socketPath string, timeout time.Duration) error {
+	if _, err := os.Stat(socketPath); err != nil {
+		return err // no file → no live daemon
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	s := ipc.Socket{Path: socketPath}
+	conn, err := s.Dial(ctx)
+	if err != nil {
+		return err // file exists but dial fails → stale
+	}
+	_ = conn.Close()
+	return nil // someone answered → live daemon
+}
