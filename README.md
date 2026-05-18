@@ -17,7 +17,7 @@ Everything runs locally. No cloud broker, no external coordination service. The 
 | Feature | Description |
 |---------|-------------|
 | **Squash (headless)** | `rallish squash` runs headless preset sessions (`solo-ralph`, `pair-review`); broker spawns adapters automatically |
-| **Rally (interactive)** | `rallish rally` provides live baton-passing between two or more human terminals; exclusive holder enforcement via SSE |
+| **Rally (interactive)** | `rallish rally` provides live baton-passing between two coding-CLI sessions; agents self-loop the ping-pong (no per-turn user trigger needed); exclusive holder enforcement via SSE |
 | **A2A Protocol** | `/.well-known/agent.json`, JSON-RPC 2.0 tasks, SSE streaming |
 | **Token Budgets** | Hard caps on tokens, turns, and wall-clock time per session |
 | **Scratchpad** | Rolling shared scratch with automatic compaction |
@@ -127,15 +127,14 @@ EOF
 # Two-terminal tennis rally (live baton-passing between human sessions)
 # Prefer the natural-language UX driven by skills/rallish-operator —
 # the agent (Claude Code, Cursor, …) runs all rally commands for you.
-# In Terminal A's coding-CLI session you say:    "랠리보낼 준비해"
-# Agent: → rally new + role=server, prints SID.
+# In Terminal A's coding-CLI session you say:    "랠리보낼 준비해 — 사이클로 가자"
+# Agent: rally new --first server + role=server, prints SID, serves first turn, yields.
 # In Terminal B's coding-CLI session you say:    "랠리받을 준비해 <SID>"
-# Agent: → rally status + role=returner, waits.
-# Back in Terminal A:                            "시작"
-# Agent: serves the first turn, runs rally done with a summary note.
-# In Terminal B:                                 "내 차례"
-# Agent: picks up the baton, returns, runs rally done.
-# Either side, when finished:                    "끝"
+# Agent: parses pattern, role=returner, immediately picks up the baton, yields.
+# After each side finishes a turn the agent yields back to the user; on the
+# next user message it checks status and continues if it's its turn. No
+# per-turn "내 차례" trigger needed.
+# Either side, at any time, to stop:             "끝"
 #
 # Raw CLI surface (used by the skill under the hood, or by scripts):
 SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-up rally")

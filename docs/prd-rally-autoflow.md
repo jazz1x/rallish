@@ -211,3 +211,25 @@ The skill body now also records (in conversation state):
 8. CHANGELOG.md / .ko / .jp gain a `[Unreleased] / Added` entry.
 9. SSL audit on updated SKILL.md returns ≥ 95 on every layer.
 10. `make check` passes on the `feat/rally-autoflow` branch.
+
+## Amendment — released as v0.2.0
+
+The first public release of this feature shipped as part of rallish
+`v0.2.0` (not the `v0.3.x` skill versions referenced in §4 above).
+Skill version was aligned with the repo version at release time.
+
+Two semantic refinements from the original spec:
+
+1. **Default `WAIT_MODE` is `yield`**, not `block`. The blocking
+   `rally join --once --timeout 5m` loop described in §4.5 burned ~5k
+   agent tokens per 5-minute timeout window in live testing. The
+   released auto-loop uses `rally status` polling on each user prompt
+   instead, costing tens of tokens per check. `WAIT_MODE=block`
+   remains available as an opt-in for known-ready sessions.
+
+2. **Single-instance daemon protection** landed alongside the autoflow
+   surface. Spawning a second `rallish daemon` against the same
+   `~/.rallish/` now fails fast with a clear error instead of
+   orphaning the first daemon.
+
+All other §4–§6 spec sections shipped as documented.

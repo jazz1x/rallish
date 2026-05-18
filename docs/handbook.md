@@ -227,7 +227,7 @@ the brand-group convention at `~/.claude/skills/`. No per-vendor setup
 is needed. Live validation: a discuss-pattern rally between Claude Code
 and Kimi reached mutual `[agree]` in 4 turns.
 
-**Autoflow (v0.3.1+):** by default the rallish-operator skill drives both
+**Autoflow (v0.2.0+):** by default the rallish-operator skill drives both
 sides autonomously after a single setup trigger per side. The skill uses a
 yield-first design: on entry it emits a status poll and yields back to the
 user rather than holding the agent in a long wait. This eliminates idle token
@@ -235,7 +235,7 @@ spend on the waiting side while the active side works. The baton ping-pongs
 without user intervention between turns; the loop exits on pattern-specific
 signals (mutual `[agree]`, final `[review] approved`, or `[resolved]`) or
 the user typing `끝`. See
-[docs/runbook-rally-mode.md#autoflow-v03](runbook-rally-mode.md#autoflow-v03)
+[docs/runbook-rally-mode.md#autoflow-v020](runbook-rally-mode.md#autoflow-v020)
 and [docs/prd-rally-autoflow.md](prd-rally-autoflow.md). For cases where both
 sides are known-ready and you prefer a blocking wait, set `WAIT_MODE=block` in
 the skill invocation.

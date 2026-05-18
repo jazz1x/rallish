@@ -17,7 +17,7 @@
 | 機能 | 説明 |
 |------|------|
 | **Squash（ヘッドレス）** | `rallish squash` でヘッドレスプリセットセッションを実行（`solo-ralph`、`pair-review`）; ブローカーがアダプターを自動スポーン |
-| **Rally（インタラクティブ）** | `rallish rally` で 2 つ以上の人間ターミナル間のライブバトン受け渡し; SSE による排他的ホルダー強制 |
+| **Rally（インタラクティブ）** | `rallish rally` で 2 つのコーディング CLI セッション間のライブバトン受け渡し; エージェントがピンポンを自律ループ (ターンごとのユーザートリガー不要); SSE による排他的ホルダー強制 |
 | **A2A プロトコル** | `/.well-known/agent.json`, JSON-RPC 2.0 タスク, SSE ストリーミング |
 | **トークン予算** | セッションごとのトークン、ターン数、時間の上限を強制 |
 | **スクラッチパッド** | 自動圧縮(compaction)が適用されたローリング共有スクラッチ |
@@ -130,15 +130,13 @@ EOF
 # 2 ターミナル テニスラリー (ライブバトン受け渡し)
 # skills/rallish-operator による自然言語 UX を推奨 —
 # エージェント (Claude Code, Cursor など) がすべての rally コマンドを代行します。
-# ターミナル A のコーディング CLI セッション:        "랠리보낼 준비해"
-# エージェント: → rally new + role=server, SID を出力。
+# ターミナル A のコーディング CLI セッション:        "랠리보낼 준비해 — 사이클로 가자"
+# エージェント: rally new --first server + role=server, SID 出力, 初回ターンをサーブ, yield。
 # ターミナル B のコーディング CLI セッション:        "랠리받을 준비해 <SID>"
-# エージェント: → rally status + role=returner, 待機。
-# 再びターミナル A:                                "시작"
-# エージェント: 最初のターンをサーブし、要約 note 付きで rally done。
-# ターミナル B:                                    "내 차례"
-# エージェント: バトンを受け取り、リターンして rally done。
-# どちらでも、終了時:                              "끝"
+# エージェント: パターン解析, role=returner, 即座にバトンを受け取り, yield。
+# 各ターン終了後エージェントはユーザーに制御を返し、次のユーザーメッセージで
+# status を確認して自分のターンなら続行します。ターンごとの "내 차례" は不要。
+# どちらでも、いつでも終了するには:               "끝"
 #
 # Raw CLI (スキルが内部呼び出し / スクリプト用):
 SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-up rally")

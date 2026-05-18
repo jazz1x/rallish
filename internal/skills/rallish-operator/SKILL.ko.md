@@ -6,10 +6,9 @@ description: >
   준비, 리시버 준비, 첫 번째 서브, 이후 리턴, 종료까지 다룹니다. squash
   모드(헤드리스 프리셋 자동 실행)도 포함합니다.
   바톤 위에 세 가지 행동 패턴을 지원합니다: cycle (계획/실행/검토), discuss (다관점 논의), help (막힐 때 짧은 조언).
-  v0.3은 자동 루프를 제공합니다: 각 에이전트가 한 번의 설정 트리거 후 `rally join --once`로 자가 폴링하며 사용자 개입 없이 핑퐁합니다.
-  v0.3.1은 자동 루프를 yield-friendly 방식으로 기본 변경합니다 — 30초 짧은 첫 대기 후 사용자에게 제어권을 넘깁니다. 스킬이 크로스벤더 `~/.claude/skills/` brand-group 경로에 위치하므로 다양한 코딩 CLI(Claude Code, Kimi 등)에서 동작합니다.
+  v0.2.0은 자동 루프를 제공합니다: 한 번의 설정 트리거 후 양쪽 에이전트가 사용자 개입 없이 바톤 핑퐁을 스스로 루프합니다. 기본 WAIT_MODE=yield: 각 쪽이 사용자 메시지마다 status를 확인하고 자기 차례면 계속 진행합니다. 스킬이 크로스벤더 `~/.claude/skills/` brand-group 경로에 위치하므로 다양한 코딩 CLI(Claude Code, Kimi 등)에서 동작합니다.
   Triggers: "랠리보낼 준비해", "let's serve", "serve prep", "rally prep — serving", "서브 준비", "랠리받을 준비해", "let's return", "returner prep", "rally prep — returning", "리턴 준비", "시작", "serve!", "go", "start rally", "내 차례", "내 차례 됐어?", "is it my turn", "ready", "ready to return", "끝", "match over", "stop rally", "랠리 끝", "cycle", "plan-execute-review", "사이클로 가자", "discuss", "discussion rally", "논의 랠리", "여러 시선으로", "stuck rally", "help me out", "막혔어 도와줘", "한 번만 봐줘"
-version: 0.3.1
+version: 0.2.0
 ssl:
   scheduling:
     anti_triggers:
@@ -39,10 +38,10 @@ ssl:
       - "pattern help → owner stays driving; helper provides at most ~3 [hint] turns; owner's [resolved] ends session"
       - "mid-rally switch → [switch-pattern:<name>] proposed, acked next turn by [switch-ack:<name>]"
       - "서버 준비는 `rally new --first server`를 사용하므로 세션 생성 즉시 바톤이 할당됨 (SSE 팬텀 조인 불필요)"
-      - "턴 사이에 각 쪽은 `rally join --once --timeout 5m --as <ROLE>`을 실행하여 다음 바톤 도착 또는 타임아웃(exit 2)까지 블로킹"
-      - "join exit 2 (타임아웃) → 사용자에게 '5분간 baton 없음. 계속 대기할까 혹은 끝낼까?' 체크포인트; 기본 동작: `끝` 입력 없으면 루프 재개"
+      - "기본 WAIT_MODE=yield: `rally done` 후 에이전트는 yield; 다음 사용자 메시지에 `rally status` 실행해 자기 차례면 계속, 아니면 현재 holder 보고하고 다시 yield"
+      - "WAIT_MODE=block (옵트인): 각 쪽이 `rally join --once --timeout 5m --as <ROLE>` 으로 다음 바톤 도착 또는 timeout(exit 2)까지 블로킹; 양쪽 모두 ready 임을 알 때만 사용"
+      - "join exit 2 (타임아웃) → 사용자에게 '5분간 baton 없음. 계속 대기할까 혹은 끝낼까?' 체크포인트; `끝` 입력 없으면 루프 재개"
       - "패턴별 종료 신호 감지 → 에이전트가 최종 요약을 사용자에게 전달하고 루프 종료"
-      - "서버 첫 done 완료 → 사용자에게 제어권 반환 (긴 블로킹 없음); 리시버 준비 완료 후 사용자가 서버에 다시 신호 → 상태 확인 후 계속"
       - "크로스벤더: kimi는 brand-group 폴백(kimi → claude → codex)으로 스킬 자동 발견; Anthropic-skill-format 클라이언트(Cursor 등)도 동일 트리거 표면 사용"
   logical:
     tools: [Bash, Read]
@@ -95,7 +94,7 @@ sh ~/.claude/skills/rallish-operator/scripts/install-binary.sh
 - PATTERN: cycle | discuss | help | freeform (기본값; 트리거 A 또는 랠리 중 전환으로 설정)
 - LAST_HOLDER: 에이전트가 마지막으로 확인한 holder (바톤 도착 감지에 사용)
 - EXIT_REASON: 루프 종료 시 채워짐 ('mutual-agree', 'review-approved', 'resolved', 'user-끝', 'timeout-abandoned')
-- WAIT_MODE: "yield" (v0.3.1 기본값) | "block" (v0.3.0 레거시 블로킹 자동 루프, 양쪽이 모두 준비된 것을 알고 있을 때만 사용)
+- WAIT_MODE: "yield" (기본값) | "block" (옵트인 블로킹 자동 루프, 양쪽이 모두 준비된 것을 알고 있을 때만 사용)
 
 ## 트리거 A — "랠리보낼 준비해" (또는 영어 동의어)
 이 쪽 에이전트가 서버가 됩니다.
@@ -142,8 +141,8 @@ sh ~/.claude/skills/rallish-operator/scripts/install-binary.sh
    > Returner 준비 완료. 서버가 서브할 때까지 대기 중.
 
 4a. **자동 루프 진입** (아래 "자동 루프" 섹션 참조). 리시버는
-    `내 차례` 사용자 트리거를 기다리지 않습니다 —
-    `rally join --once` 호출이 바톤 도착까지 블로킹합니다.
+    `내 차례` 사용자 트리거를 기다리지 않습니다 — 다음 사용자 메시지에
+    `rally status`로 바톤 도착을 확인하고 자기 차례면 즉시 진행합니다.
 
 ## 트리거 C — "시작" (서버 쪽, prep 이후)
 에이전트가 첫 번째 턴을 서브합니다.
@@ -160,7 +159,7 @@ sh ~/.claude/skills/rallish-operator/scripts/install-binary.sh
 
 ## 트리거 D — "내 차례" (prep 이후, 리시버 쪽)
 
-**참고 (v0.3+):** 자동 루프가 턴 사이의 `내 차례` 필요성을 대체합니다.
+**참고 (v0.2.0+):** 자동 루프가 턴 사이의 `내 차례` 필요성을 대체합니다.
 이 트리거는 수동 오버라이드 또는 루프가 일시정지된 경우에도 계속 지원됩니다.
 
 에이전트가 자기 차례이면 바톤을 받습니다.
@@ -209,7 +208,7 @@ on every "내 차례" trigger OR any user message after the agent has yielded:
     return  # 사용자에게 제어권 반환 — 블로킹 금지
 ```
 
-**왜 `rally join --once` 대신 yield 방식인가?** v0.3.0 라이브 테스트에서 리시버가 준비되지 않은 상태에서 블로킹 자동 루프가 타임아웃 창(기본 5분)당 ~5k 토큰을 소모한다는 것이 확인되었습니다. yield-friendly 패턴은 사용자의 모든 프롬프트마다 `rally status` (HTTP GET 한 번)를 사용하며, 수십 토큰만 소비하고 사용자가 랠리 속도를 자연스럽게 조절할 수 있습니다. `rally join --once --timeout <short>`는 양쪽이 모두 준비된 상태에서 30초 이내의 빠른 핸드오프가 필요할 때만 사용하세요 (예: 양쪽이 준비된 cycle 패턴).
+**yield가 기본값인 이유.** yield는 토큰 효율적입니다: 상대방이 응답을 작성하는 동안 에이전트는 사용자 메시지마다 경량 `rally status` HTTP GET 하나(수십 토큰)만 소비하고 유휴 상태로 대기합니다. `WAIT_MODE=block` (`rally join --once --timeout <short>`)은 양쪽이 모두 준비된 상태에서 30초 이내의 빠른 핸드오프가 필요할 때만 사용하세요 (예: 양쪽 터미널이 모두 준비된 cycle 패턴).
 
 **루프 내부 휴리스틱:**
 - `compose_response(discuss, NOTE, history)` — NOTE가 `[opinion]`이면
@@ -223,7 +222,7 @@ on every "내 차례" trigger OR any user message after the agent has yielded:
   owner는 각 힌트 후 `[try]`, 문제 해결 시 `[resolved]` 발행.
   helper는 `[try]` 없이 `[hint]`를 3턴 연속 발행하지 않습니다.
 
-**사용자 인터럽트 규칙:** `rally done` 완료와 다음 `rally join --once`
+**사용자 인터럽트 규칙:** `rally done` 완료와 다음 status 확인
 사이에 에이전트가 사용자에게 양보합니다. 이 짧은 체크포인트 창에서
 사용자 메시지가 오면 처리합니다 (예: `끝`, "잠깐, 방향 바꿔줘").
 침묵 = 계속.
@@ -384,10 +383,10 @@ ServerPrep에서 패턴 단서가 감지되지 않으면 PATTERN = `freeform`.
 ## 폴링, SSE 아닌 이유?
 에이전트의 생명주기는 메시지 단위이며 지속적이지 않습니다. 백그라운드
 SSE는 이 스킬의 범위를 벗어나는 프로세스 감시가 필요합니다. `rally status`
-는 HTTP GET 한 번이면 충분하고, 사용자 주도 턴 흐름이 이미 명시적이므로
-"내 차례" 시 폴링이 올바른 자동화 수준입니다.
-v0.3에서는 에이전트가 `rally join --once --timeout <dur>`을 사용해
-짧은 블로킹 SSE 대기와 명시적 데드라인을 결합합니다 — 두 방법의 장점을 모두 취합니다.
+는 HTTP GET 한 번이면 충분하고, 사용자 메시지마다 status 폴링이 올바른
+자동화 수준입니다. `WAIT_MODE=block` (`rally join --once --timeout <dur>`)은
+양쪽이 모두 준비된 상태에서 30초 이내의 빠른 핸드오프가 필요할 때
+옵트인으로 사용할 수 있습니다.
 
 ## 참조
 - PRD: docs/prd-rally-mode.md
