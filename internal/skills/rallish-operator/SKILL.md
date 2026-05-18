@@ -7,8 +7,9 @@ description: >
   and clean shutdown. Also covers squash mode (headless preset orchestration).
   Supports three behavioural patterns layered on top of the baton: cycle (plan/execute/review), discuss (multi-perspective), and help (stuck-help).
   v0.3 ships an autonomous loop: after a single setup trigger per side, both agents self-poll on `rally join --once` and ping-pong without user prompts between turns.
+  v0.3.1 makes the auto-loop yield-friendly by default — short 30 s first wait, then yield to the user; works across coding-CLI vendors (Claude Code, Kimi, …) since the skill lives at the cross-vendor `~/.claude/skills/` brand-group path.
   Triggers: "랠리보낼 준비해", "let's serve", "serve prep", "rally prep — serving", "서브 준비", "랠리받을 준비해", "let's return", "returner prep", "rally prep — returning", "리턴 준비", "시작", "serve!", "go", "start rally", "내 차례", "내 차례 됐어?", "is it my turn", "ready", "ready to return", "끝", "match over", "stop rally", "랠리 끝", "cycle", "plan-execute-review", "사이클로 가자", "discuss", "discussion rally", "논의 랠리", "여러 시선으로", "stuck rally", "help me out", "막혔어 도와줘", "한 번만 봐줘"
-version: 0.3.0
+version: 0.3.1
 ssl:
   scheduling:
     anti_triggers:
@@ -41,6 +42,8 @@ ssl:
       - "between turns each side runs `rally join --once --timeout 5m --as <ROLE>` which blocks until the next baton arrives or the timeout fires (exit 2)"
       - "join exit 2 (timeout) → checkpoint user '5분간 baton 없음. 계속 대기할까 혹은 끝낼까?'; default behaviour: loop again unless user types `끝`"
       - "pattern-specific exit signal hit → agent emits a final user-facing summary and stops the loop"
+      - "server-side first done → yield to user (no long blocking); user pings server back when receiver is ready → status-check + continue"
+      - "cross-vendor: skill auto-discovered by kimi via brand-group fallback (kimi → claude → codex), and by other Anthropic-skill-format clients (Cursor, etc.) — same trigger surface"
   logical:
     tools: [Bash, Read]
     side_effects:
@@ -92,6 +95,7 @@ Refer to the chosen path as `$RALLISH` for the rest of this skill.
 - PATTERN: cycle | discuss | help | freeform (default; set by Trigger A or by mid-rally switch)
 - LAST_HOLDER: who the agent last saw as holder (used to detect baton arrival)
 - EXIT_REASON: filled on loop exit ('mutual-agree', 'review-approved', 'resolved', 'user-끝', 'timeout-abandoned')
+- WAIT_MODE: "yield" (default in v0.3.1) | "block" (legacy v0.3.0 blocking auto-loop, only when both sides are known to be ready)
 
 ## Trigger A — "랠리보낼 준비해" (or English equivalents)
 The agent on this side becomes the server.
@@ -123,7 +127,9 @@ The agent on this side becomes the server.
     Run: `rallish rally done --session-id $SID --as server --note "<above>"`.
     Status now: returner_turn.
 
-5b. **Enter the auto-loop** (see "Auto-Loop" section below).
+5b. **Yield to user.** Tell the user the SID, the trigger they should give the receiver-side agent ("랠리받을 준비해 <SID>"), and that on their next message (after the receiver has joined or replied) you'll check status. Do NOT block on `rally join --once` here — that wastes the agent's context if the receiver isn't yet ready.
+
+    Implementation: `rally done` finishes; tell the user; stop. On the next user message, run `rally status` — if `holder == server` (receiver replied), read the new note and continue the loop. If `holder == returner` (receiver hasn't replied), tell user "아직 receiver 차례 — 더 기다릴까?" and stop.
 
 ## Trigger B — "랠리받을 준비해 <SID>" (or English equivalents)
 The agent on this side becomes the returner.
@@ -184,39 +190,27 @@ each side runs the same loop. The user does not need to type any
 trigger between turns.
 
 ```
-while true:
-    cue = bash("rallish rally join --session-id $SID --as $ROLE --once --timeout 5m")
-    exit_code = $?
+on every "내 차례" trigger OR any user message after the agent has yielded:
+    cue_via_status = bash("rally status --session-id $SID")
+    parse_holder(cue_via_status) → CURRENT_HOLDER
+    parse_last_history(cue_via_status) → LAST_TURN, LAST_FROM, LAST_NOTE
 
-    if exit_code == 2:
-        # timeout — broker quiet for 5 minutes
-        tell user: "🎾 5분간 baton 없음. 계속 대기할까(엔터)? 끝낼까(끝)?"
-        if user typed 끝: break with EXIT_REASON=timeout-abandoned
-        else: continue   # loop again
+    if CURRENT_HOLDER != ROLE:
+        tell user: "아직 내 차례 아니야. 현재 holder: $CURRENT_HOLDER. 더 기다리려면 잠시 후 'ok' 또는 '확인해'."
+        return
 
-    # baton arrived — parse the cue line for turn + from + note
-    parse_cue(cue) → TURN, FROM, NOTE
+    # it is my turn
+    if pattern_specific_exit_signal_met(LAST_NOTE, history):
+        tell user: "🎾 <signal> — 랠리 종료."
+        set EXIT_REASON; return
 
-    # detect pattern-specific exit
-    if PATTERN == discuss and last_two_history_notes_are("[agree]", "[agree]"):
-        EXIT_REASON = mutual-agree; tell user "🎾 양쪽 [agree]. 랠리 종료."; break
-    if PATTERN == cycle and NOTE.startswith("[review] approved") and no_pending_plan_in_history():
-        EXIT_REASON = review-approved; tell user "🎾 사이클 완료."; break
-    if PATTERN == help and NOTE.startswith("[resolved]") and ROLE == helper:
-        EXIT_REASON = resolved; tell user "🎾 owner가 [resolved]. 도움 랠리 종료."; break
-
-    # compose a response per PATTERN + previous NOTE
-    new_note = compose_response(PATTERN, NOTE, history)
-    bash("rallish rally done --session-id $SID --as $ROLE --note '$new_note'")
-
-    # checkpoint to user (one-liner)
-    tell user: "🎾 보냈어: <new_note 첫 60자>. 다음 차례 대기 중."
-
-    # before looping, yield: if the user typed anything during the
-    # checkpoint window, honour it. user '끝' breaks the loop:
-    if user_message_pending and contains_끝:
-        EXIT_REASON = user-끝; tell user "랠리 종료."; break
+    composed_note = compose_response(PATTERN, LAST_NOTE, history)
+    bash("rally done --session-id $SID --as $ROLE --note '$composed_note'")
+    tell user: "🎾 보냈어: <composed_note 앞 60자>. 상대 응답 오면 알려주거나 '확인해' 라고 해."
+    return  # yield to user — do NOT block
 ```
+
+**Why yield instead of `rally join --once`?** Live testing of v0.3.0 showed that the blocking auto-loop burns ~5 k tokens per timeout window (default 5 min) when the receiver isn't yet ready. The yield-friendly pattern uses `rally status` (one cheap HTTP GET) on every user prod, which costs tens of tokens and lets the user pace the rally naturally. Use `rally join --once --timeout <short>` only when you have a known-ready receiver and want a sub-30-second hand-off (e.g. cycle pattern with both sides primed).
 
 **Heuristics inside the loop:**
 - `compose_response(discuss, NOTE, history)` — if NOTE was `[opinion]`,
@@ -239,6 +233,66 @@ says `끝`, or "잠깐, 방향 바꿔줘"). Silence = continue.
 **Hard ceiling:** if the loop runs more than 20 iterations without
 hitting an exit signal, the agent should checkpoint to user with
 `"🎾 20턴 넘었어. 정리할까?"` and pause.
+
+## Cross-vendor compatibility
+
+The skill lives at `~/.claude/skills/rallish-operator/`. This path is
+discovered by:
+
+- **Claude Code** — directly under its brand group.
+- **Kimi (kimi-cli)** — brand-group fallback (default discovery order:
+  `~/.kimi/skills/` → `~/.claude/skills/` → `~/.codex/skills/`),
+  enabled by the default `merge_all_available_skills = true` in
+  `~/.kimi/config.toml`.
+- **Codex / Cursor / other Anthropic-skill-format clients** — same
+  brand-group convention; some may need `--skills-dir ~/.claude/skills/`
+  passed explicitly.
+
+Live validation: a discuss-pattern rally between a Claude Code session
+(server) and a Kimi session (returner) reached `[agree]/[agree]` mutual
+convergence in 4 turns. Both sides correctly followed the trigger
+surface and the pattern-exit detection.
+
+When mixing vendors, keep in mind:
+
+- The `rally` CLI on both sides must point at the **same daemon**
+  (single `~/.rallish/` per user account; see the next section).
+- Note prefix tokens (`[plan]` / `[opinion]` / `[stuck]` / etc.) are
+  case- and bracket-sensitive — both sides parse history the same way.
+- Pattern exit detection is each side's local decision; one side may
+  declare convergence while the other emits one more turn before
+  agreeing. The skill body's 20-turn hard ceiling prevents runaway.
+
+## Using rallish from any project
+
+Nothing in the rally workflow assumes you are inside the rallish source
+tree. After a one-time install:
+
+```bash
+npx skills add jazz1x/rallish          # global skill at ~/.claude/skills/
+rallish bootstrap                       # confirms daemon + materialises skill
+```
+
+…you can rally from any project directory. The daemon at
+`~/.rallish/rallish.sock` is per-user, not per-repo. Two examples:
+
+```bash
+# In ~/work/frontend (some unrelated project), trigger a rally with a
+# teammate who is in ~/work/backend on the same machine, same user:
+cd ~/work/frontend
+# (open Claude Code here, say "랠리보낼 준비해 — 논의 랠리 — 토픽 …")
+```
+
+```bash
+# In a Python repo, no Go nearby, no rallish source — same flow:
+cd ~/some-other-repo
+# (open Claude Code, trigger as above)
+```
+
+The optional `--repo <path>` flag on `rally new` is **session metadata
+only** — the broker stores it but never opens it. It's a hint for the
+agents to know what code they're discussing; it does not have to match
+either side's working directory.
 
 ## Rally Patterns
 

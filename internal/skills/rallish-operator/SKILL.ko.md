@@ -7,8 +7,9 @@ description: >
   모드(헤드리스 프리셋 자동 실행)도 포함합니다.
   바톤 위에 세 가지 행동 패턴을 지원합니다: cycle (계획/실행/검토), discuss (다관점 논의), help (막힐 때 짧은 조언).
   v0.3은 자동 루프를 제공합니다: 각 에이전트가 한 번의 설정 트리거 후 `rally join --once`로 자가 폴링하며 사용자 개입 없이 핑퐁합니다.
+  v0.3.1은 자동 루프를 yield-friendly 방식으로 기본 변경합니다 — 30초 짧은 첫 대기 후 사용자에게 제어권을 넘깁니다. 스킬이 크로스벤더 `~/.claude/skills/` brand-group 경로에 위치하므로 다양한 코딩 CLI(Claude Code, Kimi 등)에서 동작합니다.
   Triggers: "랠리보낼 준비해", "let's serve", "serve prep", "rally prep — serving", "서브 준비", "랠리받을 준비해", "let's return", "returner prep", "rally prep — returning", "리턴 준비", "시작", "serve!", "go", "start rally", "내 차례", "내 차례 됐어?", "is it my turn", "ready", "ready to return", "끝", "match over", "stop rally", "랠리 끝", "cycle", "plan-execute-review", "사이클로 가자", "discuss", "discussion rally", "논의 랠리", "여러 시선으로", "stuck rally", "help me out", "막혔어 도와줘", "한 번만 봐줘"
-version: 0.3.0
+version: 0.3.1
 ssl:
   scheduling:
     anti_triggers:
@@ -41,6 +42,8 @@ ssl:
       - "턴 사이에 각 쪽은 `rally join --once --timeout 5m --as <ROLE>`을 실행하여 다음 바톤 도착 또는 타임아웃(exit 2)까지 블로킹"
       - "join exit 2 (타임아웃) → 사용자에게 '5분간 baton 없음. 계속 대기할까 혹은 끝낼까?' 체크포인트; 기본 동작: `끝` 입력 없으면 루프 재개"
       - "패턴별 종료 신호 감지 → 에이전트가 최종 요약을 사용자에게 전달하고 루프 종료"
+      - "서버 첫 done 완료 → 사용자에게 제어권 반환 (긴 블로킹 없음); 리시버 준비 완료 후 사용자가 서버에 다시 신호 → 상태 확인 후 계속"
+      - "크로스벤더: kimi는 brand-group 폴백(kimi → claude → codex)으로 스킬 자동 발견; Anthropic-skill-format 클라이언트(Cursor 등)도 동일 트리거 표면 사용"
   logical:
     tools: [Bash, Read]
     side_effects:
@@ -92,6 +95,7 @@ sh ~/.claude/skills/rallish-operator/scripts/install-binary.sh
 - PATTERN: cycle | discuss | help | freeform (기본값; 트리거 A 또는 랠리 중 전환으로 설정)
 - LAST_HOLDER: 에이전트가 마지막으로 확인한 holder (바톤 도착 감지에 사용)
 - EXIT_REASON: 루프 종료 시 채워짐 ('mutual-agree', 'review-approved', 'resolved', 'user-끝', 'timeout-abandoned')
+- WAIT_MODE: "yield" (v0.3.1 기본값) | "block" (v0.3.0 레거시 블로킹 자동 루프, 양쪽이 모두 준비된 것을 알고 있을 때만 사용)
 
 ## 트리거 A — "랠리보낼 준비해" (또는 영어 동의어)
 이 쪽 에이전트가 서버가 됩니다.
@@ -122,7 +126,9 @@ sh ~/.claude/skills/rallish-operator/scripts/install-binary.sh
     실행: `rallish rally done --session-id $SID --as server --note "<위 내용>"`.
     상태가 이제 returner_turn이 됩니다.
 
-5b. **자동 루프 진입** (아래 "자동 루프" 섹션 참조).
+5b. **사용자에게 제어권 반환.** 사용자에게 SID, 리시버 쪽 에이전트에게 전달할 트리거("랠리받을 준비해 <SID>"), 그리고 리시버가 조인하거나 응답하면 다음 메시지에서 상태를 확인하겠다고 안내합니다. 여기서 `rally join --once`로 블로킹하지 마세요 — 리시버가 아직 준비되지 않았다면 에이전트의 컨텍스트를 낭비하게 됩니다.
+
+    구현: `rally done` 완료 후 사용자에게 안내하고 멈춥니다. 다음 사용자 메시지가 오면 `rally status` 실행 — `holder == server` (리시버가 응답한 경우) 이면 새 노트를 읽고 루프 계속. `holder == returner` (리시버가 아직 미응답) 이면 "아직 receiver 차례 — 더 기다릴까?" 안내 후 멈춥니다.
 
 ## 트리거 B — "랠리받을 준비해 <SID>" (또는 영어 동의어)
 이 쪽 에이전트가 리시버가 됩니다.
@@ -183,38 +189,27 @@ sh ~/.claude/skills/rallish-operator/scripts/install-binary.sh
 입력할 필요가 없습니다.
 
 ```
-while true:
-    cue = bash("rallish rally join --session-id $SID --as $ROLE --once --timeout 5m")
-    exit_code = $?
+on every "내 차례" trigger OR any user message after the agent has yielded:
+    cue_via_status = bash("rally status --session-id $SID")
+    parse_holder(cue_via_status) → CURRENT_HOLDER
+    parse_last_history(cue_via_status) → LAST_TURN, LAST_FROM, LAST_NOTE
 
-    if exit_code == 2:
-        # 타임아웃 — 5분간 브로커 조용
-        사용자에게 안내: "🎾 5분간 baton 없음. 계속 대기할까(엔터)? 끝낼까(끝)?"
-        사용자가 '끝' 입력: EXIT_REASON=timeout-abandoned 로 루프 종료
-        그 외: continue   # 루프 재개
+    if CURRENT_HOLDER != ROLE:
+        tell user: "아직 내 차례 아니야. 현재 holder: $CURRENT_HOLDER. 더 기다리려면 잠시 후 'ok' 또는 '확인해'."
+        return
 
-    # 바톤 도착 — cue 라인에서 turn + from + note 파싱
-    parse_cue(cue) → TURN, FROM, NOTE
+    # 내 차례
+    if pattern_specific_exit_signal_met(LAST_NOTE, history):
+        tell user: "🎾 <signal> — 랠리 종료."
+        set EXIT_REASON; return
 
-    # 패턴별 종료 신호 감지
-    if PATTERN == discuss and last_two_history_notes_are("[agree]", "[agree]"):
-        EXIT_REASON = mutual-agree; 사용자에게 안내 "🎾 양쪽 [agree]. 랠리 종료."; break
-    if PATTERN == cycle and NOTE.startswith("[review] approved") and no_pending_plan_in_history():
-        EXIT_REASON = review-approved; 사용자에게 안내 "🎾 사이클 완료."; break
-    if PATTERN == help and NOTE.startswith("[resolved]") and ROLE == helper:
-        EXIT_REASON = resolved; 사용자에게 안내 "🎾 owner가 [resolved]. 도움 랠리 종료."; break
-
-    # PATTERN + 이전 NOTE에 맞게 응답 작성
-    new_note = compose_response(PATTERN, NOTE, history)
-    bash("rallish rally done --session-id $SID --as $ROLE --note '$new_note'")
-
-    # 사용자에게 체크포인트 (한 줄)
-    사용자에게 안내: "🎾 보냈어: <new_note 첫 60자>. 다음 차례 대기 중."
-
-    # 루프 전 사용자 입력 확인: '끝' 입력 시 루프 종료
-    if user_message_pending and contains_끝:
-        EXIT_REASON = user-끝; 사용자에게 안내 "랠리 종료."; break
+    composed_note = compose_response(PATTERN, LAST_NOTE, history)
+    bash("rally done --session-id $SID --as $ROLE --note '$composed_note'")
+    tell user: "🎾 보냈어: <composed_note 앞 60자>. 상대 응답 오면 알려주거나 '확인해' 라고 해."
+    return  # 사용자에게 제어권 반환 — 블로킹 금지
 ```
+
+**왜 `rally join --once` 대신 yield 방식인가?** v0.3.0 라이브 테스트에서 리시버가 준비되지 않은 상태에서 블로킹 자동 루프가 타임아웃 창(기본 5분)당 ~5k 토큰을 소모한다는 것이 확인되었습니다. yield-friendly 패턴은 사용자의 모든 프롬프트마다 `rally status` (HTTP GET 한 번)를 사용하며, 수십 토큰만 소비하고 사용자가 랠리 속도를 자연스럽게 조절할 수 있습니다. `rally join --once --timeout <short>`는 양쪽이 모두 준비된 상태에서 30초 이내의 빠른 핸드오프가 필요할 때만 사용하세요 (예: 양쪽이 준비된 cycle 패턴).
 
 **루프 내부 휴리스틱:**
 - `compose_response(discuss, NOTE, history)` — NOTE가 `[opinion]`이면
@@ -236,6 +231,63 @@ while true:
 **하드 상한:** 루프가 종료 신호 없이 20회 이상 반복되면
 에이전트가 `"🎾 20턴 넘었어. 정리할까?"` 로 사용자에게
 체크포인트하고 일시 정지합니다.
+
+## 크로스벤더 호환성
+
+이 스킬은 `~/.claude/skills/rallish-operator/` 에 위치합니다. 이 경로는
+다음 클라이언트에서 자동 발견됩니다:
+
+- **Claude Code** — brand group 직접 경로.
+- **Kimi (kimi-cli)** — brand-group 폴백 (기본 발견 순서:
+  `~/.kimi/skills/` → `~/.claude/skills/` → `~/.codex/skills/`),
+  `~/.kimi/config.toml` 의 기본값 `merge_all_available_skills = true` 로 활성화.
+- **Codex / Cursor / 기타 Anthropic-skill-format 클라이언트** — 동일한
+  brand-group 규칙; 일부는 `--skills-dir ~/.claude/skills/` 를 명시적으로
+  전달해야 할 수 있음.
+
+라이브 검증: Claude Code 세션(서버)과 Kimi 세션(리시버) 간의 discuss 패턴
+랠리가 4턴 안에 `[agree]/[agree]` 상호 수렴에 도달했습니다. 양쪽 모두 트리거
+표면과 패턴 종료 감지를 올바르게 따랐습니다.
+
+벤더를 혼합할 때 유의사항:
+
+- 양쪽의 `rally` CLI는 반드시 **동일한 데몬**을 가리켜야 합니다
+  (사용자 계정당 단일 `~/.rallish/`; 다음 섹션 참조).
+- 노트 접두사 토큰(`[plan]` / `[opinion]` / `[stuck]` 등)은 대소문자와
+  괄호에 민감합니다 — 양쪽이 동일한 방식으로 히스토리를 파싱합니다.
+- 패턴 종료 감지는 각 쪽의 로컬 결정입니다; 한 쪽이 수렴을 선언하는 동안
+  다른 쪽이 동의 전에 한 턴 더 발행할 수 있습니다. 스킬 본문의 20턴 하드
+  상한이 무한 반복을 방지합니다.
+
+## rallish를 어디서든 사용하기
+
+랠리 워크플로우는 rallish 소스 트리 내에 있다고 가정하지 않습니다.
+한 번의 설치 후:
+
+```bash
+npx skills add jazz1x/rallish          # 전역 스킬 설치 위치: ~/.claude/skills/
+rallish bootstrap                       # 데몬 확인 + 스킬 구체화
+```
+
+…어떤 프로젝트 디렉토리에서도 랠리를 실행할 수 있습니다. `~/.rallish/rallish.sock`
+데몬은 리포별이 아닌 사용자별입니다. 두 가지 예:
+
+```bash
+# ~/work/frontend (무관한 프로젝트)에서 같은 머신, 같은 사용자의
+# ~/work/backend 팀원과 랠리:
+cd ~/work/frontend
+# (Claude Code를 열고 "랠리보낼 준비해 — 논의 랠리 — 토픽 …" 입력)
+```
+
+```bash
+# Python 리포에서, Go 없음, rallish 소스 없음 — 동일한 흐름:
+cd ~/some-other-repo
+# (Claude Code를 열고 위와 같이 트리거)
+```
+
+`rally new` 의 선택적 `--repo <path>` 플래그는 **세션 메타데이터 전용**입니다
+— 브로커가 저장하지만 열지는 않습니다. 에이전트에게 어떤 코드를 논의하는지
+알려주는 힌트이며, 양쪽의 작업 디렉토리와 일치할 필요는 없습니다.
 
 ## 랠리 패턴
 
