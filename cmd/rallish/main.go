@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -55,8 +56,12 @@ func main() {
 	}()
 
 	if err := root.ExecuteContext(context.Background()); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "Error:", err)
-		exitCode = 1
+		if errors.Is(err, cli.ErrTimeoutWaitingForBaton) {
+			exitCode = 2
+		} else {
+			_, _ = fmt.Fprintln(os.Stderr, "Error:", err)
+			exitCode = 1
+		}
 	}
 	os.Exit(exitCode) //nolint:gocritic // defer resets signals; exit code must propagate
 }

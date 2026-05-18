@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -548,6 +549,63 @@ func TestRallyBatonNonMember(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+// TestRallyCreateWithFirstHolder verifies that a session created with
+// first_holder="server" immediately has status=server_turn, holder="server",
+// and turnN=1.
+func TestRallyCreateWithFirstHolder(t *testing.T) {
+	resetRallies()
+	ts, _ := newRallyServer(t)
+
+	req := contract.NewRallyRequest{
+		Participants: []string{"server", "returner"},
+		FirstHolder:  "server",
+	}
+	body, err := json.Marshal(req)
+	require.NoError(t, err)
+	resp := postJSON(t, ts.URL+"/rally/sessions", string(body))
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	var sess contract.RallySession
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&sess))
+	require.Equal(t, contract.RallyTurnState("server"), sess.Status)
+	require.Equal(t, "server", sess.Holder)
+	require.Equal(t, 1, sess.TurnN)
+}
+
+// TestRallyCreateInvalidFirstHolder verifies that supplying a first_holder
+// that is not in participants returns 400 with a message mentioning first_holder.
+func TestRallyCreateInvalidFirstHolder(t *testing.T) {
+	resetRallies()
+	ts, _ := newRallyServer(t)
+
+	req := contract.NewRallyRequest{
+		Participants: []string{"server", "returner"},
+		FirstHolder:  "ghost",
+	}
+	body, err := json.Marshal(req)
+	require.NoError(t, err)
+	resp := postJSON(t, ts.URL+"/rally/sessions", string(body))
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	raw, _ := io.ReadAll(resp.Body)
+	require.Contains(t, string(raw), "first_holder")
+}
+
+// TestRallyCreateWithoutFirstHolder verifies backwards compatibility: omitting
+// first_holder still produces an idle session with turnN=0 and no holder.
+func TestRallyCreateWithoutFirstHolder(t *testing.T) {
+	resetRallies()
+	ts, _ := newRallyServer(t)
+
+	sess := createSession(t, ts, []string{"server", "returner"})
+
+	require.Equal(t, contract.RallyStateIdle, sess.Status)
+	require.Equal(t, "", sess.Holder)
+	require.Equal(t, 0, sess.TurnN)
 }
 
 // TestCloseAllRallies verifies that an active SSE baton stream receives a

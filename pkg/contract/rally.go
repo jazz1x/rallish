@@ -77,6 +77,10 @@ type NewRallyRequest struct {
 	Repo string `json:"repo,omitempty"`
 	// Task is the optional task description.
 	Task string `json:"task,omitempty"`
+	// FirstHolder optionally pre-assigns the baton to this participant at session-create time.
+	// Must be one of the Participants. When set, the session starts in <first_holder>_turn
+	// state with TurnN=1 rather than idle/0.
+	FirstHolder string `json:"first_holder,omitempty"`
 }
 
 // RallySession is the full state of a rally session as returned by GET /rally/sessions/:id.

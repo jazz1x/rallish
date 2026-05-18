@@ -174,6 +174,21 @@ func (s *Server) handleRallyCreate(w http.ResponseWriter, r *http.Request) {
 		seen[name] = true
 	}
 
+	// Validate first_holder if provided.
+	if req.FirstHolder != "" {
+		found := false
+		for _, p := range req.Participants {
+			if p == req.FirstHolder {
+				found = true
+				break
+			}
+		}
+		if !found {
+			http.Error(w, fmt.Sprintf("first_holder %q is not in participants", req.FirstHolder), http.StatusBadRequest)
+			return
+		}
+	}
+
 	id, err := generateRallyID()
 	if err != nil {
 		logger.ErrorContext(ctx, "generate id", "error", err)
@@ -194,6 +209,14 @@ func (s *Server) handleRallyCreate(w http.ResponseWriter, r *http.Request) {
 		createdAt:      nowMS,
 		streams:        make(map[string]chan contract.BatonEvent),
 		staleThreshold: 30_000,
+	}
+
+	// Apply first_holder pre-assignment if provided.
+	if req.FirstHolder != "" {
+		sess.holder = req.FirstHolder
+		sess.status = contract.RallyTurnState(req.FirstHolder)
+		sess.turnN = 1
+		sess.lastSeen[req.FirstHolder] = nowMS
 	}
 
 	rallies.mu.Lock()

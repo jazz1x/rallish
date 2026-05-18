@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,10 @@ import (
 	"github.com/jazz1x/rallish/pkg/contract"
 	"github.com/spf13/cobra"
 )
+
+// ErrTimeoutWaitingForBaton is returned by runRallyJoin when --timeout elapses
+// before any baton event arrives. The top-level main maps this to exit code 2.
+var ErrTimeoutWaitingForBaton = errors.New("rally join: timeout waiting for baton")
 
 // nameRe mirrors the broker's participant name validation (PRD §6).
 var nameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,16}$`)
@@ -44,6 +49,7 @@ func RallyNewCmd() *cobra.Command {
 		participants string
 		repo         string
 		task         string
+		firstHolder  string
 	)
 	cmd := &cobra.Command{
 		Use:   "new",
@@ -53,12 +59,13 @@ func RallyNewCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("get home dir: %w", err)
 			}
-			return runRallyNew(cmd.Context(), home, participants, repo, task, cmd.OutOrStdout())
+			return runRallyNew(cmd.Context(), home, participants, repo, task, firstHolder, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().StringVar(&participants, "participants", "", "Comma-separated participant names (required)")
 	cmd.Flags().StringVar(&repo, "repo", "", "Repository path (optional)")
 	cmd.Flags().StringVar(&task, "task", "", "Task description (optional)")
+	cmd.Flags().StringVar(&firstHolder, "first", "", "Pre-assign baton to this participant at create time")
 	_ = cmd.MarkFlagRequired("participants")
 	return cmd
 }
@@ -68,6 +75,8 @@ func RallyJoinCmd() *cobra.Command {
 	var (
 		sessionID string
 		as        string
+		once      bool
+		timeout   time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "join",
@@ -77,11 +86,13 @@ func RallyJoinCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("get home dir: %w", err)
 			}
-			return runRallyJoin(cmd.Context(), home, sessionID, as, cmd.OutOrStdout())
+			return runRallyJoin(cmd.Context(), home, sessionID, as, once, timeout, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 	cmd.Flags().StringVar(&sessionID, "session-id", "", "Rally session ID (required)")
 	cmd.Flags().StringVar(&as, "as", "", "Participant name (required)")
+	cmd.Flags().BoolVar(&once, "once", false, "Exit after the first baton event")
+	cmd.Flags().DurationVar(&timeout, "timeout", 0, "Exit code 2 if no baton arrives within this duration; 0 means block indefinitely")
 	_ = cmd.MarkFlagRequired("session-id")
 	_ = cmd.MarkFlagRequired("as")
 	return cmd
@@ -136,7 +147,7 @@ func RallyStatusCmd() *cobra.Command {
 
 // ---- implementation ----
 
-func runRallyNew(ctx context.Context, homeDir, participants, repo, task string, out io.Writer) error {
+func runRallyNew(ctx context.Context, homeDir, participants, repo, task, firstHolder string, out io.Writer) error {
 	// Parse and validate participants.
 	names := splitParticipants(participants)
 	if len(names) < 2 {
@@ -173,6 +184,7 @@ func runRallyNew(ctx context.Context, homeDir, participants, repo, task string, 
 		Participants: names,
 		Repo:         repo,
 		Task:         task,
+		FirstHolder:  firstHolder,
 	}
 	bodyJSON, err := json.Marshal(reqBody)
 	if err != nil {
@@ -205,7 +217,7 @@ func runRallyNew(ctx context.Context, homeDir, participants, repo, task string, 
 	return nil
 }
 
-func runRallyJoin(ctx context.Context, homeDir, sessionID, as string, out io.Writer) error {
+func runRallyJoin(ctx context.Context, homeDir, sessionID, as string, once bool, timeout time.Duration, out io.Writer, errOut io.Writer) error {
 	if !nameRe.MatchString(as) {
 		return fmt.Errorf("invalid participant name %q: must match ^[a-zA-Z0-9_-]{1,16}$", as)
 	}
@@ -220,15 +232,23 @@ func runRallyJoin(ctx context.Context, homeDir, sessionID, as string, out io.Wri
 	bc.Client.Timeout = 0
 
 	url := fmt.Sprintf("%s/rally/sessions/%s/baton?as=%s", bc.URL, sessionID, as)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Accept", "text/event-stream")
 
-	// Handle SIGINT/SIGTERM: cancel the context to close the connection cleanly.
+	// If --timeout is set, derive a deadline context.
+	// We track whether the context expired via a flag so we can return the
+	// sentinel error rather than a generic cancellation error.
+	timedOut := false
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	if timeout > 0 {
+		timer := time.AfterFunc(timeout, func() {
+			timedOut = true
+			cancel()
+		})
+		defer timer.Stop()
+	}
+
+	// Handle SIGINT/SIGTERM: cancel the context to close the connection cleanly.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
@@ -240,8 +260,18 @@ func runRallyJoin(ctx context.Context, homeDir, sessionID, as string, out io.Wri
 		}
 	}()
 
-	resp, err := bc.Client.Do(req.WithContext(ctx))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+
+	resp, err := bc.Client.Do(req)
+	if err != nil {
+		if timedOut {
+			_, _ = fmt.Fprintf(errOut, "rally join: no baton within %s\n", timeout)
+			return ErrTimeoutWaitingForBaton
+		}
 		if ctx.Err() != nil {
 			return nil // cancelled by signal
 		}
@@ -269,17 +299,34 @@ func runRallyJoin(ctx context.Context, homeDir, sessionID, as string, out io.Wri
 		if line == "" && dataLine != "" {
 			// End of SSE event block.
 			if err := handleBatonEvent(dataLine, sessionID, as, out); err != nil {
+				if errors.Is(err, io.EOF) {
+					return nil // closed sentinel
+				}
 				return err
 			}
 			dataLine = ""
+			// --once: exit cleanly after first baton event is handled.
+			if once {
+				return nil
+			}
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
+		if timedOut {
+			_, _ = fmt.Fprintf(errOut, "rally join: no baton within %s\n", timeout)
+			return ErrTimeoutWaitingForBaton
+		}
 		if ctx.Err() != nil {
 			return nil // cancelled cleanly
 		}
 		return fmt.Errorf("reading SSE stream: %w", err)
+	}
+
+	// Check if we timed out while blocked in scanner (scanner saw EOF from context cancel).
+	if timedOut {
+		_, _ = fmt.Fprintf(errOut, "rally join: no baton within %s\n", timeout)
+		return ErrTimeoutWaitingForBaton
 	}
 
 	_, _ = fmt.Fprintln(out, "session closed")
