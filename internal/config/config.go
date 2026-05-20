@@ -21,7 +21,9 @@ import (
 // Config is the typed view of ~/.rallish/config.yaml.
 //
 // Add new keys here, then teach [Keys], [Get], and [Set] about them.
-// Booleans use *bool so the YAML round-trip can preserve "unset".
+// All fields are strings so unset → empty round-trips cleanly through
+// YAML; enums (wait_mode, telemetry, coding_cli) are validated in
+// [Set].
 type Config struct {
 	DefaultPreset  string `yaml:"default_preset,omitempty"`
 	DefaultAdapter string `yaml:"default_adapter,omitempty"`

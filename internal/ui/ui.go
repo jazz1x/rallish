@@ -14,8 +14,9 @@
 //	└  footer / flow end
 //
 // Color is disabled automatically when stdout is not a TTY, when
-// the NO_COLOR environment variable is set, or when the user passes
-// --no-color via [DisableColor].
+// the NO_COLOR environment variable is set, or when TERM=dumb.
+// Set [Theme.Color] = false on a per-instance basis to opt out
+// explicitly.
 package ui
 
 import (

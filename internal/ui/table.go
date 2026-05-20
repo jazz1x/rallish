@@ -8,8 +8,11 @@ import (
 // Table is a tiny aligned-column printer for the CLI.
 // Columns auto-size to the widest cell (including header).
 type Table struct {
+	// Headers is the dim-styled header row.
 	Headers []string
-	Rows    [][]string
+	// Rows is the body. Each row must have len(Headers) cells; cells
+	// beyond that index are silently dropped by Render.
+	Rows [][]string
 }
 
 // Render writes the table to the theme's Out with dim header and
