@@ -1,14 +1,21 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 )
 
+// ErrPromptRequired is returned by [Theme.Ask] when no default was
+// provided and the user supplied no input (including the EOF case).
+var ErrPromptRequired = errors.New("prompt requires a non-empty answer")
+
 // Ask prints a [◆] prompt question and returns the trimmed user input.
-// An empty answer returns the supplied default. Pass an empty default
-// to require a non-empty answer.
+// An empty answer returns the supplied default. When def is empty and
+// the user enters nothing (or stdin is closed), Ask returns
+// [ErrPromptRequired] rather than silently producing "" — callers can
+// branch on it with errors.Is.
 func (t *Theme) Ask(question, def string) (string, error) {
 	openP, closeP := t.styleANSI(StylePrompt)
 	openD, closeD := t.styleANSI(StyleDim)
@@ -24,6 +31,9 @@ func (t *Theme) Ask(question, def string) (string, error) {
 	}
 	ans := strings.TrimSpace(line)
 	if ans == "" {
+		if def == "" {
+			return "", ErrPromptRequired
+		}
 		return def, nil
 	}
 	return ans, nil

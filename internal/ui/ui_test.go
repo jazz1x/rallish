@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -129,6 +130,27 @@ func TestAskReturnsDefault(t *testing.T) {
 	}
 	if got != "anonymous" {
 		t.Errorf("expected default, got %q", got)
+	}
+}
+
+func TestAskRequiredButEmpty_ReturnsErrPromptRequired(t *testing.T) {
+	th, _, _ := newTestTheme(false)
+	th.In = strings.NewReader("\n")
+	_, err := th.Ask("name?", "")
+	if !errors.Is(err, ErrPromptRequired) {
+		t.Errorf("want ErrPromptRequired, got %v", err)
+	}
+}
+
+func TestAskEOFWithDefault_UsesDefault(t *testing.T) {
+	th, _, _ := newTestTheme(false)
+	th.In = strings.NewReader("") // immediate EOF
+	got, err := th.Ask("name?", "anon")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "anon" {
+		t.Errorf("EOF with default should yield default, got %q", got)
 	}
 }
 
