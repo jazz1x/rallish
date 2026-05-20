@@ -66,6 +66,17 @@ func TestBootstrap_BannerFitsScreen(t *testing.T) {
 	require.Less(t, lines, 50, "bootstrap should fit on one screen; got %d lines", lines)
 }
 
+func TestBootstrap_CancelledContext_ExitsEarly(t *testing.T) {
+	withBootstrapHome(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel
+	var out bytes.Buffer
+	opts := BootstrapOptions{Yes: true, stdout: &out}
+	err := RunBootstrap(ctx, opts)
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 func TestBootstrap_InteractiveWizard_SetsValues(t *testing.T) {
 	withBootstrapHome(t)
 	// Provide stdin answers:

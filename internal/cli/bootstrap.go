@@ -77,8 +77,10 @@ don't truncate their session banner. Use --yes to skip all prompts.`,
 }
 
 // RunBootstrap is the executable entry point so tests can call it
-// directly with an in-memory BootstrapOptions.
-func RunBootstrap(_ context.Context, opts BootstrapOptions) error {
+// directly with an in-memory BootstrapOptions. The context is checked
+// between steps so a Ctrl-C / SIGTERM cancellation exits cleanly
+// without writing a partial config.
+func RunBootstrap(ctx context.Context, opts BootstrapOptions) error {
 	t := opts.theme()
 	total := 4
 
@@ -92,6 +94,9 @@ func RunBootstrap(_ context.Context, opts BootstrapOptions) error {
 	}
 
 	// Step 1 — install skill.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if opts.SkipSkill {
 		t.StepOK(1, total, "skill install — skipped")
 	} else {
@@ -109,6 +114,9 @@ func RunBootstrap(_ context.Context, opts BootstrapOptions) error {
 	}
 
 	// Step 2 — config wizard.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if opts.SkipConfig {
 		t.StepOK(2, total, "config wizard — skipped")
 		ensureConfigFile(t)
@@ -121,11 +129,17 @@ func RunBootstrap(_ context.Context, opts BootstrapOptions) error {
 	}
 
 	// Step 3 — show config summary.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := showConfigSummary(t, 3, total); err != nil {
 		return err
 	}
 
 	// Step 4 — daemon status.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := showDaemonStatus(t, 4, total, home); err != nil {
 		return err
 	}
