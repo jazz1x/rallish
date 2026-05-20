@@ -6,9 +6,15 @@ Thanks for considering a contribution.
 
 1. Fork + clone.
 2. `make setup-hooks` (installs lefthook).
-3. Make your change on a feature branch.
-4. `make check` (vet + golangci-lint + race tests) — must pass.
+3. Make your change on a feature branch — never on `main`.
+4. `make check-all` (gofmt + vet + race tests + golangci-lint +
+   no-raw-ANSI sweep) — must pass. Mirrors CI exactly.
 5. Open a PR against `main`.
+
+> **Touching CLI output?** All user-facing rendering goes through
+> `internal/ui` (color tokens, glyphs, prompts, tables). Don't roll
+> your own ANSI — the pre-commit hook will reject it. See
+> [AGENTS.md §CLI Presentation](AGENTS.md#cli-presentation).
 
 ## Conventions
 
