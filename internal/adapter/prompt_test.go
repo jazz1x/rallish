@@ -54,8 +54,8 @@ func BenchmarkBuildPrompt(b *testing.B) {
 		ModelHint:   "claude-3-5-sonnet",
 		Budget:      contract.Budget{TokensLeft: 8000, TurnsLeft: 10},
 		LastTurn: &contract.LastTurn{
-			From:    "executor",
-			Summary: "implemented feature X",
+			From:      "executor",
+			Summary:   "implemented feature X",
 			Artifacts: []string{"feat.go"},
 			SelfEval:  contract.SelfEvalConfident,
 		},

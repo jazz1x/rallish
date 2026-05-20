@@ -376,7 +376,6 @@ func TestNext_AsRoleTerminalDuringWait(t *testing.T) {
 	}
 }
 
-
 func TestBroker_BudgetExhaustion_410Gone(t *testing.T) {
 	dir := t.TempDir()
 	clock := &fakeClock{t: time.Now()}

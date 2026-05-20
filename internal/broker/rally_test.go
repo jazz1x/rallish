@@ -243,7 +243,7 @@ func TestRallyBatonRoundTrip(t *testing.T) {
 	// alice expects 2 events (turn 1 and turn 3), bob expects 2 events (turn 2 and... wait).
 	// For this test we do 2 full rounds (alice→bob→alice→bob) and check 4 handoffs.
 	aliceCh := joinAndCollect(ctx, "alice", 1) // alice gets turn 1 immediately
-	time.Sleep(80 * time.Millisecond)           // let alice join and get baton
+	time.Sleep(80 * time.Millisecond)          // let alice join and get baton
 
 	bobCh := joinAndCollect(ctx, "bob", 1) // bob waits for alice to pass
 
@@ -703,4 +703,3 @@ func TestCloseAllRallies(t *testing.T) {
 	rallies.mu.Unlock()
 	require.Equal(t, contract.RallyStateInterrupted, status)
 }
-
