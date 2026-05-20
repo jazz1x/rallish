@@ -18,6 +18,18 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+// Sentinel errors for callers that want to branch on validation
+// failures with [errors.Is]. Wrap site uses %w so the sentinel survives.
+var (
+	// ErrUnknownKey is returned by [Get] / [Set] when the key is not
+	// in the [Keys] enumeration.
+	ErrUnknownKey = errors.New("unknown config key")
+	// ErrInvalidValue is returned by [Set] when the value fails the
+	// enum check for a constrained key (wait_mode, telemetry,
+	// coding_cli).
+	ErrInvalidValue = errors.New("invalid config value")
+)
+
 // Config is the typed view of ~/.rallish/config.yaml.
 //
 // Add new keys here, then teach [Keys], [Get], and [Set] about them.
@@ -242,7 +254,7 @@ func Get(cfg Config, key string) (string, error) {
 	case "telemetry":
 		return cfg.Telemetry, nil
 	default:
-		return "", fmt.Errorf("unknown key %q (run `rallish config list` for valid keys)", key)
+		return "", fmt.Errorf("%w: %q (run `rallish config list` for valid keys)", ErrUnknownKey, key)
 	}
 }
 
@@ -257,23 +269,23 @@ func Set(cfg *Config, key, value string) error {
 		cfg.DefaultAdapter = value
 	case "coding_cli":
 		if value != "" && !validCodingCLI(value) {
-			return fmt.Errorf("coding_cli must be one of: claude, kimi, codex")
+			return fmt.Errorf("%w: coding_cli must be one of: claude, kimi, codex", ErrInvalidValue)
 		}
 		cfg.CodingCLI = value
 	case "editor":
 		cfg.Editor = value
 	case "wait_mode":
 		if value != "" && value != "yield" && value != "block" {
-			return fmt.Errorf("wait_mode must be 'yield' or 'block'")
+			return fmt.Errorf("%w: wait_mode must be 'yield' or 'block'", ErrInvalidValue)
 		}
 		cfg.WaitMode = value
 	case "telemetry":
 		if value != "" && value != "on" && value != "off" {
-			return fmt.Errorf("telemetry must be 'on' or 'off'")
+			return fmt.Errorf("%w: telemetry must be 'on' or 'off'", ErrInvalidValue)
 		}
 		cfg.Telemetry = value
 	default:
-		return fmt.Errorf("unknown key %q (run `rallish config list` for valid keys)", key)
+		return fmt.Errorf("%w: %q (run `rallish config list` for valid keys)", ErrUnknownKey, key)
 	}
 	return nil
 }

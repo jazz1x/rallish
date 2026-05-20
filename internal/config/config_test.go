@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -50,10 +51,12 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 
 func TestSet_ValidatesEnums(t *testing.T) {
 	cfg := Defaults()
-	require.Error(t, Set(&cfg, "wait_mode", "nope"))
-	require.Error(t, Set(&cfg, "telemetry", "maybe"))
-	require.Error(t, Set(&cfg, "coding_cli", "gpt"))
-	require.Error(t, Set(&cfg, "unknown_key", "x"))
+	err := Set(&cfg, "wait_mode", "nope")
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrInvalidValue), "wait_mode invalid should wrap ErrInvalidValue: %v", err)
+	require.True(t, errors.Is(Set(&cfg, "telemetry", "maybe"), ErrInvalidValue))
+	require.True(t, errors.Is(Set(&cfg, "coding_cli", "gpt"), ErrInvalidValue))
+	require.True(t, errors.Is(Set(&cfg, "unknown_key", "x"), ErrUnknownKey))
 	require.NoError(t, Set(&cfg, "wait_mode", "block"))
 	require.Equal(t, "block", cfg.WaitMode)
 }
@@ -62,6 +65,7 @@ func TestGet_UnknownKeyErrs(t *testing.T) {
 	cfg := Defaults()
 	_, err := Get(cfg, "nope")
 	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrUnknownKey), "Get unknown key should wrap ErrUnknownKey: %v", err)
 }
 
 func TestResolve_EditorEnvFallback(t *testing.T) {
