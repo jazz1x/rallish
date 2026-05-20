@@ -38,7 +38,7 @@ func (t *Theme) Render(table Table) {
 			hb.WriteString("  ")
 		}
 	}
-	fmt.Fprintf(t.out(), "%s%s%s\n", openH, hb.String(), closeH)
+	_, _ = fmt.Fprintf(t.out(), "%s%s%s\n", openH, hb.String(), closeH)
 
 	for _, row := range table.Rows {
 		var rb strings.Builder
@@ -51,7 +51,7 @@ func (t *Theme) Render(table Table) {
 				rb.WriteString("  ")
 			}
 		}
-		fmt.Fprintln(t.out(), rb.String())
+		_, _ = fmt.Fprintln(t.out(), rb.String())
 	}
 }
 

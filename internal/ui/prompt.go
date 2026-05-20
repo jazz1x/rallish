@@ -16,7 +16,7 @@ func (t *Theme) Ask(question, def string) (string, error) {
 	if def != "" {
 		hint = fmt.Sprintf(" %s(%s)%s", openD, def, closeD)
 	}
-	fmt.Fprintf(t.out(), "%s%s%s  %s%s ", openP, GlyphPrompt, closeP, question, hint)
+	_, _ = fmt.Fprintf(t.out(), "%s%s%s  %s%s ", openP, GlyphPrompt, closeP, question, hint)
 
 	line, err := t.inputReader().readLine()
 	if err != nil && err != io.EOF {
@@ -38,7 +38,7 @@ func (t *Theme) Confirm(question string, defaultYes bool) (bool, error) {
 	}
 	openP, closeP := t.styleANSI(StylePrompt)
 	openD, closeD := t.styleANSI(StyleDim)
-	fmt.Fprintf(t.out(), "%s%s%s  %s %s(%s)%s ", openP, GlyphPrompt, closeP, question, openD, hint, closeD)
+	_, _ = fmt.Fprintf(t.out(), "%s%s%s  %s %s(%s)%s ", openP, GlyphPrompt, closeP, question, openD, hint, closeD)
 
 	line, err := t.inputReader().readLine()
 	if err != nil && err != io.EOF {
@@ -64,15 +64,15 @@ func (t *Theme) SelectOne(question string, choices []string, defaultIdx int) (st
 
 	openP, closeP := t.styleANSI(StylePrompt)
 	openD, closeD := t.styleANSI(StyleDim)
-	fmt.Fprintf(t.out(), "%s%s%s  %s\n", openP, GlyphPrompt, closeP, question)
+	_, _ = fmt.Fprintf(t.out(), "%s%s%s  %s\n", openP, GlyphPrompt, closeP, question)
 	for i, c := range choices {
 		marker := " "
 		if i == defaultIdx {
 			marker = "›"
 		}
-		fmt.Fprintf(t.out(), "  %s %d) %s\n", marker, i+1, c)
+		_, _ = fmt.Fprintf(t.out(), "  %s %d) %s\n", marker, i+1, c)
 	}
-	fmt.Fprintf(t.out(), "%s  pick (1-%d, enter=%d):%s ", openD, len(choices), defaultIdx+1, closeD)
+	_, _ = fmt.Fprintf(t.out(), "%s  pick (1-%d, enter=%d):%s ", openD, len(choices), defaultIdx+1, closeD)
 
 	line, err := t.inputReader().readLine()
 	if err != nil && err != io.EOF {

@@ -34,6 +34,7 @@ type Config struct {
 // Source describes where a resolved value came from.
 type Source string
 
+// Source values returned by [Resolve].
 const (
 	SourceFile    Source = "file"
 	SourceEnv     Source = "env"

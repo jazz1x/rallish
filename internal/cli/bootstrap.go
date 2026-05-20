@@ -1,14 +1,13 @@
-// Package cli — bootstrap command.
-//
-// `rallish bootstrap` runs the one-shot setup walk-through:
+package cli
+
+// bootstrap.go implements `rallish bootstrap` — the one-shot setup
+// walk-through:
 //   1. install the skill bundle into ~/.claude/skills/rallish
 //   2. (interactive) collect required config values and persist them
 //   3. verify the daemon is reachable (or explain auto-spawn behavior)
 //
 // The wizard is intentionally compact (≤ 1 screen of progress lines)
 // so coding-CLI assistants don't truncate their session banner.
-
-package cli
 
 import (
 	"context"
@@ -39,13 +38,6 @@ type BootstrapOptions struct {
 
 	stdout io.Writer
 	stdin  io.Reader
-}
-
-func (o *BootstrapOptions) out() io.Writer {
-	if o.stdout != nil {
-		return o.stdout
-	}
-	return os.Stdout
 }
 
 func (o *BootstrapOptions) theme() *ui.Theme {
@@ -86,7 +78,7 @@ don't truncate their session banner. Use --yes to skip all prompts.`,
 
 // RunBootstrap is the executable entry point so tests can call it
 // directly with an in-memory BootstrapOptions.
-func RunBootstrap(ctx context.Context, opts BootstrapOptions) error {
+func RunBootstrap(_ context.Context, opts BootstrapOptions) error {
 	t := opts.theme()
 	total := 4
 

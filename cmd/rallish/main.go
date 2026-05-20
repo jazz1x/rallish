@@ -54,12 +54,12 @@ func main() {
 			t := ui.New()
 			t.Heading("rallish")
 			t.Detail("agent-driven rally / squash playbook  ·  %s", buildinfo.Version())
-			fmt.Fprintln(cmd.OutOrStdout())
+			_, _ = fmt.Fprintln(cmd.OutOrStdout())
 			t.Info("setup:    rallish bootstrap")
 			t.Info("install:  rallish add (interactive)")
 			t.Info("config:   rallish config list")
 			t.Info("verify:   rallish doctor")
-			fmt.Fprintln(cmd.OutOrStdout())
+			_, _ = fmt.Fprintln(cmd.OutOrStdout())
 			t.Detail("for a full command tree, run: rallish --help")
 		},
 	}

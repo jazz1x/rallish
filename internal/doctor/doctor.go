@@ -25,6 +25,7 @@ type pathReporter interface {
 // Status enumerates the outcome of a single check.
 type Status string
 
+// Status values returned by [Inspect] on each [Check].
 const (
 	StatusOK   Status = "ok"
 	StatusWarn Status = "warn"

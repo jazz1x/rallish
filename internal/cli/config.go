@@ -71,7 +71,7 @@ func configListCmd(opts *ConfigOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List all config keys with current values and source",
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			return RunConfigList(opts)
 		},
 	}
@@ -82,7 +82,7 @@ func configGetCmd(opts *ConfigOptions) *cobra.Command {
 		Use:   "get <key>",
 		Short: "Print the current value for one key",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			return RunConfigGet(opts, args[0])
 		},
 	}
@@ -93,7 +93,7 @@ func configSetCmd(opts *ConfigOptions) *cobra.Command {
 		Use:   "set <key> <value>",
 		Short: "Write a value to the config file",
 		Args:  cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			return RunConfigSet(opts, args[0], args[1])
 		},
 	}
@@ -103,7 +103,7 @@ func configPathCmd(opts *ConfigOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "path",
 		Short: "Print the absolute config file path",
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			p, err := config.Path()
 			if err != nil {
 				return err
@@ -118,7 +118,7 @@ func configEditCmd(opts *ConfigOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "edit",
 		Short: "Open the config file in $EDITOR (creates it if missing)",
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			return RunConfigEdit(opts)
 		},
 	}
@@ -148,9 +148,9 @@ func RunConfigList(opts *ConfigOptions) error {
 		}
 		table.Rows = append(table.Rows, []string{e.Key, val, string(e.Source), e.Description})
 	}
-	fmt.Fprintln(opts.out())
+	_, _ = fmt.Fprintln(opts.out())
 	t.Render(table)
-	fmt.Fprintln(opts.out())
+	_, _ = fmt.Fprintln(opts.out())
 	t.Detail("change a value:  rallish config set <key> <value>")
 	t.Detail("open in editor:  rallish config edit")
 	return nil

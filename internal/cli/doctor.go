@@ -60,7 +60,7 @@ func RunDoctor(ctx context.Context, opts DoctorOptions) error {
 	for _, c := range rep.Checks {
 		renderCheck(t, c)
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 	t.Detail("config:  %s", configPathOrDefault())
 	t.Detail("skill:   %s/.claude/skills/rallish", home)
 	return nil

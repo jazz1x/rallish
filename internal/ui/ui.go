@@ -28,16 +28,18 @@ import (
 // Glyph is the SSOT for status glyphs.
 type Glyph string
 
+// Glyph values used by the Theme renderer. Add new glyphs here so
+// every CLI surface picks the same character.
 const (
-	GlyphInfo    Glyph = "◇"
-	GlyphOK      Glyph = "✓"
-	GlyphErr     Glyph = "■"
-	GlyphWarn    Glyph = "⚠"
-	GlyphPrompt  Glyph = "◆"
-	GlyphFooter  Glyph = "└"
-	GlyphBullet  Glyph = "•"
-	GlyphArrow   Glyph = "→"
-	GlyphPipe    Glyph = "│"
+	GlyphInfo   Glyph = "◇"
+	GlyphOK     Glyph = "✓"
+	GlyphErr    Glyph = "■"
+	GlyphWarn   Glyph = "⚠"
+	GlyphPrompt Glyph = "◆"
+	GlyphFooter Glyph = "└"
+	GlyphBullet Glyph = "•"
+	GlyphArrow  Glyph = "→"
+	GlyphPipe   Glyph = "│"
 )
 
 // ANSI color escape codes. Kept here so no other file in the
@@ -65,6 +67,8 @@ const (
 // Style is a semantic color token. Map to ANSI in styleANSI().
 type Style int
 
+// Semantic style tokens. Add new tokens here, then teach styleANSI
+// how to map them.
 const (
 	StylePlain Style = iota
 	StyleInfo
@@ -145,7 +149,7 @@ func (t *Theme) errw() io.Writer {
 	return t.ErrOut
 }
 
-func (t *Theme) styleANSI(s Style) (open, close string) {
+func (t *Theme) styleANSI(s Style) (open, closeC string) {
 	if t == nil || !t.Color {
 		return "", ""
 	}
@@ -174,11 +178,11 @@ func (t *Theme) styleANSI(s Style) (open, close string) {
 // Sprint returns text wrapped with the style's ANSI codes (or the bare
 // text when color is disabled).
 func (t *Theme) Sprint(s Style, text string) string {
-	open, close := t.styleANSI(s)
+	open, closeC := t.styleANSI(s)
 	if open == "" {
 		return text
 	}
-	return open + text + close
+	return open + text + closeC
 }
 
 // Info prints a [◇] info line on Out.
@@ -223,28 +227,28 @@ func (t *Theme) StepErr(idx, total int, format string, args ...any) {
 // status line. Always dim (or plain when color is off).
 func (t *Theme) Detail(format string, args ...any) {
 	text := fmt.Sprintf(format, args...)
-	open, close := t.styleANSI(StyleDim)
-	fmt.Fprintf(t.out(), "%s  %s%s%s\n", GlyphPipe, open, text, close)
+	open, closeC := t.styleANSI(StyleDim)
+	_, _ = fmt.Fprintf(t.out(), "%s  %s%s%s\n", GlyphPipe, open, text, closeC)
 }
 
 // Heading prints a bold/plain heading with no glyph and a leading newline.
 func (t *Theme) Heading(format string, args ...any) {
 	text := fmt.Sprintf(format, args...)
-	open, close := t.styleANSI(StyleHeading)
-	fmt.Fprintf(t.out(), "\n%s%s%s\n", open, text, close)
+	open, closeC := t.styleANSI(StyleHeading)
+	_, _ = fmt.Fprintf(t.out(), "\n%s%s%s\n", open, text, closeC)
 }
 
 // Footer prints the closing "└  text" line followed by a trailing newline.
 func (t *Theme) Footer(format string, args ...any) {
 	text := fmt.Sprintf(format, args...)
-	open, close := t.styleANSI(StyleAccent)
-	fmt.Fprintf(t.out(), "\n%s  %s%s%s\n\n", GlyphFooter, open, text, close)
+	open, closeC := t.styleANSI(StyleAccent)
+	_, _ = fmt.Fprintf(t.out(), "\n%s  %s%s%s\n\n", GlyphFooter, open, text, closeC)
 }
 
 // Bullet prints a "  • text" bullet point on Out.
 func (t *Theme) Bullet(format string, args ...any) {
 	text := fmt.Sprintf(format, args...)
-	fmt.Fprintf(t.out(), "  %s %s\n", GlyphBullet, text)
+	_, _ = fmt.Fprintf(t.out(), "  %s %s\n", GlyphBullet, text)
 }
 
 // Kv prints a "  ✔ label  → value" wizard step in npx style.
@@ -260,7 +264,7 @@ func (t *Theme) KvSource(label, value, source string) {
 	if source != "" {
 		suffix = fmt.Sprintf("  %s(%s)%s", openDim, source, closeDim)
 	}
-	fmt.Fprintf(t.out(), "  %s%s%s %-18s %s %s%s\n",
+	_, _ = fmt.Fprintf(t.out(), "  %s%s%s %-18s %s %s%s\n",
 		openOK, "✔", closeOK,
 		label,
 		GlyphArrow,
@@ -272,8 +276,8 @@ func (t *Theme) KvSource(label, value, source string) {
 // line is the common renderer for glyph-prefixed status lines.
 func (t *Theme) line(w io.Writer, g Glyph, s Style, format string, args ...any) {
 	text := fmt.Sprintf(format, args...)
-	open, close := t.styleANSI(s)
-	fmt.Fprintf(w, "%s%s%s  %s\n", open, g, close, text)
+	open, closeC := t.styleANSI(s)
+	_, _ = fmt.Fprintf(w, "%s%s%s  %s\n", open, g, closeC, text)
 }
 
 // stripANSI removes ANSI escape sequences from s. Useful for tests.

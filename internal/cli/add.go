@@ -45,13 +45,6 @@ func (o *AddOptions) out() io.Writer {
 	return os.Stdout
 }
 
-func (o *AddOptions) in() io.Reader {
-	if o.stdin != nil {
-		return o.stdin
-	}
-	return os.Stdin
-}
-
 // theme constructs a ui.Theme bound to the options' streams. Tests
 // inject buffers via stdout/stdin and get plain output for free.
 func (o *AddOptions) theme() *ui.Theme {
@@ -219,7 +212,7 @@ func runAdd(ctx context.Context, opts AddOptions, args []string) error {
 			return err
 		}
 		if !ok {
-			fmt.Fprintln(opts.out(), "Cancelled.")
+			_, _ = fmt.Fprintln(opts.out(), "Cancelled.")
 			return nil
 		}
 	}
