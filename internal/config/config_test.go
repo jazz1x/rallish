@@ -101,6 +101,53 @@ func TestPath_HonorsRallishHome(t *testing.T) {
 	require.Equal(t, filepath.Join(tmp, "config.yaml"), p)
 }
 
+func TestLoad_ForwardCompat_IgnoresUnknownKeys(t *testing.T) {
+	// A user upgraded from a future rallish that wrote a key we don't
+	// know about must still load cleanly with the known fields intact.
+	tmp := withTempHome(t)
+	dir := filepath.Join(tmp, ".rallish")
+	require.NoError(t, os.MkdirAll(dir, 0o750))
+	yamlBody := "default_preset: pair-review\n" +
+		"future_field: some-value\n" +
+		"another_future: 42\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlBody), 0o600))
+
+	cfg, res, err := Load()
+	require.NoError(t, err)
+	require.True(t, res.FileExists)
+	require.Equal(t, "pair-review", cfg.DefaultPreset)
+}
+
+func TestLoad_DowngradeCompat_MissingKeysUseDefaults(t *testing.T) {
+	// A user wrote only one key; every other key must fall back to
+	// Defaults() rather than empty strings.
+	tmp := withTempHome(t)
+	dir := filepath.Join(tmp, ".rallish")
+	require.NoError(t, os.MkdirAll(dir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"),
+		[]byte("wait_mode: block\n"), 0o600))
+
+	cfg, res, err := Load()
+	require.NoError(t, err)
+	require.True(t, res.IsFromFile("wait_mode"))
+	require.False(t, res.IsFromFile("default_preset"))
+	// Defaults fill in the unset fields.
+	require.Equal(t, "solo-ralph", cfg.DefaultPreset)
+	require.Equal(t, "claude", cfg.CodingCLI)
+}
+
+func TestLoad_MalformedYAML_ReturnsError(t *testing.T) {
+	tmp := withTempHome(t)
+	dir := filepath.Join(tmp, ".rallish")
+	require.NoError(t, os.MkdirAll(dir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"),
+		[]byte(":\n  : not valid yaml ::\n"), 0o600))
+
+	_, _, err := Load()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "parse config")
+}
+
 func TestSave_AtomicTempIsCleaned(t *testing.T) {
 	withTempHome(t)
 	cfg := Defaults()
