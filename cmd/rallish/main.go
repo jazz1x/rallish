@@ -39,6 +39,7 @@ func main() {
 		squashCmd(),
 		cli.RallyCmd(),
 		cli.AddCmd(),
+		cli.ConfigCmd(),
 		skillCmd(),
 		bootstrapCmd(),
 	)
