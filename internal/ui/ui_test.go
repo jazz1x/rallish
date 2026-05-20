@@ -144,6 +144,35 @@ func TestSelectOneNumeric(t *testing.T) {
 	}
 }
 
+func TestReaderSharedAcrossPrompts(t *testing.T) {
+	// Regression: a Theme reused for multiple prompts in a wizard must
+	// keep its bufio buffer alive across calls. Two Ask calls + one
+	// Confirm call back-to-back must each see their own line.
+	th, _, _ := newTestTheme(false)
+	th.In = strings.NewReader("first\nsecond\ny\n")
+	a, err := th.Ask("q1?", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a != "first" {
+		t.Errorf("first Ask: want first, got %q", a)
+	}
+	b, err := th.Ask("q2?", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b != "second" {
+		t.Errorf("second Ask: want second, got %q", b)
+	}
+	ok, err := th.Confirm("q3?", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Errorf("Confirm should have read 'y'")
+	}
+}
+
 func TestSelectOneEnterUsesDefault(t *testing.T) {
 	th, _, _ := newTestTheme(false)
 	th.In = strings.NewReader("\n")

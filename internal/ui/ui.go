@@ -85,6 +85,12 @@ const (
 // Theme controls how ui.* helpers render. The zero value is safe and
 // auto-detects color support against os.Stdout. Build a Theme with
 // [New] (recommended) or assign directly.
+//
+// Theme is **not** safe for concurrent use: prompt helpers
+// ([Theme.Ask], [Theme.Confirm], [Theme.SelectOne]) share a lazily-
+// initialised bufio reader to keep buffered input across calls. A CLI
+// wizard runs sequentially, so this is fine in practice — but if you
+// truly need parallel prompts, give each goroutine its own Theme.
 type Theme struct {
 	// Out is the writer for normal output. Defaults to os.Stdout.
 	Out io.Writer
