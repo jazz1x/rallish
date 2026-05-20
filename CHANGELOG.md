@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`internal/ui` — CLI presentation SSOT.** Color tokens
+  (info / success / warn / error / dim / prompt / accent / heading),
+  PyClack glyphs (`◇ ✓ ■ ⚠ ◆ └ • → │`), prompt / confirm / numeric
+  select helpers, and a tiny aligned-column Table renderer. Color
+  auto-disables under `NO_COLOR`, `TERM=dumb`, or when stdout is not a
+  TTY. Pipe / CI output stays plain ASCII (regression-tested).
+- **`rallish config` command group.** `list` (table view of all keys
+  with current value + source), `get <key>`, `set <key> <value>` (with
+  enum validation for `wait_mode`, `telemetry`, `coding_cli`), `path`,
+  `edit` (opens `$EDITOR` after lazily seeding `~/.rallish/config.yaml`
+  with defaults). Schema lives in `internal/config`.
+- **Compact bootstrap wizard.** `rallish bootstrap` is now a 4-step,
+  one-screen interactive flow (skill install → config wizard → summary
+  → daemon check) that asks for the three most-asked-about settings
+  (default preset, coding-CLI vendor, wait mode). `--yes` skips prompts
+  for CI; `--skip-skill` / `--skip-config` skip individual phases.
+- **`rallish add` interactive picker.** Bare `rallish add` (no args)
+  walks the user through type → name → scope, npx-style.
+- **Grouped root help.** `rallish --help` now sorts commands under
+  Setup / Rally / Manage / System headers; `rallish` (no args) prints
+  a compact 4-line hint banner. `--version` (cobra) added.
+- **`rallish doctor` view.** New structured `doctor.Inspect()` API
+  returns typed `Check` records; the CLI renders them with glyphs.
+- **`scripts/check-no-raw-ANSI.sh` guardrail** + lefthook hook — fails
+  the commit if a `\x1b[` escape lands outside `internal/ui`.
+
 ## [0.2.1] - 2026-05-18
 
 ### Changed
