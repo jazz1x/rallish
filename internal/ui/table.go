@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // Table is a tiny aligned-column printer for the CLI.
@@ -58,12 +59,38 @@ func (t *Theme) Render(table Table) {
 	}
 }
 
-// visualWidth returns the column count for s, treating ANSI escapes
-// as zero-width. Multi-byte glyphs count as 1 (good enough for our
-// short labels).
+// visualWidth returns the terminal column count for s. ANSI escapes
+// are treated as zero-width; East-Asian wide characters (Hangul, CJK
+// ideographs, Hiragana, Katakana, fullwidth forms) are counted as 2
+// cells to match how most terminals render them. ASCII and other
+// narrow characters count as 1.
 func visualWidth(s string) int {
 	clean := stripANSI(s)
-	return len([]rune(clean))
+	w := 0
+	for _, r := range clean {
+		w += runeWidth(r)
+	}
+	return w
+}
+
+// runeWidth returns 2 for East-Asian wide / fullwidth runes and 1 for
+// the rest. Zero-width control chars are folded to 1 (we don't expect
+// them in CLI table cells; ANSI is already stripped upstream).
+func runeWidth(r rune) int {
+	switch {
+	case r < 0x80:
+		return 1
+	case unicode.Is(unicode.Hangul, r),
+		unicode.Is(unicode.Han, r),
+		unicode.Is(unicode.Hiragana, r),
+		unicode.Is(unicode.Katakana, r):
+		return 2
+	case r >= 0xFF00 && r <= 0xFFEF: // fullwidth forms
+		return 2
+	case r >= 0x2E80 && r <= 0x303E: // CJK radicals + symbols
+		return 2
+	}
+	return 1
 }
 
 func padRight(s string, w int) string {

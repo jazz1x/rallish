@@ -71,6 +71,47 @@ func TestKv(t *testing.T) {
 	}
 }
 
+func TestVisualWidth_CJKCountsAsTwo(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"abc", 3},
+		{"랠리", 4},                // 2 hangul × 2
+		{"테스트", 6},               // 3 hangul × 2
+		{"テスト", 6},               // 3 katakana × 2
+		{"漢字", 4},                // 2 han × 2
+		{"hi랠리", 6},              // 2 ascii + 2 hangul × 2
+		{"\x1b[32mok\x1b[0m", 2}, // ANSI stripped
+	}
+	for _, c := range cases {
+		if got := visualWidth(c.in); got != c.want {
+			t.Errorf("visualWidth(%q) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+func TestTable_CJKHeaderAligns(t *testing.T) {
+	th, out, _ := newTestTheme(false)
+	th.Render(Table{
+		Headers: []string{"키", "값"},
+		Rows: [][]string{
+			{"preset", "solo-ralph"},
+			{"랠리", "ok"},
+		},
+	})
+	// Keep trailing whitespace — alignment relies on it. Drop the
+	// final empty line that Fprintln leaves after the last row.
+	raw := strings.TrimSuffix(out.String(), "\n")
+	lines := strings.Split(raw, "\n")
+	w := visualWidth(lines[0])
+	for i, l := range lines {
+		if got := visualWidth(l); got != w {
+			t.Errorf("line %d width %d != header width %d (%q)", i, got, w, l)
+		}
+	}
+}
+
 func TestTableAligns(t *testing.T) {
 	th, out, _ := newTestTheme(false)
 	th.Render(Table{
