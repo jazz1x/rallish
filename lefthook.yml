@@ -14,6 +14,10 @@ pre-commit:
     go-lint:
       run: golangci-lint run --timeout=5m
       fail_text: "Linting failed. Please fix linting issues before committing."
+    no-raw-ansi:
+      glob: "*.go"
+      run: bash scripts/check-no-raw-ansi.sh
+      fail_text: "Raw ANSI escape detected outside internal/ui. Use ui.Theme instead."
 
 # Reject commit messages that don't use a conventional-commits prefix (see
 # AGENTS.md §Commit Messages). Merge/Revert messages from git are allowed.
