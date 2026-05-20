@@ -148,6 +148,22 @@ func TestLoad_MalformedYAML_ReturnsError(t *testing.T) {
 	require.Contains(t, err.Error(), "parse config")
 }
 
+func TestSave_FileMode_IsRestrictive(t *testing.T) {
+	// config.yaml may hold sensitive future fields (api keys, tokens);
+	// on-disk mode must be 0o600 — owner read/write only.
+	withTempHome(t)
+	require.NoError(t, Save(Defaults()))
+	path, err := Path()
+	require.NoError(t, err)
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	// On Windows the os.WriteFile mode bits are ignored; gate the
+	// assertion to Unix to keep cross-platform CI green.
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("config.yaml mode = %o, want 0o600", info.Mode().Perm())
+	}
+}
+
 func TestSave_AtomicTempIsCleaned(t *testing.T) {
 	withTempHome(t)
 	cfg := Defaults()
