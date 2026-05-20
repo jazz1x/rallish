@@ -5,12 +5,20 @@
 ## Build & Test
 
 ```bash
-make check   # go vet + golangci-lint + go test -race
-make build   # go build -o dist/rallish
-make test    # go test -race ./...
+make check-all  # gofmt + go vet + go test -race + golangci-lint + no-raw-ansi (CI parity, recommended)
+make check      # subset — go vet + golangci-lint + go test -race
+make build      # go build -o dist/rallish
+make test       # go test -race ./...
 ```
 
-All commits must pass `lefthook run pre-commit` (go-fmt, go-vet, go-test -race, go-lint).
+`make check-all` is the single source of truth for "is this branch
+shippable" — it mirrors the GitHub Actions gate exactly (including the
+pinned `golangci-lint v2.12.2` from `.toolchain/bin/`). Run it before
+every push. Lefthook is the same gate set, but only fires if lefthook
+itself is on `$PATH` — `make check-all` works everywhere.
+
+All commits must pass `make check-all` (and, if installed, `lefthook
+run pre-commit`).
 
 ## Project Layout
 
@@ -32,6 +40,8 @@ All commits must pass `lefthook run pre-commit` (go-fmt, go-vet, go-test -race, 
 | `internal/safepath/` | Path-traversal guards for user-supplied paths |
 | `internal/scratch/` | Rolling scratchpad with compaction |
 | `internal/session/` | In-memory session store |
+| `internal/ui/` | CLI presentation SSOT — color tokens, glyphs, prompts, tables. ALL user-facing CLI output goes through here. |
+| `internal/config/` | `~/.rallish/config.yaml` schema + Get / Set / Save / Resolve. |
 | `pkg/contract/` | Public types (A2A, Budget, Session, Rally) |
 | `skills/` | Symlink → `internal/skills/`. Vendor-neutral Agent Skills discovery path |
 | `internal/skills/` | Canonical SKILL.md sources (embedded into the rallish binary via `go:embed`); installed globally by `rallish bootstrap` |
@@ -47,6 +57,18 @@ and may break without notice.
 - No `fmt.Println` / `fmt.Printf` in library code (use `logx`).
 - Error wrapping: `fmt.Errorf("...: %w", err)`.
 - Context propagation: always pass `context.Context` as the first arg.
+
+## CLI Presentation
+
+User-facing CLI output is the responsibility of `internal/ui`. Never
+write raw ANSI escapes elsewhere — `scripts/check-no-raw-ansi.sh`
+enforces this in pre-commit. Add new colors / glyphs / prompt helpers
+to the `ui` package, not to the caller. The `Theme` is single-goroutine
+by design (lazily-cached bufio reader for multi-prompt wizards).
+
+Plain `fmt.Fprintln` / `fmt.Fprintf` for cases that need no theming
+(e.g. `config get` printing a raw value) must use `_, _ = fmt.Fprintln(...)`
+or capture the return; errcheck is enforced.
 
 ## A2A Protocol
 

@@ -323,7 +323,6 @@ func TestRallyNewWithRepo(t *testing.T) {
 	}
 }
 
-
 // TestRallyNewWithBadRepo tests that runRallyNew rejects a non-existent repo path.
 func TestRallyNewWithBadRepo(t *testing.T) {
 	homeDir := t.TempDir()

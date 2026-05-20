@@ -99,8 +99,19 @@ npx skills add jazz1x/rallish
 ## 빠른 시작
 
 ```bash
-# 환경 점검 (어댑터 존재 + 데몬 도달성 보고)
+# 한 번에 셋업 (스킬 설치 + 3개 질문)
+./dist/rallish bootstrap
+
+# 환경 점검 (어댑터 + 데몬을 글리프 상태 목록으로 출력)
 ./dist/rallish doctor
+
+# 설정 확인/변경 (~/.rallish/config.yaml)
+./dist/rallish config list
+./dist/rallish config set wait_mode block
+./dist/rallish config edit              # $EDITOR 실행
+
+# 인터랙티브 컴포넌트 picker (npx 스타일)
+./dist/rallish add
 
 # 내장 어댑터/프리셋 목록
 ./dist/rallish add --list

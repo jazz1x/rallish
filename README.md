@@ -100,8 +100,19 @@ skill bundle and verifies the daemon.
 ## Quickstart
 
 ```bash
-# Environment check (reports adapter presence + daemon reachability)
+# One-shot setup wizard (installs the skill + asks 3 short questions)
+./dist/rallish bootstrap
+
+# Environment check (renders adapters + daemon as a glyph status list)
 ./dist/rallish doctor
+
+# Inspect or edit settings (~/.rallish/config.yaml)
+./dist/rallish config list
+./dist/rallish config set wait_mode block
+./dist/rallish config edit              # opens $EDITOR
+
+# Interactive component picker (npx-style)
+./dist/rallish add
 
 # List built-in adapters and presets
 ./dist/rallish add --list
@@ -151,6 +162,24 @@ curl -X POST http://127.0.0.1:$(cat ~/.rallish/port)/a2a \
 ```
 
 Per-turn requests and responses land in `~/.rallish/sessions/<id>/log.jsonl`.
+
+## CLI surface
+
+`rallish --help` groups commands into four sections. Output uses
+PyClack-style glyphs (◇ info, ✓ ok, ⚠ warn, ■ err, ◆ prompt, └ footer)
+and auto-falls-back to plain ASCII when `$NO_COLOR` is set or stdout is
+not a TTY.
+
+| Group | Commands |
+|---|---|
+| **Setup** | `bootstrap` (one-shot wizard) · `skill install` |
+| **Rally** | `rally` (live baton) · `squash` (headless preset) |
+| **Manage** | `add` (interactive picker · `--list` for catalog) · `config` (`list` / `get` / `set` / `path` / `edit`) |
+| **System** | `doctor` (status table) · `daemon` · `version` |
+
+`rallish bootstrap` fits on one screen by design — the wizard never
+exceeds ~12 lines so coding-CLI session banners (skills discography,
+trigger lists) stay visible after the install.
 
 ## Usage
 

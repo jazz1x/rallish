@@ -77,4 +77,3 @@ func TestSocketRemove(t *testing.T) {
 	_, err = os.Stat(s.Path)
 	require.True(t, os.IsNotExist(err), "expected file to be removed")
 }
-

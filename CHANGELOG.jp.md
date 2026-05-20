@@ -7,6 +7,34 @@
 
 ## [未発表]
 
+### 追加
+
+- **`internal/ui` — CLI 出力の SSOT。** カラー トークン
+  (info / success / warn / error / dim / prompt / accent / heading)、
+  PyClack グリフ (`◇ ✓ ■ ⚠ ◆ └ • → │`)、プロンプト / confirm / 数値
+  セレクト ヘルパー、整列テーブル レンダラー。`NO_COLOR` / `TERM=dumb`
+  / stdout が TTY でない場合に自動でカラーを無効化します（回帰テストで
+  ロック）。
+- **`rallish config` コマンド グループ。** `list`（全キー値とソースの
+  テーブル）、`get <key>`、`set <key> <value>`（`wait_mode` / `telemetry`
+  / `coding_cli` の列挙型検証）、`path`、`edit`（`~/.rallish/config.yaml`
+  にデフォルトを書いてから `$EDITOR` を起動）。スキーマは
+  `internal/config` にあります。
+- **コンパクトな bootstrap ウィザード。** `rallish bootstrap` を 4ステップ
+  1画面のインタラクティブ フロー（skill install → config ウィザード →
+  サマリー → daemon チェック）に書き換え、頻出 3 設定（default preset、
+  coding-CLI ベンダー、wait mode）だけを尋ねます。`--yes` は CI 用、
+  `--skip-skill` / `--skip-config` は個別ステップのスキップ。
+- **`rallish add` インタラクティブ ピッカー。** 引数なしの `rallish add`
+  は npx スタイル type → name → scope ウィザードを起動します。
+- **グループ化された root help。** `rallish --help` がコマンドを
+  Setup / Rally / Manage / System の見出しで整理します。引数なしの
+  `rallish` は 4 行のヒント バナーを出力します。cobra `--version` を追加。
+- **`rallish doctor` ビュー。** 構造化された `doctor.Inspect()` API が
+  typed `Check` レコードを返し、CLI がグリフでレンダリングします。
+- **`scripts/check-no-raw-ANSI.sh` ガードレール** + lefthook フック —
+  `internal/ui` の外で `\x1b[` エスケープが見つかればコミットを失敗させます。
+
 ## [0.2.1] - 2026-05-18
 
 ### 変更

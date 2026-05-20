@@ -30,8 +30,8 @@ func (s TaskState) IsTerminal() bool {
 
 // AgentCapability flags supported by the broker.
 type AgentCapability struct {
-	Streaming            bool `json:"streaming"`
-	PushNotifications    bool `json:"pushNotifications"`
+	Streaming              bool `json:"streaming"`
+	PushNotifications      bool `json:"pushNotifications"`
 	StateTransitionHistory bool `json:"stateTransitionHistory"`
 }
 
@@ -47,21 +47,21 @@ type AgentSkill struct {
 // AgentCard is the well-known discovery document for A2A clients.
 // Published at GET /.well-known/agent.json
 type AgentCard struct {
-	Name             string          `json:"name"`
-	Description      string          `json:"description"`
-	Version          string          `json:"version"`
-	URL              string          `json:"url"`
-	DocumentationURL string          `json:"documentationUrl,omitempty"`
-	Capabilities     AgentCapability `json:"capabilities"`
-	Skills           []AgentSkill    `json:"skills"`
-	DefaultInputModes  []string `json:"defaultInputModes"`
-	DefaultOutputModes []string `json:"defaultOutputModes"`
+	Name               string          `json:"name"`
+	Description        string          `json:"description"`
+	Version            string          `json:"version"`
+	URL                string          `json:"url"`
+	DocumentationURL   string          `json:"documentationUrl,omitempty"`
+	Capabilities       AgentCapability `json:"capabilities"`
+	Skills             []AgentSkill    `json:"skills"`
+	DefaultInputModes  []string        `json:"defaultInputModes"`
+	DefaultOutputModes []string        `json:"defaultOutputModes"`
 }
 
 // A2APart is a polymorphic message part (text or structured data).
 type A2APart struct {
-	Type string `json:"type"` // "text" | "data"
-	Text string `json:"text,omitempty"`
+	Type string         `json:"type"` // "text" | "data"
+	Text string         `json:"text,omitempty"`
 	Data map[string]any `json:"data,omitempty"`
 }
 
@@ -122,4 +122,3 @@ type JSONRPCError struct {
 	Message string `json:"message"`
 	Data    any    `json:"data,omitempty"`
 }
-

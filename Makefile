@@ -1,4 +1,4 @@
-.PHONY: build test check run lint tidy bench setup-hooks install-skill release-patch release-minor release-major release-dry-run
+.PHONY: build test check check-all run lint tidy bench setup-hooks install-skill release-patch release-minor release-major release-dry-run
 
 VERSION ?= $(shell cat VERSION 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -31,6 +31,9 @@ check:
 	go vet ./...
 	@PATH="$(PWD)/.toolchain/go/bin:$(PWD)/.toolchain/bin:$$PATH" "$(GOLANGCI_LINT)" run --timeout=5m
 	go test ./... -race
+
+check-all:
+	@bash scripts/check-all.sh
 
 run: build
 	./dist/rallish

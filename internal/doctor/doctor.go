@@ -4,6 +4,7 @@ package doctor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -19,6 +20,131 @@ import (
 
 type pathReporter interface {
 	Path() string
+}
+
+// Status enumerates the outcome of a single check.
+type Status string
+
+// Status values returned by [Inspect] on each [Check].
+const (
+	StatusOK   Status = "ok"
+	StatusWarn Status = "warn"
+	StatusFail Status = "fail"
+	StatusInfo Status = "info"
+)
+
+// Check is a structured result for a single doctor probe — easier to
+// render in a TUI than scraping slog output.
+type Check struct {
+	Name   string
+	Status Status
+	Detail string
+}
+
+// Report is the structured result of [Inspect].
+type Report struct {
+	Checks []Check
+}
+
+// Inspect runs all doctor probes and returns a structured report.
+// Errors per-probe are surfaced as Status fields on individual checks;
+// only a totally fatal condition (e.g. impossible home directory)
+// surfaces as the returned error.
+func Inspect(ctx context.Context, homeDir string) (Report, error) {
+	rep := Report{}
+	if homeDir == "" {
+		if h, err := os.UserHomeDir(); err == nil {
+			homeDir = h
+		}
+	}
+	if homeDir == "" {
+		return rep, fmt.Errorf("could not determine home directory")
+	}
+
+	// Daemon check
+	rep.Checks = append(rep.Checks, daemonCheck(ctx, homeDir))
+
+	// Adapters
+	if c, err := claude.New(); err != nil {
+		rep.Checks = append(rep.Checks, Check{
+			Name: "adapter:claude", Status: StatusInfo,
+			Detail: "not found on PATH (install Claude Code or Claude CLI)",
+		})
+	} else {
+		rep.Checks = append(rep.Checks, adapterCheck("adapter:claude", c))
+	}
+	if k, err := kimi.New(); err != nil {
+		rep.Checks = append(rep.Checks, Check{
+			Name: "adapter:kimi", Status: StatusInfo,
+			Detail: "not found on PATH (install kimi CLI to enable)",
+		})
+	} else {
+		rep.Checks = append(rep.Checks, adapterCheck("adapter:kimi", k))
+	}
+
+	return rep, nil
+}
+
+type adapterIface interface {
+	Check() error
+	pathReporter
+}
+
+func adapterCheck(name string, a adapterIface) Check {
+	if err := a.Check(); err != nil {
+		return Check{Name: name, Status: StatusFail, Detail: err.Error()}
+	}
+	return Check{Name: name, Status: StatusOK, Detail: a.Path()}
+}
+
+func daemonCheck(ctx context.Context, homeDir string) Check {
+	sockDir := filepath.Join(homeDir, ".rallish")
+	pointer := filepath.Join(sockDir, "socket")
+	pointerBytes, perr := os.ReadFile(pointer) //nolint:gosec // well-known path
+	socketPath := strings.TrimSpace(string(pointerBytes))
+
+	if perr == nil && socketPath != "" {
+		if uerr := safepath.UnderRoot(socketPath, sockDir); uerr != nil {
+			return Check{Name: "daemon", Status: StatusWarn,
+				Detail: fmt.Sprintf("socket pointer escapes rallish home: %v", uerr)}
+		}
+		safePath, cerr := safepath.Clean(socketPath)
+		if cerr != nil {
+			return Check{Name: "daemon", Status: StatusWarn, Detail: cerr.Error()}
+		}
+		info, serr := os.Stat(safePath) //nolint:gosec // validated above
+		if serr != nil {
+			return Check{Name: "daemon", Status: StatusWarn,
+				Detail: fmt.Sprintf("pointer present but socket missing: %v", serr)}
+		}
+		if info.Mode()&fs.ModeSocket == 0 {
+			return Check{Name: "daemon", Status: StatusWarn,
+				Detail: "pointer references non-socket file"}
+		}
+		dialCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+		defer cancel()
+		s := ipc.Socket{Path: safePath}
+		conn, derr := s.Dial(dialCtx)
+		if derr != nil {
+			return Check{Name: "daemon", Status: StatusFail,
+				Detail: fmt.Sprintf("not reachable: %v", derr)}
+		}
+		_ = conn.Close()
+		return Check{Name: "daemon", Status: StatusOK,
+			Detail: "reachable via unix socket"}
+	}
+
+	if errors.Is(perr, fs.ErrNotExist) || perr == nil {
+		portFile := filepath.Join(sockDir, "port")
+		if _, err := os.Stat(portFile); err == nil {
+			return Check{Name: "daemon", Status: StatusOK,
+				Detail: "reachable via port fallback"}
+		}
+		return Check{Name: "daemon", Status: StatusInfo,
+			Detail: "not running — will auto-spawn on `rally new`"}
+	}
+	return Check{Name: "daemon", Status: StatusWarn,
+		Detail: fmt.Sprintf("could not read socket pointer: %v", perr)}
 }
 
 // Run performs health checks for all known adapters and the daemon IPC layer.

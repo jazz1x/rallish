@@ -103,8 +103,19 @@ npx skills add jazz1x/rallish
 ## クイックスタート
 
 ```bash
-# 環境チェック (アダプター有無 + デーモン到達性を報告)
+# 1コマンドのセットアップ ウィザード（スキル + 3 つの質問）
+./dist/rallish bootstrap
+
+# 環境チェック（アダプター + デーモンをグリフ ステータスで表示）
 ./dist/rallish doctor
+
+# 設定の確認 / 変更（~/.rallish/config.yaml）
+./dist/rallish config list
+./dist/rallish config set wait_mode block
+./dist/rallish config edit              # $EDITOR を起動
+
+# インタラクティブな コンポーネント ピッカー（npx スタイル）
+./dist/rallish add
 
 # 同梱アダプター/プリセット一覧
 ./dist/rallish add --list

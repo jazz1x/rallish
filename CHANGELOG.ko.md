@@ -7,6 +7,33 @@
 
 ## [미발표]
 
+### 추가됨
+
+- **`internal/ui` — CLI 출력 SSOT.** 컬러 토큰
+  (info / success / warn / error / dim / prompt / accent / heading),
+  PyClack 글리프 (`◇ ✓ ■ ⚠ ◆ └ • → │`), 프롬프트 / confirm / 숫자
+  선택 헬퍼, 그리고 컬럼 정렬 Table 렌더러를 추가했습니다. `NO_COLOR`,
+  `TERM=dumb` 또는 stdout 이 TTY 가 아닌 경우 자동으로 컬러를
+  비활성화합니다 (회귀 테스트 포함).
+- **`rallish config` 명령 그룹.** `list` (모든 키의 값 + source 테이블),
+  `get <key>`, `set <key> <value>` (`wait_mode` / `telemetry` /
+  `coding_cli` 열거형 검증), `path`, `edit` (`~/.rallish/config.yaml`
+  기본값 시드 후 `$EDITOR` 실행). 스키마는 `internal/config` 에 있습니다.
+- **간결한 부트스트랩 위저드.** `rallish bootstrap` 이 4단계 1화면
+  인터랙티브 플로우 (skill install → config 위저드 → 요약 → daemon
+  체크) 로 재작성되었습니다. 자주 묻는 3가지 설정 (기본 preset,
+  coding-CLI 벤더, wait mode) 만 묻습니다. `--yes` 는 CI 용,
+  `--skip-skill` / `--skip-config` 은 개별 단계 건너뛰기.
+- **`rallish add` 인터랙티브 picker.** 인자 없는 `rallish add` 는 npx
+  스타일 type → name → scope 위저드를 실행합니다.
+- **그룹화된 루트 help.** `rallish --help` 가 Setup / Rally / Manage
+  / System 헤더로 명령을 분류합니다; 인자 없는 `rallish` 는 4줄 힌트
+  배너를 출력합니다. cobra `--version` 추가.
+- **`rallish doctor` 뷰.** 구조화된 `doctor.Inspect()` API 가 typed
+  `Check` 레코드를 반환하며 CLI 는 글리프로 렌더링합니다.
+- **`scripts/check-no-raw-ANSI.sh` 가드레일** + lefthook 훅 —
+  `internal/ui` 외부에 `\x1b[` 이스케이프가 들어가면 커밋을 실패시킵니다.
+
 ## [0.2.1] - 2026-05-18
 
 ### 변경됨

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"embed"
 	"fmt"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/jazz1x/rallish/internal/preset"
+	"github.com/jazz1x/rallish/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -45,38 +45,44 @@ func (o *AddOptions) out() io.Writer {
 	return os.Stdout
 }
 
-func (o *AddOptions) in() io.Reader {
-	if o.stdin != nil {
-		return o.stdin
+// theme constructs a ui.Theme bound to the options' streams. Tests
+// inject buffers via stdout/stdin and get plain output for free.
+func (o *AddOptions) theme() *ui.Theme {
+	t := ui.New()
+	if o.stdout != nil {
+		t.Out = o.stdout
+		t.ErrOut = o.stdout
+		t.Color = false
 	}
-	return os.Stdin
+	if o.stdin != nil {
+		t.In = o.stdin
+	}
+	return t
 }
 
 // AddCmd returns the `add` cobra command.
 func AddCmd() *cobra.Command {
 	var opts AddOptions
 	cmd := &cobra.Command{
-		Use:   "add <type> <name>",
+		Use:   "add [type] [name]",
 		Short: "Install adapters, presets, or skills",
 		Long: `Install rallish components.
 
 Supported types: adapter, preset, skill.
 
 Examples:
-  rallish add --list
-  rallish add preset solo-ralph
-  rallish add adapter claude --global
-  rallish add preset my-review --from https://example.com/presets/my-review.yaml`,
+  rallish add                                  # interactive picker
+  rallish add --list                           # list built-ins
+  rallish add preset solo-ralph                # install a built-in preset
+  rallish add adapter claude --global          # install for all projects
+  rallish add preset my-review --from URL      # install from a URL`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			list, _ := cmd.Flags().GetBool("list")
-			if list {
-				if len(args) > 0 {
-					return fmt.Errorf("--list does not take arguments")
-				}
-				return nil
+			if list && len(args) > 0 {
+				return fmt.Errorf("--list does not take arguments")
 			}
-			if len(args) != 2 {
-				return fmt.Errorf("requires exactly 2 arguments (type and name)")
+			if !list && len(args) != 0 && len(args) != 2 {
+				return fmt.Errorf("requires 0 args (interactive) or 2 args (type name)")
 			}
 			return nil
 		},
@@ -84,6 +90,9 @@ Examples:
 			list, _ := cmd.Flags().GetBool("list")
 			if list {
 				return listComponents(opts.out())
+			}
+			if len(args) == 0 {
+				return runAddInteractive(cmd.Context(), opts)
 			}
 			return runAdd(cmd.Context(), opts, args)
 		},
@@ -95,8 +104,53 @@ Examples:
 	return cmd
 }
 
+// runAddInteractive walks the user through picking a type and name
+// from the built-in catalog. Used when `rallish add` is invoked with
+// no positional arguments.
+func runAddInteractive(ctx context.Context, opts AddOptions) error {
+	t := opts.theme()
+
+	t.Heading("rallish add — pick a component to install")
+	t.Detail("Press enter to accept the highlighted choice. Ctrl-C to abort.")
+
+	typeChoices := []string{"preset", "adapter"}
+	typ, _, err := t.SelectOne("Component type?", typeChoices, 0)
+	if err != nil {
+		return err
+	}
+
+	all, err := loadAllBuiltIns()
+	if err != nil {
+		return err
+	}
+	var names []string
+	for _, a := range all {
+		if a.Type == typ {
+			names = append(names, a.Name)
+		}
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		return fmt.Errorf("no built-in %ss found", typ)
+	}
+
+	picked, _, err := t.SelectOne(fmt.Sprintf("Which %s?", typ), names, 0)
+	if err != nil {
+		return err
+	}
+
+	scope, _, err := t.SelectOne("Install scope?",
+		[]string{"local (./.rallish)", "global (~/.rallish)"}, 0)
+	if err != nil {
+		return err
+	}
+	opts.Global = strings.HasPrefix(scope, "global")
+
+	return runAdd(ctx, opts, []string{typ, picked})
+}
+
 func runAdd(ctx context.Context, opts AddOptions, args []string) error {
-	w := opts.out()
+	t := opts.theme()
 	typ := args[0]
 	name := args[1]
 
@@ -111,14 +165,13 @@ func runAdd(ctx context.Context, opts AddOptions, args []string) error {
 	if err != nil {
 		return err
 	}
-
 	targetPath := filepath.Join(targetDir, name+".yaml")
 
 	var data []byte
 	var usage string
 
 	if opts.From != "" {
-		_, _ = fmt.Fprintf(w, "→ Download from %s\n", opts.From)
+		t.Info("Download from %s", opts.From)
 		data, err = downloadURL(ctx, opts.From)
 		if err != nil {
 			return fmt.Errorf("download: %w", err)
@@ -131,10 +184,9 @@ func runAdd(ctx context.Context, opts AddOptions, args []string) error {
 		if asset == nil {
 			return fmt.Errorf("no built-in %s named %q (use --from to install from a URL)", typ, name)
 		}
-
-		_, _ = fmt.Fprintf(w, "→ Found built-in %s: %s\n", typ, name)
+		t.Info("Found built-in %s: %s", typ, name)
 		if asset.Description != "" {
-			_, _ = fmt.Fprintf(w, "  Description: %s\n", asset.Description)
+			t.Detail("%s", asset.Description)
 		}
 
 		data, err = loadBuiltInData(typ, name)
@@ -143,27 +195,25 @@ func runAdd(ctx context.Context, opts AddOptions, args []string) error {
 		}
 	}
 
+	exists := false
 	if _, err := os.Stat(targetPath); err == nil {
-		if !opts.Yes {
-			ok, err := confirm(w, opts.in(), fmt.Sprintf("→ Overwrite %s?", targetPath))
-			if err != nil {
-				return err
-			}
-			if !ok {
-				_, _ = fmt.Fprintln(w, "Cancelled.")
-				return nil
-			}
+		exists = true
+	}
+
+	if !opts.Yes {
+		var msg string
+		if exists {
+			msg = fmt.Sprintf("Overwrite %s?", targetPath)
+		} else {
+			msg = fmt.Sprintf("Install to %s?", targetPath)
 		}
-	} else {
-		if !opts.Yes {
-			ok, err := confirm(w, opts.in(), fmt.Sprintf("→ Install to %s?", targetPath))
-			if err != nil {
-				return err
-			}
-			if !ok {
-				_, _ = fmt.Fprintln(w, "Cancelled.")
-				return nil
-			}
+		ok, err := t.Confirm(msg, true)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			_, _ = fmt.Fprintln(opts.out(), "Cancelled.")
+			return nil
 		}
 	}
 
@@ -183,9 +233,9 @@ func runAdd(ctx context.Context, opts AddOptions, args []string) error {
 		usage = fmt.Sprintf("Skill %q installed", name)
 	}
 
-	_, _ = fmt.Fprintf(w, "✓ Installed %s %s to %s\n", typ, name, targetPath)
+	t.OK("Installed %s %s to %s", typ, name, targetPath)
 	if usage != "" {
-		_, _ = fmt.Fprintf(w, "  Usage: %s\n", usage)
+		t.Detail("Usage: %s", usage)
 	}
 	return nil
 }
@@ -225,34 +275,10 @@ func resolveTargetDir(typ string, global bool) (string, error) {
 }
 
 func listComponents(w io.Writer) error {
-	var rows []addAsset
-
-	// List presets
-	presets, err := preset.LoadEmbedded()
+	rows, err := loadAllBuiltIns()
 	if err != nil {
-		return fmt.Errorf("load presets: %w", err)
+		return err
 	}
-	for name, p := range presets {
-		rows = append(rows, addAsset{
-			Name:        name,
-			Type:        "preset",
-			Description: p.Description,
-		})
-	}
-
-	// List adapters
-	adapters, err := loadAdapters()
-	if err != nil {
-		return fmt.Errorf("load adapters: %w", err)
-	}
-	for name, a := range adapters {
-		rows = append(rows, addAsset{
-			Name:        name,
-			Type:        "adapter",
-			Description: a.Description,
-		})
-	}
-
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].Type != rows[j].Type {
 			return rows[i].Type < rows[j].Type
@@ -260,11 +286,45 @@ func listComponents(w io.Writer) error {
 		return rows[i].Name < rows[j].Name
 	})
 
-	_, _ = fmt.Fprintln(w, "TYPE      NAME         DESCRIPTION")
-	for _, r := range rows {
-		_, _ = fmt.Fprintf(w, "%-9s %-12s %s\n", r.Type, r.Name, r.Description)
+	t := ui.New()
+	t.Out = w
+	t.ErrOut = w
+	// Detect color from the underlying writer (still works for *os.File).
+	t.Color = false
+	if f, ok := w.(*os.File); ok {
+		stat, err := f.Stat()
+		if err == nil && stat.Mode()&os.ModeCharDevice != 0 {
+			if _, no := os.LookupEnv("NO_COLOR"); !no && os.Getenv("TERM") != "dumb" {
+				t.Color = true
+			}
+		}
 	}
+
+	table := ui.Table{Headers: []string{"TYPE", "NAME", "DESCRIPTION"}}
+	for _, r := range rows {
+		table.Rows = append(table.Rows, []string{r.Type, r.Name, r.Description})
+	}
+	t.Render(table)
 	return nil
+}
+
+func loadAllBuiltIns() ([]addAsset, error) {
+	var rows []addAsset
+	presets, err := preset.LoadEmbedded()
+	if err != nil {
+		return nil, fmt.Errorf("load presets: %w", err)
+	}
+	for name, p := range presets {
+		rows = append(rows, addAsset{Name: name, Type: "preset", Description: p.Description})
+	}
+	adapters, err := loadAdapters()
+	if err != nil {
+		return nil, fmt.Errorf("load adapters: %w", err)
+	}
+	for name, a := range adapters {
+		rows = append(rows, addAsset{Name: name, Type: "adapter", Description: a.Description})
+	}
+	return rows, nil
 }
 
 func findBuiltIn(typ, name string) (*addAsset, error) {
@@ -278,11 +338,7 @@ func findBuiltIn(typ, name string) (*addAsset, error) {
 		if !ok {
 			return nil, nil
 		}
-		return &addAsset{
-			Name:        name,
-			Type:        "preset",
-			Description: p.Description,
-		}, nil
+		return &addAsset{Name: name, Type: "preset", Description: p.Description}, nil
 	case "adapter":
 		adapters, err := loadAdapters()
 		if err != nil {
@@ -292,11 +348,7 @@ func findBuiltIn(typ, name string) (*addAsset, error) {
 		if !ok {
 			return nil, nil
 		}
-		return &addAsset{
-			Name:        name,
-			Type:        "adapter",
-			Description: a.Description,
-		}, nil
+		return &addAsset{Name: name, Type: "adapter", Description: a.Description}, nil
 	case "skill":
 		return nil, nil
 	default:
@@ -338,11 +390,7 @@ func loadAdapters() (map[string]addAsset, error) {
 			return nil, fmt.Errorf("parse adapter %q: %w", e.Name(), err)
 		}
 		name := strings.TrimSuffix(e.Name(), ".yaml")
-		out[name] = addAsset{
-			Name:        m.Name,
-			Type:        "adapter",
-			Description: m.Description,
-		}
+		out[name] = addAsset{Name: m.Name, Type: "adapter", Description: m.Description}
 	}
 	return out, nil
 }
@@ -361,24 +409,4 @@ func downloadURL(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
 	}
 	return io.ReadAll(resp.Body)
-}
-
-func confirm(w io.Writer, r io.Reader, msg string) (bool, error) {
-	_, _ = fmt.Fprintf(w, "%s [Y/n] ", msg)
-	br := bufio.NewReader(r)
-	line, err := br.ReadString('\n')
-	if err != nil {
-		if err == io.EOF {
-			if line == "" {
-				return false, nil
-			}
-		} else {
-			return false, err
-		}
-	}
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return true, nil
-	}
-	return strings.ToLower(line) == "y" || strings.ToLower(line) == "yes", nil
 }
