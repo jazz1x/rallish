@@ -40,8 +40,8 @@ func main() {
 		cli.RallyCmd(),
 		cli.AddCmd(),
 		cli.ConfigCmd(),
+		cli.BootstrapCmd(),
 		skillCmd(),
-		bootstrapCmd(),
 	)
 
 	exitCode := 0
@@ -144,55 +144,6 @@ func skillInstallCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&target, "target", "", "Install directory (default: ~/.claude/skills/rallish)")
 	return cmd
-}
-
-// bootstrapCmd returns the `bootstrap` command.
-func bootstrapCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "bootstrap",
-		Short: "Install the rallish skill and verify the daemon in one step",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			out := cmd.OutOrStdout()
-
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return fmt.Errorf("get home dir: %w", err)
-			}
-
-			skillDir := filepath.Join(home, ".claude", "skills", "rallish")
-
-			// 1. Install skill.
-			results, err := skills.Install(skillDir)
-			if err != nil {
-				return fmt.Errorf("install skill: %w", err)
-			}
-			for _, r := range results {
-				_, _ = fmt.Fprintf(out, "%s %s\n", r.Action, r.Path)
-			}
-
-			// 2. Run doctor.
-			if err := doctor.Run(cmd.Context(), home); err != nil {
-				// doctor surfaces issues via slog; treat non-nil as informational.
-				_, _ = fmt.Fprintf(out, "doctor: %v\n", err)
-			}
-
-			// 3. Determine daemon status for the summary block.
-			daemonStatus := "not running — will auto-spawn on next `rallish rally new`"
-			sockDir := filepath.Join(home, ".rallish")
-			pointerBytes, perr := os.ReadFile(filepath.Join(sockDir, "socket")) //nolint:gosec // well-known path
-			if perr == nil && len(pointerBytes) > 0 {
-				daemonStatus = "reachable"
-			} else if _, ferr := os.Stat(filepath.Join(sockDir, "port")); ferr == nil {
-				daemonStatus = "reachable"
-			}
-
-			_, _ = fmt.Fprintf(out, "\nBootstrap complete.\n")
-			_, _ = fmt.Fprintf(out, "- Skill installed at: %s\n", skillDir)
-			_, _ = fmt.Fprintf(out, "- Daemon: %s\n", daemonStatus)
-			_, _ = fmt.Fprintln(out, "- Next: open any project in Claude Code and say \"랠리보낼 준비해\" to start.")
-			return nil
-		},
-	}
 }
 
 func squashCmd() *cobra.Command {

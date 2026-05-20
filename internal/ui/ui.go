@@ -92,6 +92,11 @@ type Theme struct {
 	// In is the reader for prompts (kept here so tests can inject).
 	// Defaults to os.Stdin.
 	In io.Reader
+
+	// reader is a cached bufio-backed line reader wrapping In, used by
+	// Ask / Confirm / SelectOne. Cached so multiple prompts in one
+	// wizard don't lose buffered bytes between calls.
+	reader *bufioLineReader
 }
 
 // New returns a Theme bound to os.Stdin/Stdout/Stderr with color
@@ -291,3 +296,18 @@ func stripANSI(s string) string {
 
 // StripANSI is the public form of stripANSI (test/inspection use).
 func StripANSI(s string) string { return stripANSI(s) }
+
+// inputReader returns a single bufio-backed reader for prompt helpers.
+// It is allocated lazily so each Theme keeps any read-ahead buffer
+// across multiple Ask/Confirm/SelectOne calls — otherwise consecutive
+// prompts in the same wizard would lose lines that bufio buffered.
+func (t *Theme) inputReader() *bufioLineReader {
+	if t.reader == nil {
+		src := t.In
+		if src == nil {
+			src = os.Stdin
+		}
+		t.reader = newBufioLineReader(src)
+	}
+	return t.reader
+}

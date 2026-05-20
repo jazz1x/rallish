@@ -1,10 +1,8 @@
 package ui
 
 import (
-	"bufio"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 )
 
@@ -20,12 +18,7 @@ func (t *Theme) Ask(question, def string) (string, error) {
 	}
 	fmt.Fprintf(t.out(), "%s%s%s  %s%s ", openP, GlyphPrompt, closeP, question, hint)
 
-	in := t.In
-	if in == nil {
-		in = os.Stdin
-	}
-	br := bufio.NewReader(in)
-	line, err := br.ReadString('\n')
+	line, err := t.inputReader().readLine()
 	if err != nil && err != io.EOF {
 		return "", err
 	}
@@ -47,12 +40,7 @@ func (t *Theme) Confirm(question string, defaultYes bool) (bool, error) {
 	openD, closeD := t.styleANSI(StyleDim)
 	fmt.Fprintf(t.out(), "%s%s%s  %s %s(%s)%s ", openP, GlyphPrompt, closeP, question, openD, hint, closeD)
 
-	in := t.In
-	if in == nil {
-		in = os.Stdin
-	}
-	br := bufio.NewReader(in)
-	line, err := br.ReadString('\n')
+	line, err := t.inputReader().readLine()
 	if err != nil && err != io.EOF {
 		return false, err
 	}
@@ -86,12 +74,7 @@ func (t *Theme) SelectOne(question string, choices []string, defaultIdx int) (st
 	}
 	fmt.Fprintf(t.out(), "%s  pick (1-%d, enter=%d):%s ", openD, len(choices), defaultIdx+1, closeD)
 
-	in := t.In
-	if in == nil {
-		in = os.Stdin
-	}
-	br := bufio.NewReader(in)
-	line, err := br.ReadString('\n')
+	line, err := t.inputReader().readLine()
 	if err != nil && err != io.EOF {
 		return "", -1, err
 	}
