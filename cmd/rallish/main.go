@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -12,11 +13,27 @@ import (
 
 	"github.com/jazz1x/rallish/internal/buildinfo"
 	"github.com/jazz1x/rallish/internal/cli"
-	"github.com/jazz1x/rallish/internal/doctor"
 	"github.com/jazz1x/rallish/internal/skills"
+	"github.com/jazz1x/rallish/internal/ui"
 	"github.com/jazz1x/rallish/pkg/contract"
 	"github.com/spf13/cobra"
 )
+
+const rootLong = `rallish — agent-driven rally / squash playbook.
+
+A tiny coordinator that lets two coding-CLI agents take turns on the
+same problem (rally) or runs one preset headlessly (squash). Skills,
+adapters, and presets are bundled and installable via 'rallish add'.
+
+Quick start:
+  rallish bootstrap                # one-shot setup wizard
+  rallish add                      # interactive component picker
+  rallish config list              # see your settings
+  rallish doctor                   # check daemon + adapters
+
+For natural-language usage inside a coding-CLI, install the skill
+('rallish bootstrap' already does this) and say "랠리보낼 준비해" or
+"let's serve" in any project.`
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -25,23 +42,68 @@ func main() {
 	shutdown := make(chan struct{})
 	isDaemon := false
 
-	root := &cobra.Command{Use: "rallish", SilenceUsage: true, SilenceErrors: true}
+	root := &cobra.Command{
+		Use:           "rallish",
+		Short:         "Agent-driven rally / squash playbook",
+		Long:          rootLong,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Version:       buildinfo.String(),
+		// Friendlier no-arg behavior: print compact help + hint instead of usage walls.
+		Run: func(cmd *cobra.Command, _ []string) {
+			t := ui.New()
+			t.Heading("rallish")
+			t.Detail("agent-driven rally / squash playbook  ·  %s", buildinfo.Version())
+			fmt.Fprintln(cmd.OutOrStdout())
+			t.Info("setup:    rallish bootstrap")
+			t.Info("install:  rallish add (interactive)")
+			t.Info("config:   rallish config list")
+			t.Info("verify:   rallish doctor")
+			fmt.Fprintln(cmd.OutOrStdout())
+			t.Detail("for a full command tree, run: rallish --help")
+		},
+	}
+	root.SetVersionTemplate("{{.Version}}\n")
+
+	// Group commands for help readability. Cobra renders them under
+	// a single "Available Commands" header by default, so we set
+	// short groups via Annotations.
+	root.AddGroup(
+		&cobra.Group{ID: "setup", Title: "Setup"},
+		&cobra.Group{ID: "rally", Title: "Rally"},
+		&cobra.Group{ID: "manage", Title: "Manage"},
+		&cobra.Group{ID: "system", Title: "System"},
+	)
+
+	addCmd := cli.AddCmd()
+	addCmd.GroupID = "manage"
+	configCmd := cli.ConfigCmd()
+	configCmd.GroupID = "manage"
+	bootstrapCmd := cli.BootstrapCmd()
+	bootstrapCmd.GroupID = "setup"
+	skillC := skillCmd()
+	skillC.GroupID = "setup"
+	doctorC := cli.DoctorCmd()
+	doctorC.GroupID = "system"
+	rallyC := cli.RallyCmd()
+	rallyC.GroupID = "rally"
+	squashC := squashCmd()
+	squashC.GroupID = "rally"
+	daemonC := daemonCmd(shutdown, &isDaemon)
+	daemonC.GroupID = "system"
+	versionC := versionCmd()
+	versionC.GroupID = "system"
+
 	root.AddCommand(
-		&cobra.Command{Use: "version", RunE: func(cmd *cobra.Command, _ []string) error {
-			_, err := fmt.Fprintln(cmd.OutOrStdout(), buildinfo.String())
-			return err
-		}},
-		&cobra.Command{Use: "doctor", Short: "Diagnose adapters and daemon reachability", RunE: func(cmd *cobra.Command, _ []string) error {
-			home, _ := os.UserHomeDir()
-			return doctor.Run(cmd.Context(), home)
-		}},
-		daemonCmd(shutdown, &isDaemon),
-		squashCmd(),
-		cli.RallyCmd(),
-		cli.AddCmd(),
-		cli.ConfigCmd(),
-		cli.BootstrapCmd(),
-		skillCmd(),
+		bootstrapCmd,
+		addCmd,
+		configCmd,
+		skillC,
+		doctorC,
+		rallyC,
+		squashC,
+		daemonC,
+		versionC,
 	)
 
 	exitCode := 0
@@ -77,6 +139,17 @@ func main() {
 	os.Exit(exitCode) //nolint:gocritic // defer resets signals; exit code must propagate
 }
 
+func versionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print build version, commit, and date",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), buildinfo.String())
+			return err
+		},
+	}
+}
+
 func daemonCmd(shutdown chan struct{}, isDaemon *bool) *cobra.Command {
 	return &cobra.Command{
 		Use:   "daemon",
@@ -109,7 +182,7 @@ func defaultSkillTarget() (string, error) {
 func skillCmd() *cobra.Command {
 	parent := &cobra.Command{
 		Use:   "skill",
-		Short: "Manage bundled skills",
+		Short: "Manage the bundled rallish skill",
 	}
 	parent.AddCommand(skillInstallCmd())
 	return parent
@@ -134,16 +207,28 @@ func skillInstallCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("install skill: %w", err)
 			}
-			out := cmd.OutOrStdout()
+			t := newOutTheme(cmd.OutOrStdout())
+			t.OK("installed skill → %s", dir)
 			for _, r := range results {
-				_, _ = fmt.Fprintf(out, "%s %s\n", r.Action, r.Path)
+				t.Detail("%s %s", r.Action, filepath.Base(r.Path))
 			}
-			_, _ = fmt.Fprintln(out, "Reload your coding-CLI session (or open a new chat) to pick up the skill.")
+			t.Detail("reload your coding-CLI session (or open a new chat) to pick up the skill")
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&target, "target", "", "Install directory (default: ~/.claude/skills/rallish)")
 	return cmd
+}
+
+// newOutTheme builds a ui.Theme bound to w, color-detected when w is *os.File.
+func newOutTheme(w io.Writer) *ui.Theme {
+	t := ui.New()
+	t.Out = w
+	t.ErrOut = w
+	if _, ok := w.(*os.File); !ok {
+		t.Color = false
+	}
+	return t
 }
 
 func squashCmd() *cobra.Command {
