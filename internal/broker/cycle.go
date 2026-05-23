@@ -22,25 +22,41 @@ import (
 
 // cycleStore holds active cycle sessions in memory, backed by file sync.
 type cycleStore struct {
-	mu     sync.Mutex
-	states map[string]cycle.State
-	syncs  map[string]*cycle.StateFileSync
-	events map[string][]chan contract.CycleEvent
+	mu            sync.Mutex
+	states        map[string]cycle.State
+	syncs         map[string]*cycle.StateFileSync
+	events        map[string][]chan contract.CycleEvent
+	orchestrating map[string]bool // guards against duplicate orchestrate goroutines
 }
 
 func newCycleStore() *cycleStore {
 	return &cycleStore{
-		states: make(map[string]cycle.State),
-		syncs:  make(map[string]*cycle.StateFileSync),
-		events: make(map[string][]chan contract.CycleEvent),
+		states:        make(map[string]cycle.State),
+		syncs:         make(map[string]*cycle.StateFileSync),
+		events:        make(map[string][]chan contract.CycleEvent),
+		orchestrating: make(map[string]bool),
 	}
 }
 
+// get returns the cycle state from memory, falling back to the file system.
+// It also registers the sync in the store on successful file fallback.
 func (cs *cycleStore) get(id string) (cycle.State, bool) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	s, ok := cs.states[id]
-	return s, ok
+	if ok {
+		return s, true
+	}
+	// Memory miss — try filesystem.
+	fs, err := loadCycleFromFile(id)
+	if err != nil || fs.ID == "" {
+		return cycle.State{}, false
+	}
+	cs.states[id] = fs
+	if cs.syncs[id] == nil {
+		cs.syncs[id] = cycle.NewStateFileSync(fmt.Sprintf("tmp/cycle-%s.json", id))
+	}
+	return fs, true
 }
 
 func (cs *cycleStore) put(id string, state cycle.State) {
@@ -147,21 +163,19 @@ func (s *Server) handleGetCycle(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	state, ok := s.cycleStore.get(id)
 	if !ok {
-		if fs, err := loadCycleFromFile(id); err == nil {
-			state = fs
-			s.cycleStore.put(id, state)
-			s.cycleStore.syncs[id] = cycle.NewStateFileSync(fmt.Sprintf("tmp/cycle-%s.json", id))
-			ok = true
-		}
-	}
-	if !ok {
 		logger.InfoContext(ctx, "cycle not found", "cycle_id", id)
 		http.Error(w, "cycle not found", http.StatusNotFound)
 		return
 	}
 
+	// Limit response bloat: cap history to the most recent 50 reports.
+	respState := state.CycleState
+	if len(respState.History) > 50 {
+		respState.History = respState.History[len(respState.History)-50:]
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(state.CycleState); err != nil {
+	if err := json.NewEncoder(w).Encode(respState); err != nil {
 		logger.ErrorContext(ctx, "encode response", "error", err)
 	}
 }
@@ -172,13 +186,6 @@ func (s *Server) handleStepCycle(w http.ResponseWriter, r *http.Request) {
 
 	id := r.PathValue("id")
 	state, ok := s.cycleStore.get(id)
-	if !ok {
-		if fs, err := loadCycleFromFile(id); err == nil {
-			state = fs
-			s.cycleStore.put(id, state)
-			ok = true
-		}
-	}
 	if !ok {
 		http.Error(w, "cycle not found", http.StatusNotFound)
 		return
@@ -230,13 +237,6 @@ func (s *Server) handleHaltCycle(w http.ResponseWriter, r *http.Request) {
 
 	id := r.PathValue("id")
 	state, ok := s.cycleStore.get(id)
-	if !ok {
-		if fs, err := loadCycleFromFile(id); err == nil {
-			state = fs
-			s.cycleStore.put(id, state)
-			ok = true
-		}
-	}
 	if !ok {
 		http.Error(w, "cycle not found", http.StatusNotFound)
 		return
@@ -354,11 +354,26 @@ func (s *Server) handleOrchestrate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "orchestration unavailable: adapter registry not configured", http.StatusServiceUnavailable)
 		return
 	}
+
+	s.cycleStore.mu.Lock()
+	if s.cycleStore.orchestrating[id] {
+		s.cycleStore.mu.Unlock()
+		http.Error(w, "orchestration already running for this cycle", http.StatusConflict)
+		return
+	}
+	s.cycleStore.orchestrating[id] = true
+	s.cycleStore.mu.Unlock()
+
 	orch := cycle.NewMultiAgentOrchestrator(s.adapterRegistry, sync)
 	orch.SetDriverPipeline(buildStandardPipeline())
 
 	// Run orchestration asynchronously so the HTTP request returns immediately.
 	go func() {
+		defer func() {
+			s.cycleStore.mu.Lock()
+			delete(s.cycleStore.orchestrating, id)
+			s.cycleStore.mu.Unlock()
+		}()
 		if err := orch.Run(context.WithoutCancel(ctx), cfg); err != nil {
 			logger.ErrorContext(ctx, "orchestration failed", "cycle_id", id, "error", err)
 		}

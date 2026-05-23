@@ -35,6 +35,7 @@ type Driver struct {
 	sync        *StateFileSync
 	sleeper     Sleeper
 	StepTimeout time.Duration
+	ReadRetries int
 }
 
 // NewCycleDriver creates a driver with the standard gate pipeline.
@@ -44,6 +45,7 @@ func NewCycleDriver(sync *StateFileSync) *Driver {
 		sync:        sync,
 		sleeper:     defaultSleeper{},
 		StepTimeout: 10 * time.Minute,
+		ReadRetries: 3,
 	}
 }
 
@@ -67,10 +69,10 @@ func (d *Driver) SetSleeper(s Sleeper) {
 }
 
 // Run loops until the cycle halts or max cycles are reached.
-// It sleeps 30s between cycles.
+// It sleeps 30s between cycles and retries transient read errors.
 func (d *Driver) Run(ctx context.Context) error {
 	for {
-		state, err := d.sync.Read()
+		state, err := d.readWithRetry()
 		if err != nil {
 			return fmt.Errorf("read state: %w", err)
 		}
@@ -101,6 +103,25 @@ func (d *Driver) Run(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+func (d *Driver) readWithRetry() (State, error) {
+	retries := d.ReadRetries
+	if retries <= 0 {
+		retries = 3
+	}
+	var lastErr error
+	for i := 0; i < retries; i++ {
+		state, err := d.sync.Read()
+		if err == nil {
+			return state, nil
+		}
+		lastErr = err
+		if i < retries-1 {
+			time.Sleep(time.Duration(i+1) * time.Second)
+		}
+	}
+	return State{}, lastErr
 }
 
 // Step runs one full cycle: pipeline + complete cycle + clear goal.
