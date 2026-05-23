@@ -26,6 +26,8 @@ type Server struct {
 	mu            sync.Mutex
 	pendingReqs   map[string]contract.TurnRequest
 	sessionStates map[string]sessionState
+
+	cycleStore *cycleStore
 }
 
 type sessionState struct {
@@ -58,6 +60,7 @@ func NewServer(store *session.Store, budgeter *budget.Budgeter) *Server {
 	s.mux.HandleFunc("POST /sessions/{id}/turn", s.handlePostTurn)
 	s.registerA2ARoutes()
 	s.registerRallyRoutes()
+	s.registerCycleRoutes()
 	return s
 }
 

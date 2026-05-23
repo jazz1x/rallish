@@ -89,6 +89,8 @@ func main() {
 	rallyC.GroupID = "rally"
 	squashC := squashCmd()
 	squashC.GroupID = "rally"
+	cycleC := cli.CycleCmd()
+	cycleC.GroupID = "rally"
 	daemonC := daemonCmd(shutdown, &isDaemon)
 	daemonC.GroupID = "system"
 	versionC := versionCmd()
@@ -102,6 +104,7 @@ func main() {
 		doctorC,
 		rallyC,
 		squashC,
+		cycleC,
 		daemonC,
 		versionC,
 	)

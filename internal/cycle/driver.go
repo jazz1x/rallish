@@ -1,0 +1,127 @@
+// Package cycle implements the autonomous-cycle domain layer.
+package cycle
+
+import (
+	"context"
+	"fmt"
+	"time"
+)
+
+// Sleeper abstracts sleep for testability.
+type Sleeper interface {
+	Sleep(ctx context.Context, d time.Duration) error
+}
+
+// defaultSleeper uses time.Sleep, respecting context cancellation.
+type defaultSleeper struct{}
+
+func (defaultSleeper) Sleep(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// Driver runs the autonomous cycle loop for a single agent.
+type Driver struct {
+	pipeline Pipeline
+	sync     *StateFileSync
+	sleeper  Sleeper
+}
+
+// NewCycleDriver creates a driver with the standard gate pipeline.
+func NewCycleDriver(sync *StateFileSync) *Driver {
+	return &Driver{
+		pipeline: StandardPipeline(),
+		sync:     sync,
+		sleeper:  defaultSleeper{},
+	}
+}
+
+// StandardPipeline returns the default ordered gate list.
+func StandardPipeline() Pipeline {
+	// We import gates here to avoid an import cycle.
+	// gates package imports cycle; cycle must not import gates.
+	// Therefore StandardPipeline lives outside cycle package or we use a registry.
+	// To keep it simple, we leave pipeline construction to the caller (broker/CLI).
+	return nil
+}
+
+// SetPipeline assigns a custom pipeline to the driver.
+func (d *Driver) SetPipeline(p Pipeline) {
+	d.pipeline = p
+}
+
+// SetSleeper assigns a custom sleeper (useful in tests).
+func (d *Driver) SetSleeper(s Sleeper) {
+	d.sleeper = s
+}
+
+// Run loops until the cycle halts or max cycles are reached.
+// It sleeps 30s between cycles.
+func (d *Driver) Run(ctx context.Context) error {
+	for {
+		state, err := d.sync.Read()
+		if err != nil {
+			return fmt.Errorf("read state: %w", err)
+		}
+		if !state.CanAdvance() {
+			return nil // graceful exit
+		}
+
+		result := d.Step(ctx, state)
+		if result.IsFailure() {
+			he, ok := result.Err().(*HaltedError)
+			if ok {
+				_ = d.sync.Write(result.Value())
+				return he
+			}
+			return result.Err()
+		}
+
+		next := result.Value()
+		if err := d.sync.Write(next); err != nil {
+			return fmt.Errorf("write state: %w", err)
+		}
+
+		if !next.CanAdvance() {
+			return nil
+		}
+
+		if err := d.sleeper.Sleep(ctx, 30*time.Second); err != nil {
+			return err
+		}
+	}
+}
+
+// Step runs one full cycle: pipeline + complete cycle + clear goal.
+func (d *Driver) Step(ctx context.Context, state State) Result[State] {
+	if len(d.pipeline) == 0 {
+		return Failure(state, fmt.Errorf("no pipeline configured"))
+	}
+
+	// Run the gate pipeline.
+	result := d.pipeline.Execute(ctx, state)
+	if result.IsFailure() {
+		return result
+	}
+
+	current := result.Value()
+
+	// Complete the cycle: increment counter, reset phase.
+	completed := current.CompleteCycle()
+	if completed.IsFailure() {
+		return completed
+	}
+	current = completed.Value()
+
+	// Goal is consumed; caller (orchestrator or human) must set a new one before next step.
+	current.NextCycleGoal = ""
+	current.UpdatedAt = time.Now().UnixMilli()
+
+	return Success(current, result.Reports()...)
+}

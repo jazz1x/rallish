@@ -7,10 +7,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
-//go:embed all:rallish
+//go:embed all:rallish all:autonomous-cycle
 var embedded embed.FS
 
 // InstallResult reports what happened to one file during Install.
@@ -30,13 +31,19 @@ type InstallResult struct {
 // Returns the list of InstallResults (one per embedded file) and any error
 // encountered.
 func Install(targetDir string) ([]InstallResult, error) {
+	return InstallNamed("rallish", targetDir)
+}
+
+// InstallNamed writes the embedded skill named skillName to targetDir.
+// Supported names: "rallish", "autonomous-cycle".
+func InstallNamed(skillName, targetDir string) ([]InstallResult, error) {
 	if err := os.MkdirAll(targetDir, 0o750); err != nil { //nolint:gosec // skill dir; world-readable is fine but 0750 satisfies gosec
 		return nil, fmt.Errorf("create target dir %q: %w", targetDir, err)
 	}
 
 	var results []InstallResult
 
-	err := fs.WalkDir(embedded, "rallish", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(embedded, skillName, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -49,8 +56,8 @@ func Install(targetDir string) ([]InstallResult, error) {
 			return fmt.Errorf("read embedded %q: %w", path, readErr)
 		}
 
-		// Strip leading "rallish/" prefix to get relative dest path.
-		rel := strings.TrimPrefix(path, "rallish/")
+		// Strip leading "<skillName>/" prefix to get relative dest path.
+		rel := strings.TrimPrefix(path, skillName+"/")
 
 		destPath := filepath.Join(targetDir, rel)
 
@@ -90,4 +97,32 @@ func Install(targetDir string) ([]InstallResult, error) {
 	}
 
 	return results, nil
+}
+
+// ListEmbeddedSkills returns the names of all embedded skill bundles.
+func ListEmbeddedSkills() ([]string, error) {
+	entries, err := embedded.ReadDir(".")
+	if err != nil {
+		return nil, fmt.Errorf("read embedded root: %w", err)
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// ReadEmbeddedSkill returns the raw bytes of an embedded skill file by path.
+// The path is relative to the skill root, e.g. "autonomous-cycle/SKILL.md".
+func ReadEmbeddedSkill(path string) ([]byte, error) {
+	return embedded.ReadFile(path)
+}
+
+// SkillFileExists reports whether the given skill path exists in the embedded FS.
+func SkillFileExists(path string) bool {
+	_, err := embedded.ReadFile(path)
+	return err == nil
 }

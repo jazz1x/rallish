@@ -14,6 +14,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/jazz1x/rallish/internal/preset"
+	"github.com/jazz1x/rallish/internal/skills"
 	"github.com/jazz1x/rallish/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -195,6 +196,28 @@ func runAdd(ctx context.Context, opts AddOptions, args []string) error {
 		}
 	}
 
+	// Skill installation uses the skills package directly.
+	if typ == "skill" {
+		targetDir := filepath.Join(targetDir, name)
+		if opts.Global {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("get home dir: %w", err)
+			}
+			targetDir = filepath.Join(home, ".claude", "skills", name)
+		}
+		results, err := skills.InstallNamed(name, targetDir)
+		if err != nil {
+			return fmt.Errorf("install skill: %w", err)
+		}
+		t.OK("installed skill %s → %s", name, targetDir)
+		for _, r := range results {
+			t.Detail("%s %s", r.Action, filepath.Base(r.Path))
+		}
+		t.Detail("reload your coding-CLI session to pick up the skill")
+		return nil
+	}
+
 	exists := false
 	if _, err := os.Stat(targetPath); err == nil {
 		exists = true
@@ -230,7 +253,7 @@ func runAdd(ctx context.Context, opts AddOptions, args []string) error {
 	case "adapter":
 		usage = fmt.Sprintf("Use runtime %q in your presets", name)
 	case "skill":
-		usage = fmt.Sprintf("Skill %q installed", name)
+		usage = fmt.Sprintf("rallish skill install --target ~/.claude/skills/%s", name)
 	}
 
 	t.OK("Installed %s %s to %s", typ, name, targetPath)
@@ -324,6 +347,13 @@ func loadAllBuiltIns() ([]addAsset, error) {
 	for name, a := range adapters {
 		rows = append(rows, addAsset{Name: name, Type: "adapter", Description: a.Description})
 	}
+	skillNames, err := skills.ListEmbeddedSkills()
+	if err != nil {
+		return nil, fmt.Errorf("load skills: %w", err)
+	}
+	for _, name := range skillNames {
+		rows = append(rows, addAsset{Name: name, Type: "skill", Description: "Embedded skill bundle"})
+	}
 	return rows, nil
 }
 
@@ -350,6 +380,15 @@ func findBuiltIn(typ, name string) (*addAsset, error) {
 		}
 		return &addAsset{Name: name, Type: "adapter", Description: a.Description}, nil
 	case "skill":
+		names, err := skills.ListEmbeddedSkills()
+		if err != nil {
+			return nil, err
+		}
+		for _, n := range names {
+			if n == name {
+				return &addAsset{Name: name, Type: "skill", Description: "Embedded skill bundle"}, nil
+			}
+		}
 		return nil, nil
 	default:
 		return nil, fmt.Errorf("unknown type %q", typ)
@@ -362,6 +401,8 @@ func loadBuiltInData(typ, name string) ([]byte, error) {
 		return preset.ReadRaw(name)
 	case "adapter":
 		return adaptersFS.ReadFile(path.Join("addassets", "adapters", name+".yaml"))
+	case "skill":
+		return skills.ReadEmbeddedSkill(filepath.Join(name, "SKILL.md"))
 	default:
 		return nil, fmt.Errorf("no built-in data for type %q", typ)
 	}
