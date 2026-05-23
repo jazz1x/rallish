@@ -179,6 +179,8 @@ type CycleState struct {
 	UpdatedAt int64 `json:"updated_at"`
 	// History is the ordered list of gate reports from completed cycles.
 	History []GateReport `json:"history,omitempty"`
+	// LastFailedGate names the gate that caused the most recent halt.
+	LastFailedGate string `json:"last_failed_gate,omitempty"`
 }
 
 // CanAdvance returns true if the cycle is not halted and has not reached max cycles.
@@ -210,6 +212,8 @@ type CycleEvent struct {
 	Halted bool `json:"halted,omitempty"`
 	// HaltReason is set when Halted is true.
 	HaltReason HaltReason `json:"halt_reason,omitempty"`
+	// LastFailedGate names the gate that caused the most recent failure.
+	LastFailedGate string `json:"last_failed_gate,omitempty"`
 	// At is the Unix millisecond timestamp of the event.
 	At int64 `json:"at"`
 }
@@ -222,6 +226,7 @@ func NewCycleEvent(state *CycleState) CycleEvent {
 		CompletedCycles: state.CompletedCycles,
 		Halted:          state.Halted,
 		HaltReason:      state.HaltReason,
+		LastFailedGate:  state.LastFailedGate,
 		At:              time.Now().UnixMilli(),
 	}
 }

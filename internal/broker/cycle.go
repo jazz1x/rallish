@@ -255,6 +255,7 @@ func (s *Server) handleHaltCycle(w http.ResponseWriter, r *http.Request) {
 	halted := state.Halt(reason).Value()
 	if sync, ok := s.cycleStore.syncs[id]; ok {
 		_ = sync.Write(halted)
+		_ = sync.Remove() // prevent zombie resurrection after halt
 	}
 	s.cycleStore.put(id, halted)
 	s.cycleStore.broadcast(id, contract.NewCycleEvent(&halted.CycleState))

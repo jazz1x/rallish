@@ -99,7 +99,11 @@ func (d *Driver) Run(ctx context.Context) error {
 			return nil
 		}
 
-		if err := d.sleeper.Sleep(ctx, 30*time.Second); err != nil {
+		sleep := 30 * time.Second
+		if result.IsFailure() {
+			sleep = 60 * time.Second // back off on failure to avoid hammering
+		}
+		if err := d.sleeper.Sleep(ctx, sleep); err != nil {
 			return err
 		}
 	}

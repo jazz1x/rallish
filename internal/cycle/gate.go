@@ -34,6 +34,7 @@ func (p Pipeline) Execute(ctx context.Context, initial State) Result[State] {
 
 		switch r := result.(type) {
 		case contract.GateFailure:
+			next.LastFailedGate = r.Report().Gate
 			halted := next.Halt(r.Reason).Value()
 			return Failure(halted, &HaltedError{Reason: r.Reason, Reports: reports}, reports...)
 		case contract.GateWarning:
