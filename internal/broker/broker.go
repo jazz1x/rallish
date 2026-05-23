@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jazz1x/rallish/internal/adapter"
 	"github.com/jazz1x/rallish/internal/budget"
 	"github.com/jazz1x/rallish/internal/exit"
 	"github.com/jazz1x/rallish/internal/router"
@@ -27,7 +28,8 @@ type Server struct {
 	pendingReqs   map[string]contract.TurnRequest
 	sessionStates map[string]sessionState
 
-	cycleStore *cycleStore
+	cycleStore      *cycleStore
+	adapterRegistry *adapter.Registry
 }
 
 type sessionState struct {
@@ -67,6 +69,11 @@ func NewServer(store *session.Store, budgeter *budget.Budgeter) *Server {
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
+}
+
+// SetAdapterRegistry injects the adapter registry for orchestration support.
+func (s *Server) SetAdapterRegistry(reg *adapter.Registry) {
+	s.adapterRegistry = reg
 }
 
 func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {

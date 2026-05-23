@@ -5,14 +5,16 @@ package broker
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/jazz1x/rallish/internal/adapter"
 	"github.com/jazz1x/rallish/internal/cycle"
 	"github.com/jazz1x/rallish/internal/cycle/gates"
 	"github.com/jazz1x/rallish/pkg/contract"
@@ -86,6 +88,8 @@ func (cs *cycleStore) closeAll(id string) {
 		close(ch)
 	}
 	delete(cs.events, id)
+	delete(cs.states, id)
+	delete(cs.syncs, id)
 }
 
 func (s *Server) registerCycleRoutes() {
@@ -143,12 +147,10 @@ func (s *Server) handleGetCycle(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	state, ok := s.cycleStore.get(id)
 	if !ok {
-		// Try to load from file.
-		sync := cycle.NewStateFileSync(fmt.Sprintf("tmp/cycle-%s.json", id))
-		if fs, err := sync.Read(); err == nil && fs.ID != "" {
+		if fs, err := loadCycleFromFile(id); err == nil {
 			state = fs
 			s.cycleStore.put(id, state)
-			s.cycleStore.syncs[id] = sync
+			s.cycleStore.syncs[id] = cycle.NewStateFileSync(fmt.Sprintf("tmp/cycle-%s.json", id))
 			ok = true
 		}
 	}
@@ -171,6 +173,13 @@ func (s *Server) handleStepCycle(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	state, ok := s.cycleStore.get(id)
 	if !ok {
+		if fs, err := loadCycleFromFile(id); err == nil {
+			state = fs
+			s.cycleStore.put(id, state)
+			ok = true
+		}
+	}
+	if !ok {
 		http.Error(w, "cycle not found", http.StatusNotFound)
 		return
 	}
@@ -179,6 +188,10 @@ func (s *Server) handleStepCycle(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	if req.Goal != "" {
 		state.NextCycleGoal = req.Goal
+	}
+	if strings.TrimSpace(state.NextCycleGoal) == "" {
+		http.Error(w, "next_cycle_goal is empty", http.StatusBadRequest)
+		return
 	}
 
 	pipeline := buildStandardPipeline()
@@ -217,6 +230,13 @@ func (s *Server) handleHaltCycle(w http.ResponseWriter, r *http.Request) {
 
 	id := r.PathValue("id")
 	state, ok := s.cycleStore.get(id)
+	if !ok {
+		if fs, err := loadCycleFromFile(id); err == nil {
+			state = fs
+			s.cycleStore.put(id, state)
+			ok = true
+		}
+	}
 	if !ok {
 		http.Error(w, "cycle not found", http.StatusNotFound)
 		return
@@ -329,10 +349,12 @@ func (s *Server) handleOrchestrate(w http.ResponseWriter, r *http.Request) {
 		s.cycleStore.syncs[id] = sync
 	}
 
-	reg := adapter.NewRegistry()
-	// In a real deployment these would be registered at daemon startup.
-	// For now we accept that orchestrate without registered adapters returns an error.
-	orch := cycle.NewMultiAgentOrchestrator(reg, sync)
+	if s.adapterRegistry == nil {
+		logger.ErrorContext(ctx, "orchestrate refused: no adapter registry configured")
+		http.Error(w, "orchestration unavailable: adapter registry not configured", http.StatusServiceUnavailable)
+		return
+	}
+	orch := cycle.NewMultiAgentOrchestrator(s.adapterRegistry, sync)
 	orch.SetDriverPipeline(buildStandardPipeline())
 
 	// Run orchestration asynchronously so the HTTP request returns immediately.
@@ -351,6 +373,11 @@ func (s *Server) handleOrchestrate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func loadCycleFromFile(id string) (cycle.State, error) {
+	sync := cycle.NewStateFileSync(fmt.Sprintf("tmp/cycle-%s.json", id))
+	return sync.Read()
+}
+
 func buildStandardPipeline() cycle.Pipeline {
 	return cycle.Pipeline{
 		gates.PreflightGate{},
@@ -363,9 +390,9 @@ func buildStandardPipeline() cycle.Pipeline {
 
 func randomHex(n int) string {
 	b := make([]byte, n)
-	// crypto/rand is already imported in broker.go via other files; we use a simple fallback.
-	for i := range b {
-		b[i] = byte('a' + (i % 26))
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-based hex on crypto failure (extremely unlikely).
+		return fmt.Sprintf("%x", time.Now().UnixNano())[:n*2]
 	}
-	return string(b)
+	return hex.EncodeToString(b)
 }

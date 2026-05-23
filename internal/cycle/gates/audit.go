@@ -24,7 +24,7 @@ func (AuditGate) Run(ctx context.Context, state cycle.State) (contract.GateResul
 
 	cmd := exec.CommandContext(ctx, "make", "check-all")
 	out, err := cmd.CombinedOutput()
-	report.Stdout = string(out)
+	report.Stdout = truncateOutput(string(out), 4000)
 	report.DurationMS = elapsed(start)
 
 	if err != nil {
@@ -35,6 +35,15 @@ func (AuditGate) Run(ctx context.Context, state cycle.State) (contract.GateResul
 
 	report.Passed = true
 	return contract.GateSuccess{R: report}, state
+}
+
+// truncateOutput caps output to maxRunes to prevent state bloat in long loops.
+func truncateOutput(s string, maxRunes int) string {
+	if len(s) <= maxRunes {
+		return s
+	}
+	// Keep the tail (most recent output) because errors are usually at the end.
+	return "...truncated...\n" + s[len(s)-maxRunes:]
 }
 
 // LocalAuditGate runs a lighter subset (`make check`) for faster feedback during development.
@@ -50,7 +59,7 @@ func (LocalAuditGate) Run(ctx context.Context, state cycle.State) (contract.Gate
 
 	cmd := exec.CommandContext(ctx, "make", "check")
 	out, err := cmd.CombinedOutput()
-	report.Stdout = string(out)
+	report.Stdout = truncateOutput(string(out), 4000)
 	report.DurationMS = elapsed(start)
 
 	if err != nil {

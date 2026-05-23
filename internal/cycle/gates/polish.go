@@ -38,7 +38,7 @@ func (PolishGate) Run(ctx context.Context, state cycle.State) (contract.GateResu
 		// because the AuditGate already ran the full suite.
 		violations = append(violations, contract.Violation{
 			Type:    "polish",
-			Message: fmt.Sprintf("lint check: %v", err),
+			Message: truncateOutput(fmt.Sprintf("lint check: %v", err), 500),
 		})
 	}
 
@@ -46,7 +46,7 @@ func (PolishGate) Run(ctx context.Context, state cycle.State) (contract.GateResu
 	if err := runCheck(ctx, "bash", "scripts/check-no-raw-ansi.sh"); err != nil {
 		violations = append(violations, contract.Violation{
 			Type:    "polish",
-			Message: fmt.Sprintf("raw ANSI check failed: %v", err),
+			Message: truncateOutput(fmt.Sprintf("raw ANSI check failed: %v", err), 500),
 		})
 	}
 

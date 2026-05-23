@@ -12,6 +12,15 @@ import (
 	"github.com/jazz1x/rallish/pkg/contract"
 )
 
+// Pre-compiled regexes for philosophy scanners.
+// Compiling once at init avoids repeated allocations during long autonomous loops.
+var (
+	opElseRe    = regexp.MustCompile(`^\+\s*\}\s*else\s*\{`)
+	constDeclRe = regexp.MustCompile(`^\+\s*const\s+(\w+)`)
+	funcDeclRe  = regexp.MustCompile(`^\+\s*func\s+`)
+	versionRe   = regexp.MustCompile(`"\d+\.\d+\.\d+"`)
+)
+
 // PhilosophyGate scans the diff since BaselineSHA for style and architecture violations.
 // It implements the "self-audit" philosophy sweep: ROP, SSOT, SRP, version hardcoding.
 type PhilosophyGate struct{}
@@ -75,7 +84,6 @@ func gitDiffSince(ctx context.Context, baselineSHA string) (string, error) {
 func scanROP(diff string) []contract.Violation {
 	var vs []contract.Violation
 	// Match added lines with deep nesting (>3 levels of if/else).
-	re := regexp.MustCompile(`^\+\s*\}\s*else\s*\{`)
 	lines := strings.Split(diff, "\n")
 	inFile := ""
 	lineNo := 0
@@ -102,7 +110,7 @@ func scanROP(diff string) []contract.Violation {
 		}
 		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
 			lineNo++
-			if re.MatchString(line) {
+			if opElseRe.MatchString(line) {
 				vs = append(vs, contract.Violation{
 					File:    inFile,
 					Line:    lineNo,
@@ -120,7 +128,6 @@ func scanROP(diff string) []contract.Violation {
 func scanSSOT(diff string) []contract.Violation {
 	var vs []contract.Violation
 	// Very naive: flag added const declarations that shadow existing ones.
-	re := regexp.MustCompile(`^\+\s*const\s+(\w+)`)
 	lines := strings.Split(diff, "\n")
 	inFile := ""
 	lineNo := 0
@@ -148,7 +155,7 @@ func scanSSOT(diff string) []contract.Violation {
 		}
 		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
 			lineNo++
-			if m := re.FindStringSubmatch(line); m != nil {
+			if m := constDeclRe.FindStringSubmatch(line); m != nil {
 				name := m[1]
 				if prev, ok := seen[name]; ok {
 					vs = append(vs, contract.Violation{
@@ -170,7 +177,6 @@ func scanSSOT(diff string) []contract.Violation {
 func scanSRP(diff string) []contract.Violation {
 	var vs []contract.Violation
 	// Naive: look for func declarations and count subsequent added lines.
-	funcRe := regexp.MustCompile(`^\+\s*func\s+`)
 	lines := strings.Split(diff, "\n")
 	inFile := ""
 	lineNo := 0
@@ -201,7 +207,7 @@ func scanSRP(diff string) []contract.Violation {
 		}
 		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
 			lineNo++
-			if funcRe.MatchString(line) {
+			if funcDeclRe.MatchString(line) {
 				if inFunc {
 					// Check previous function length.
 					length := funcStart - braceDepth // rough estimate
@@ -235,7 +241,6 @@ func scanSRP(diff string) []contract.Violation {
 // Heuristic: flag added strings matching common version patterns in non-test files.
 func scanHardcodedVersions(diff string) []contract.Violation {
 	var vs []contract.Violation
-	verRe := regexp.MustCompile(`"\d+\.\d+\.\d+"`)
 	lines := strings.Split(diff, "\n")
 	inFile := ""
 	lineNo := 0
@@ -264,7 +269,7 @@ func scanHardcodedVersions(diff string) []contract.Violation {
 			if strings.Contains(inFile, "_test.go") {
 				continue
 			}
-			if verRe.MatchString(line) {
+			if versionRe.MatchString(line) {
 				vs = append(vs, contract.Violation{
 					File:    inFile,
 					Line:    lineNo,

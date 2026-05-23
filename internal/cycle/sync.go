@@ -23,6 +23,7 @@ func NewStateFileSync(path string) *StateFileSync {
 
 // Read deserialises the current state from disk.
 // If the file does not exist, it returns a zero State (not an error).
+// If the primary file is corrupt, it attempts to read the .bak backup.
 func (s *StateFileSync) Read() (State, error) {
 	data, err := os.ReadFile(s.path)
 	if err != nil {
@@ -33,12 +34,20 @@ func (s *StateFileSync) Read() (State, error) {
 	}
 	var cs contract.CycleState
 	if err := json.Unmarshal(data, &cs); err != nil {
-		return State{}, fmt.Errorf("unmarshal state: %w", err)
+		// Primary file is corrupt; attempt backup recovery.
+		bakData, bakErr := os.ReadFile(s.path + ".bak")
+		if bakErr != nil {
+			return State{}, fmt.Errorf("unmarshal state (corrupt) and no backup: %w", err)
+		}
+		if bakErr := json.Unmarshal(bakData, &cs); bakErr != nil {
+			return State{}, fmt.Errorf("unmarshal state (corrupt) and backup also corrupt: original=%w, backup=%w", err, bakErr)
+		}
 	}
 	return State{CycleState: cs}, nil
 }
 
 // Write serialises the state to disk atomically (write to temp, then rename).
+// It preserves the previous file as a .bak backup before overwriting.
 func (s *StateFileSync) Write(state State) error {
 	data, err := json.MarshalIndent(state.CycleState, "", "  ")
 	if err != nil {
@@ -47,6 +56,10 @@ func (s *StateFileSync) Write(state State) error {
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
+	}
+	// Preserve existing file as backup.
+	if _, statErr := os.Stat(s.path); statErr == nil {
+		_ = os.Rename(s.path, s.path+".bak")
 	}
 	tmp := s.path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {

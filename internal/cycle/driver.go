@@ -4,7 +4,10 @@ package cycle
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/jazz1x/rallish/pkg/contract"
 )
 
 // Sleeper abstracts sleep for testability.
@@ -28,17 +31,19 @@ func (defaultSleeper) Sleep(ctx context.Context, d time.Duration) error {
 
 // Driver runs the autonomous cycle loop for a single agent.
 type Driver struct {
-	pipeline Pipeline
-	sync     *StateFileSync
-	sleeper  Sleeper
+	pipeline    Pipeline
+	sync        *StateFileSync
+	sleeper     Sleeper
+	StepTimeout time.Duration
 }
 
 // NewCycleDriver creates a driver with the standard gate pipeline.
 func NewCycleDriver(sync *StateFileSync) *Driver {
 	return &Driver{
-		pipeline: StandardPipeline(),
-		sync:     sync,
-		sleeper:  defaultSleeper{},
+		pipeline:    StandardPipeline(),
+		sync:        sync,
+		sleeper:     defaultSleeper{},
+		StepTimeout: 10 * time.Minute,
 	}
 }
 
@@ -99,13 +104,24 @@ func (d *Driver) Run(ctx context.Context) error {
 }
 
 // Step runs one full cycle: pipeline + complete cycle + clear goal.
+// It enforces StepTimeout to prevent a single gate from blocking indefinitely.
 func (d *Driver) Step(ctx context.Context, state State) Result[State] {
 	if len(d.pipeline) == 0 {
 		return Failure(state, fmt.Errorf("no pipeline configured"))
 	}
+	if strings.TrimSpace(state.NextCycleGoal) == "" {
+		return Failure(state, fmt.Errorf("next_cycle_goal is empty: %w", contract.ErrGoalRequired))
+	}
+
+	stepCtx := ctx
+	if d.StepTimeout > 0 {
+		var cancel context.CancelFunc
+		stepCtx, cancel = context.WithTimeout(ctx, d.StepTimeout)
+		defer cancel()
+	}
 
 	// Run the gate pipeline.
-	result := d.pipeline.Execute(ctx, state)
+	result := d.pipeline.Execute(stepCtx, state)
 	if result.IsFailure() {
 		return result
 	}

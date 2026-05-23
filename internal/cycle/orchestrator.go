@@ -110,10 +110,53 @@ func (o *MultiAgentOrchestrator) Run(ctx context.Context, cfg contract.Orchestra
 	}
 }
 
+// cycleStateSummary is a slim view of CycleState to avoid overflowing the
+// adapter context window during long autonomous loops.
+type cycleStateSummary struct {
+	ID              string               `json:"id"`
+	Phase           contract.CyclePhase  `json:"phase"`
+	CompletedCycles int                  `json:"completed_cycles"`
+	MaxCycles       int                  `json:"max_cycles"`
+	Branch          string               `json:"branch"`
+	BaselineSHA     string               `json:"baseline_sha,omitempty"`
+	PendingFiles    []string             `json:"pending_files,omitempty"`
+	NextCycleGoal   string               `json:"next_cycle_goal"`
+	ViolationsFound []contract.Violation `json:"violations_found,omitempty"`
+	Halted          bool                 `json:"halted"`
+	HaltReason      contract.HaltReason  `json:"halt_reason,omitempty"`
+}
+
+func summariseState(state State) cycleStateSummary {
+	s := cycleStateSummary{
+		ID:              state.ID,
+		Phase:           state.Phase,
+		CompletedCycles: state.CompletedCycles,
+		MaxCycles:       state.MaxCycles,
+		Branch:          state.Branch,
+		BaselineSHA:     state.BaselineSHA,
+		NextCycleGoal:   state.NextCycleGoal,
+		Halted:          state.Halted,
+		HaltReason:      state.HaltReason,
+	}
+	// Cap slices to prevent context bloat in long loops.
+	if len(state.PendingFiles) > 20 {
+		s.PendingFiles = state.PendingFiles[:20]
+	} else {
+		s.PendingFiles = append([]string(nil), state.PendingFiles...)
+	}
+	if len(state.ViolationsFound) > 10 {
+		s.ViolationsFound = state.ViolationsFound[:10]
+	} else {
+		s.ViolationsFound = append([]contract.Violation(nil), state.ViolationsFound...)
+	}
+	return s
+}
+
 func (o *MultiAgentOrchestrator) buildRequest(state State, agentName string, cfg contract.OrchestratorConfig) (contract.TurnRequest, error) {
-	stateJSON, err := json.Marshal(state.CycleState)
+	summary := summariseState(state)
+	stateJSON, err := json.Marshal(summary)
 	if err != nil {
-		return contract.TurnRequest{}, fmt.Errorf("marshal state: %w", err)
+		return contract.TurnRequest{}, fmt.Errorf("marshal state summary: %w", err)
 	}
 
 	return contract.TurnRequest{
