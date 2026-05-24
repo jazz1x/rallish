@@ -228,3 +228,4 @@ coverage.out
 
 # Local toolchain
 .toolchain/
+tmp/
