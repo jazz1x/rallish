@@ -24,6 +24,7 @@ func CycleCmd() *cobra.Command {
 	}
 	cmd.AddCommand(
 		CycleNewCmd(),
+		CycleStartCmd(),
 		CycleStatusCmd(),
 		CycleNextCmd(),
 		CycleHaltCmd(),
@@ -147,6 +148,120 @@ func CycleWatchCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cycleID, "cycle-id", "", "Cycle ID (required)")
 	_ = cmd.MarkFlagRequired("cycle-id")
 	return cmd
+}
+
+// CycleStartCmd returns the `cycle start` subcommand (one-shot create + orchestrate + watch).
+func CycleStartCmd() *cobra.Command {
+	var (
+		goal               string
+		branch             string
+		maxCycles          int
+		maxDurationMinutes int
+		autoGoal           bool
+		agents             string
+	)
+	cmd := &cobra.Command{
+		Use:   "start",
+		Short: "One-shot start: create cycle, optionally orchestrate, then watch events",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("get home dir: %w", err)
+			}
+			var agentList []string
+			if agents != "" {
+				agentList = strings.Split(agents, ",")
+			}
+			req := contract.NewCycleRequest{
+				Goal:               goal,
+				Branch:             branch,
+				MaxCycles:          maxCycles,
+				MaxDurationMinutes: maxDurationMinutes,
+				AutoGoal:           autoGoal,
+			}
+			if agents != "" {
+				req.Orchestrator = &contract.OrchestratorConfig{
+					Agents:     agentList,
+					WorkingDir: ".",
+				}
+			}
+			return runCycleStart(cmd.Context(), home, req, agentList, cmd.OutOrStdout())
+		},
+	}
+	cmd.Flags().StringVar(&goal, "goal", "", "One-sentence objective for the first cycle (required)")
+	cmd.Flags().StringVar(&branch, "branch", "", "Git branch to work on (default: feat/autonomous-cycle)")
+	cmd.Flags().IntVar(&maxCycles, "max-cycles", 0, "Maximum number of cycles (0 = unlimited)")
+	cmd.Flags().IntVar(&maxDurationMinutes, "max-duration", 240, "Maximum runtime in minutes (default: 240 = 4 hours)")
+	cmd.Flags().BoolVar(&autoGoal, "auto-goal", true, "Automatically discover next goal after each cycle")
+	cmd.Flags().StringVar(&agents, "agents", "", "Comma-separated adapter names for multi-agent orchestration")
+	_ = cmd.MarkFlagRequired("goal")
+	return cmd
+}
+
+func runCycleStart(ctx context.Context, home string, req contract.NewCycleRequest, agents []string, out io.Writer) error {
+	bc, err := resolveBrokerClient(home, 0)
+	if err != nil {
+		return fmt.Errorf("broker client: %w", err)
+	}
+
+	// 1. Create cycle.
+	body, _ := json.Marshal(req)
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, bc.URL+"/cycles", strings.NewReader(string(body)))
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	r.Header.Set("Content-Type", "application/json")
+
+	resp, err := bc.Client.Do(r)
+	if err != nil {
+		return fmt.Errorf("create cycle: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("create cycle failed (%d): %s", resp.StatusCode, string(b))
+	}
+
+	var state contract.CycleState
+	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+
+	_, _ = fmt.Fprintf(out, "cycle started: %s\n", state.ID)
+	_, _ = fmt.Fprintf(out, "  branch:      %s\n", state.Branch)
+	_, _ = fmt.Fprintf(out, "  max_cycles:  %d\n", state.MaxCycles)
+	_, _ = fmt.Fprintf(out, "  max_duration:%d min\n", state.MaxDurationMinutes)
+	_, _ = fmt.Fprintf(out, "  auto_goal:   %v\n", state.AutoGoal)
+	_, _ = fmt.Fprintf(out, "  state_file:  tmp/cycle-%s.json\n", state.ID)
+
+	// 2. Start orchestration if agents are configured.
+	if len(agents) > 0 {
+		orchBody, _ := json.Marshal(contract.OrchestratorConfig{
+			Agents:     agents,
+			WorkingDir: ".",
+		})
+		r, err = http.NewRequestWithContext(ctx, http.MethodPost, bc.URL+"/cycles/"+state.ID+"/orchestrate", strings.NewReader(string(orchBody)))
+		if err != nil {
+			return fmt.Errorf("build orchestrate request: %w", err)
+		}
+		r.Header.Set("Content-Type", "application/json")
+
+		resp, err = bc.Client.Do(r)
+		if err != nil {
+			return fmt.Errorf("orchestrate: %w", err)
+		}
+		_ = resp.Body.Close()
+
+		if resp.StatusCode != http.StatusAccepted {
+			return fmt.Errorf("orchestrate failed (%d)", resp.StatusCode)
+		}
+		_, _ = fmt.Fprintf(out, "orchestration started with agents: %v\n", agents)
+	}
+
+	// 3. Block and watch events.
+	_, _ = fmt.Fprintf(out, "\nwatching events... (Ctrl+C to detach, cycle continues in background)\n\n")
+	return runCycleWatch(ctx, home, state.ID, out)
 }
 
 func runCycleNew(ctx context.Context, home, goal, branch string, maxCycles, maxDurationMinutes int, autoGoal bool, agents, workingDir string, out io.Writer) error {

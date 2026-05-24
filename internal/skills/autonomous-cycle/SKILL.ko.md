@@ -70,14 +70,17 @@ ssl:
 
 ## 트리거 흐름
 
-### A — 새 사이클 시작 (서버)
+### A — 원샷 시작 (권장)
 ```
 사용자: "autonomous cycle" / "자율 사이클 시작"
 에이전트:
   1. rallish daemon 실행 확인:  rallish doctor
-  2. 사이클 생성:  rallish cycle new --goal "feat: refactor adapter package" --max-cycles 5
-  3. --agents 설정 시 오케스트레이션 시작:  curl -X POST /cycles/<id>/orchestrate
-  4. 사용자에게 cycle-id와 초기 상태 보고.
+  2. 원샷 시작 (이벤트를 실시간 스트리밍하며 블록):
+       rallish cycle start --goal "feat: refactor adapter package" --agents claude,kimi
+     - 사이클 생성, 오케스트레이션 시작, SSE 감시를 한 번에 처리.
+     - Ctrl+C로 detach 가능; 백그라운드에서 계속 실행.
+  3. 나중에 감시 재개:  rallish cycle watch --cycle-id <id>
+  4. 상태 확인:          rallish cycle status --cycle-id <id>
 ```
 
 ### B — 상태 확인 (언제든)

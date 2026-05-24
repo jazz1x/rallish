@@ -70,14 +70,17 @@ Multi-agent ping-pong is supported: rallish rotates adapters every 3 cycles.
 
 ## Trigger flows
 
-### A — Start a new cycle (server)
+### A — One-shot start (recommended)
 ```
 User: "autonomous cycle" / "자율 사이클 시작"
 Agent:
-  1. Ensure rallish daemon is running:  rallish doctor
-  2. Create cycle:  rallish cycle new --goal "feat: refactor adapter package" --max-cycles 5
-  3. If --agents set, start orchestration:  curl -X POST /cycles/<id>/orchestrate
-  4. Report cycle-id and initial state to user.
+  1. Ensure daemon is running:  rallish doctor
+  2. One-shot start (blocks and streams events):
+       rallish cycle start --goal "feat: refactor adapter package" --agents claude,kimi
+     - This creates the cycle, starts orchestration, and watches SSE in one command.
+     - Ctrl+C detaches; the cycle continues in the background.
+  3. To resume watching later:  rallish cycle watch --cycle-id <id>
+  4. To check status:            rallish cycle status --cycle-id <id>
 ```
 
 ### B — Check status (any time)
