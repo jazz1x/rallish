@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jazz1x/rallish/internal/adapter"
+	"github.com/jazz1x/rallish/internal/adapter/fake"
 	"github.com/jazz1x/rallish/internal/budget"
 	"github.com/jazz1x/rallish/internal/cycle"
 	"github.com/jazz1x/rallish/internal/session"
@@ -284,6 +286,87 @@ func TestCycleEventLastFailedGate(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestBrokerOrchestrateEndToEnd(t *testing.T) {
+	srv := newTestBroker(t)
+
+	// Inject a mock pipeline so the cycle steps succeed instantly.
+	srv.SetCyclePipeline(cycle.Pipeline{testGate{name: "mock-ok"}})
+	srv.SetCycleSleeper(cycle.NoOpSleeper{})
+
+	// Register fake adapters.
+	reg := adapter.NewRegistry()
+	if err := reg.Register("alpha", fake.New(func(_ int) contract.TurnResponse {
+		return contract.TurnResponse{Done: false, Summary: `{"next_goal":"alpha-goal"}`}
+	})); err != nil {
+		t.Fatalf("register alpha: %v", err)
+	}
+	if err := reg.Register("beta", fake.New(func(_ int) contract.TurnResponse {
+		return contract.TurnResponse{Done: false, Summary: `{"next_goal":"beta-goal"}`}
+	})); err != nil {
+		t.Fatalf("register beta: %v", err)
+	}
+	srv.SetAdapterRegistry(reg)
+
+	// Create a cycle with max 4 cycles.
+	reqBody, _ := json.Marshal(contract.NewCycleRequest{Goal: "feat: e2e", MaxCycles: 4})
+	req := httptest.NewRequest(http.MethodPost, "/cycles", bytes.NewReader(reqBody))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	var created contract.CycleState
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+
+	// Start orchestration.
+	orchBody, _ := json.Marshal(contract.OrchestratorConfig{
+		Agents:     []string{"alpha", "beta"},
+		ResetEvery: 2,
+		WorkingDir: t.TempDir(),
+	})
+	req = httptest.NewRequest(http.MethodPost, "/cycles/"+created.ID+"/orchestrate", bytes.NewReader(orchBody))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("orchestrate status = %d, want 202", rec.Code)
+	}
+
+	// Poll the cycle state until it completes or times out.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	var final contract.CycleState
+	poll := func() bool {
+		// Force refresh from disk because the orchestrator goroutine only writes to file.
+		srv.cycleStore.refreshFromFile(created.ID)
+		req = httptest.NewRequest(http.MethodGet, "/cycles/"+created.ID, nil)
+		rec = httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			return false
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &final)
+		return final.CompletedCycles >= 4
+	}
+
+	for !poll() {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timeout waiting for cycle completion; final cycles = %d", final.CompletedCycles)
+		case <-ticker.C:
+		}
+	}
+
+	if final.CompletedCycles != 4 {
+		t.Fatalf("completed_cycles = %d, want 4", final.CompletedCycles)
+	}
+	if final.Halted {
+		t.Fatal("expected not halted after max cycles")
 	}
 }
 
