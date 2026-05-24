@@ -4,27 +4,33 @@ description: >
   Vendor-agnostic autonomous refactor runner powered by rallish.
   Drives N cycles via the rallish cycle subsystem, gated by Preflight → Audit → Philosophy → Polish → Commit,
   with 3-cycle fresh-agent reset and graceful halt on violations.
-  Triggers: "autonomous cycle", "자율 사이클", "cycle start", "nightly run", "오토 리팩터"
-version: 0.1.0
+  Supports long-run mode (4–5 hours) with 20-minute watch rounds for guardrail hardening and philosophy compliance.
+  Triggers: "autonomous cycle", "자율 사이클", "cycle start", "nightly run", "오토 리팩터",
+            "long run", "20분 감시", "가드레일 보완", "철학 보완"
+version: 0.2.0
 ssl:
   scheduling:
     when_to_use:
       - "Long mechanical refactor with a well-defined, narrow goal"
       - "Goal can be verified by gate pipeline (no human judgment per cycle)"
       - "Baseline SHA + pending_files enumerable in advance"
+      - "Overnight batch (4–5h) with periodic human check-ins every 20 min"
+      - "Guardrail hardening: self-audit → fix → re-verify → philosophy sweep"
     anti_triggers:
       - "Ambiguous scope or evolving goal — use rallish rally interactive"
       - "Work requiring per-cycle human decisions — use harnish:forki"
       - "First-time pattern with no baseline — write the pattern manually first"
+      - "MAX_CYCLES > 10 without explicit override — diminishing returns"
   structural:
-    scenes: [Preflight, CycleLoop, GateCheck, HandoffOrCommit, Reset]
+    scenes: [Preflight, CycleLoop, GateCheck, GuardrailHarden, PhilosophySweep, HandoffOrCommit, Reset, WatchRound]
     resumable: true
     branches:
       - "state file missing → Preflight initializes it"
       - "completed_cycles % 3 == 0 (and > 0) → fresh-agent reset signal"
       - "self-audit violations > 0 → halt=true, surface to user"
-      - "SSH auth fails preflight → warning, not hard halt"
+      - "SSH auth fails preflight → warning, retry next cycle"
       - "completed_cycles >= MAX_CYCLES → graceful exit"
+      - "20 min elapsed since last watch → human check-in round"
   logical:
     tools: [Bash, Read, Write]
     side_effects:
@@ -43,6 +49,7 @@ Multi-agent ping-pong is supported: rallish rotates adapters every 3 cycles.
 ## Companion files
 - State schema: `tmp/cycle-<id>.json`
 - Broker events: `rallish cycle watch --cycle-id <id>`
+- Log stream: `rallish daemon` logs (SSE via `cycle watch`)
 
 ## Cycle workflow
 
@@ -52,7 +59,7 @@ Multi-agent ping-pong is supported: rallish rotates adapters every 3 cycles.
 │  2. Preflight gate (branch, clean, goal, SSH)      │
 │  3. Audit gate (make check-all)                    │
 │  4. Philosophy gate (ROP / SSOT / SRP sweep)       │
-│  5. Polish gate (tests, lint, no-raw-ansi, commit) │
+│  5. Polish gate (tests, lint, no-raw-ansi)         │
 │  6. Commit gate (conventional message, never amend)│
 │  7. Update tmp/cycle-<id>.json                     │
 │  8. Fresh-agent reset every 3 cycles               │
@@ -105,6 +112,61 @@ Agent:
   2. Stream SSE events until halted or user interrupts.
 ```
 
+## Long-run mode (4–5 hours)
+
+For overnight or extended autonomous runs:
+
+1. **Set `--max-cycles` to 8–10** (safe default for one session).
+2. **Use `--agents claude,kimi`** for multi-agent ping-pong.
+3. **Start in a terminal multiplexer** (`tmux`, `screen`) so the daemon survives SSH disconnect.
+4. **Redirect logs to a file**:
+   ```bash
+   rallish daemon > tmp/autonomous-$(date +%Y%m%d-%H%M).log 2>&1 &
+   ```
+5. **Graceful degradation**: if any gate fails, the cycle halts, writes `halt_reason`, and the daemon keeps serving other requests.
+
+## 20-minute watch round
+
+For long runs, perform a human check-in every 20 minutes:
+
+```bash
+# Quick health check
+rallish cycle status --cycle-id <id> | jq '.completed_cycles, .halted, .last_failed_gate'
+
+# Tail the latest events
+rallish cycle watch --cycle-id <id> --since 20m
+```
+
+What to look for:
+- `completed_cycles` increasing steadily
+- `last_failed_gate` empty (no gate failures)
+- `violations_found` not growing
+- `halted` false
+
+If any of these are off, run `rallish cycle halt` and inspect the state file before resuming.
+
+## Guardrail hardening workflow
+
+When the user asks for "guardrail hardening" or "가드레일 보완":
+
+```
+┌─ Guardrail Hardening ──────────────────────────────┐
+│  1. /self-audit  → list current violations         │
+│  2. Fix violations → code or configuration changes │
+│  3. /polish      → re-run gates locally            │
+│  4. /ralphi      → token budget + philosophy sweep │
+│  5. Commit       → one commit per hardening round  │
+│  6. Verify       → make check-all green            │
+└────────────────────────────────────────────────────┘
+```
+
+In rallish terms:
+- **Self-audit** → `AuditGate` (make check-all) + manual review of `violations_found`
+- **Fix** → adapter turn that returns `violations_found: []` in the response
+- **Polish** → `PolishGate` (tests, lint, no-raw-ansi)
+- **Ralphi** → `PhilosophyGate` (ROP, SSOT, SRP, version hardcoding sweep)
+- **Commit** → `CommitGate` (conventional message, never amend)
+
 ## Multi-agent orchestration
 
 When `--agents claude,kimi` is passed to `cycle new`, the broker rotates adapters every 3 cycles:
@@ -149,6 +211,8 @@ Halt always writes `halted=true` + `halt_reason` to `tmp/cycle-<id>.json`.
 - ❌ `git commit --amend` mid-loop (Commit gate never amends).
 - ❌ `--no-verify` to push past a failing hook (Polish gate catches this).
 - ❌ Running without `next_cycle_goal` set (Preflight gate rejects).
-- ❌ MAX_CYCLES > 10 in one night (diminishing returns).
+- ❌ MAX_CYCLES > 10 in one night without explicit override (diminishing returns, harder to review).
 - ❌ Skipping Philosophy gate to push throughput (defeats the safety mechanism).
 - ❌ `sleep` < 30s between cycles (rate limit risk).
+- ❌ No 20-minute watch rounds on a 4–5 hour run (violations accumulate unnoticed).
+- ❌ Ignoring `last_failed_gate` in SSE events (misses early warning signals).
