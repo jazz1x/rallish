@@ -96,6 +96,9 @@ func main() {
 	versionC := versionCmd()
 	versionC.GroupID = "system"
 
+	triggerC := cli.TriggerCmd()
+	triggerC.GroupID = "rally"
+
 	root.AddCommand(
 		bootstrapCmd,
 		addCmd,
@@ -105,6 +108,7 @@ func main() {
 		rallyC,
 		squashC,
 		cycleC,
+		triggerC,
 		daemonC,
 		versionC,
 	)
@@ -171,16 +175,6 @@ func daemonCmd(shutdown chan struct{}, isDaemon *bool) *cobra.Command {
 	}
 }
 
-// defaultSkillTarget returns the default install directory for the
-// rallish skill: ~/.claude/skills/rallish.
-func defaultSkillTarget() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("get home dir: %w", err)
-	}
-	return filepath.Join(home, ".claude", "skills", "rallish"), nil
-}
-
 // skillCmd returns the `skill` parent command.
 func skillCmd() *cobra.Command {
 	parent := &cobra.Command{
@@ -193,20 +187,23 @@ func skillCmd() *cobra.Command {
 
 // skillInstallCmd returns the `skill install` subcommand.
 func skillInstallCmd() *cobra.Command {
-	var target string
+	var (
+		target string
+		name   string
+	)
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Install the rallish skill to ~/.claude/skills/rallish",
+		Short: "Install a bundled skill to ~/.claude/skills/<name>",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir := target
 			if dir == "" {
-				var err error
-				dir, err = defaultSkillTarget()
+				home, err := os.UserHomeDir()
 				if err != nil {
-					return err
+					return fmt.Errorf("get home dir: %w", err)
 				}
+				dir = filepath.Join(home, ".claude", "skills", name)
 			}
-			results, err := skills.Install(dir)
+			results, err := skills.InstallNamed(name, dir)
 			if err != nil {
 				return fmt.Errorf("install skill: %w", err)
 			}
@@ -215,11 +212,24 @@ func skillInstallCmd() *cobra.Command {
 			for _, r := range results {
 				t.Detail("%s %s", r.Action, filepath.Base(r.Path))
 			}
+			// Install companion files for autonomous-cycle.
+			if name == "autonomous-cycle" {
+				home, _ := os.UserHomeDir()
+				companionResults, compErr := skills.InstallCompanionFiles(name, home)
+				if compErr != nil {
+					t.Warn("companion files: %v", compErr)
+				} else {
+					for _, r := range companionResults {
+						t.Detail("%s %s", r.Action, filepath.Base(r.Path))
+					}
+				}
+			}
 			t.Detail("reload your coding-CLI session (or open a new chat) to pick up the skill")
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&target, "target", "", "Install directory (default: ~/.claude/skills/rallish)")
+	cmd.Flags().StringVar(&target, "target", "", "Install directory (default: ~/.claude/skills/<name>)")
+	cmd.Flags().StringVar(&name, "name", "rallish", "Skill name to install (rallish or autonomous-cycle)")
 	return cmd
 }
 

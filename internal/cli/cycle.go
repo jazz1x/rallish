@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jazz1x/rallish/internal/safepath"
 	"github.com/jazz1x/rallish/pkg/contract"
 	"github.com/spf13/cobra"
 )
@@ -133,7 +134,10 @@ func CycleHaltCmd() *cobra.Command {
 
 // CycleWatchCmd returns the `cycle watch` subcommand.
 func CycleWatchCmd() *cobra.Command {
-	var cycleID string
+	var (
+		cycleID string
+		logFile string
+	)
 	cmd := &cobra.Command{
 		Use:   "watch",
 		Short: "Watch cycle events via SSE",
@@ -142,10 +146,11 @@ func CycleWatchCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("get home dir: %w", err)
 			}
-			return runCycleWatch(cmd.Context(), home, cycleID, cmd.OutOrStdout())
+			return runCycleWatch(cmd.Context(), home, cycleID, logFile, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().StringVar(&cycleID, "cycle-id", "", "Cycle ID (required)")
+	cmd.Flags().StringVar(&logFile, "log-file", "", "Append event stream to file (e.g. /tmp/cycle.log)")
 	_ = cmd.MarkFlagRequired("cycle-id")
 	return cmd
 }
@@ -185,7 +190,8 @@ func CycleStartCmd() *cobra.Command {
 					WorkingDir: ".",
 				}
 			}
-			return runCycleStart(cmd.Context(), home, req, agentList, cmd.OutOrStdout())
+			logFile, _ := cmd.Flags().GetString("log-file")
+			return runCycleStart(cmd.Context(), home, req, agentList, logFile, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().StringVar(&goal, "goal", "", "One-sentence objective for the first cycle (required)")
@@ -194,11 +200,12 @@ func CycleStartCmd() *cobra.Command {
 	cmd.Flags().IntVar(&maxDurationMinutes, "max-duration", 240, "Maximum runtime in minutes (default: 240 = 4 hours)")
 	cmd.Flags().BoolVar(&autoGoal, "auto-goal", true, "Automatically discover next goal after each cycle")
 	cmd.Flags().StringVar(&agents, "agents", "", "Comma-separated adapter names for multi-agent orchestration")
+	cmd.Flags().String("log-file", "", "Append event stream to file (e.g. /tmp/cycle.log)")
 	_ = cmd.MarkFlagRequired("goal")
 	return cmd
 }
 
-func runCycleStart(ctx context.Context, home string, req contract.NewCycleRequest, agents []string, out io.Writer) error {
+func runCycleStart(ctx context.Context, home string, req contract.NewCycleRequest, agents []string, logFile string, out io.Writer) error {
 	bc, err := resolveBrokerClient(home, 0)
 	if err != nil {
 		return fmt.Errorf("broker client: %w", err)
@@ -261,7 +268,7 @@ func runCycleStart(ctx context.Context, home string, req contract.NewCycleReques
 
 	// 3. Block and watch events.
 	_, _ = fmt.Fprintf(out, "\nwatching events... (Ctrl+C to detach, cycle continues in background)\n\n")
-	return runCycleWatch(ctx, home, state.ID, out)
+	return runCycleWatch(ctx, home, state.ID, logFile, out)
 }
 
 func runCycleNew(ctx context.Context, home, goal, branch string, maxCycles, maxDurationMinutes int, autoGoal bool, agents, workingDir string, out io.Writer) error {
@@ -355,6 +362,9 @@ func runCycleStatus(ctx context.Context, home, cycleID string, out io.Writer) er
 	_, _ = fmt.Fprintf(out, "branch:       %s\n", state.Branch)
 	_, _ = fmt.Fprintf(out, "baseline:     %s\n", state.BaselineSHA)
 	_, _ = fmt.Fprintf(out, "goal:         %s\n", state.NextCycleGoal)
+	if state.ShouldRotateAgent() {
+		_, _ = fmt.Fprintf(out, "agent_rotate: yes (3-cycle reset)\n")
+	}
 	_, _ = fmt.Fprintf(out, "halted:       %v\n", state.Halted)
 	if state.Halted {
 		_, _ = fmt.Fprintf(out, "halt_reason:  %s\n", state.HaltReason)
@@ -433,7 +443,7 @@ func runCycleHalt(ctx context.Context, home, cycleID, reason string, out io.Writ
 	return nil
 }
 
-func runCycleWatch(ctx context.Context, home, cycleID string, out io.Writer) error {
+func runCycleWatch(ctx context.Context, home, cycleID, logFile string, out io.Writer) error {
 	bc, err := resolveBrokerClient(home, 0)
 	if err != nil {
 		return err
@@ -455,6 +465,22 @@ func runCycleWatch(ctx context.Context, home, cycleID string, out io.Writer) err
 		return fmt.Errorf("events failed (%d): %s", resp.StatusCode, string(b))
 	}
 
+	var logOut io.Writer
+	if logFile != "" {
+		safeLog, cleanErr := safepath.Clean(logFile)
+		if cleanErr != nil {
+			_, _ = fmt.Fprintf(out, "warn: invalid log file path: %v\n", cleanErr)
+		} else {
+			f, err := os.OpenFile(safeLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // path validated by safepath.Clean
+			if err != nil {
+				_, _ = fmt.Fprintf(out, "warn: cannot open log file: %v\n", err)
+			} else {
+				defer func() { _ = f.Close() }()
+				logOut = f
+			}
+		}
+	}
+
 	_, _ = fmt.Fprintf(out, "watching cycle %s events...\n", cycleID)
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
@@ -462,18 +488,29 @@ func runCycleWatch(ctx context.Context, home, cycleID string, out io.Writer) err
 		if strings.HasPrefix(line, "data: ") {
 			var evt contract.CycleEvent
 			if err := json.Unmarshal([]byte(line[6:]), &evt); err == nil {
-				_, _ = fmt.Fprintf(out, "[%s] phase=%s cycles=%d halted=%v\n",
+				msg := fmt.Sprintf("[%s] phase=%s cycles=%d halted=%v\n",
 					time.Now().Format("15:04:05"),
 					evt.Phase,
 					evt.CompletedCycles,
 					evt.Halted,
 				)
+				_, _ = fmt.Fprint(out, msg)
+				if logOut != nil {
+					_, _ = fmt.Fprint(logOut, msg)
+				}
 				if evt.Halted {
-					_, _ = fmt.Fprintf(out, "halt_reason: %s\n", evt.HaltReason)
+					msg = fmt.Sprintf("halt_reason: %s\n", evt.HaltReason)
+					_, _ = fmt.Fprint(out, msg)
+					if logOut != nil {
+						_, _ = fmt.Fprint(logOut, msg)
+					}
 					return nil
 				}
 			} else {
 				_, _ = fmt.Fprintln(out, line)
+				if logOut != nil {
+					_, _ = fmt.Fprintln(logOut, line)
+				}
 			}
 		}
 	}
