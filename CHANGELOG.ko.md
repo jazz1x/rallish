@@ -7,6 +7,24 @@
 
 ## [미발표]
 
+### 추가됨
+
+- **`rallish cycle` — 자율 사이클 서브시스템.** 원샷 `cycle start`
+  (생성 → 오케스트레이션 → 감시) with `--max-cycles`, `--max-duration`,
+  `--auto-goal`, `--log-file`. `cycle status`는 3사이클 마다 에이전트
+  리셋 힌트를 표시. `cycle halt` / `cycle next` / `cycle watch`로
+  인터랙티브 제어.
+- **`rallish trigger` — 자연어 스킬 호출.** `rallish trigger "자율 사이클"`은
+  임베디드 스킬 트리거를 매칭하고 SKILL.md 기본값으로 `cycle start`를
+  자동 실행. `--dry-run`으로 실행 없이 명령 미리보기.
+- **autonomous-cycle 컴패니언 파일.** `skill install --name autonomous-cycle`로
+  스킬 + 드라이버 스크립트(`~/.claude/scripts/autonomous-cycle.sh`) +
+  핸드오프 런북(`~/.claude/runbooks/cycle-handoff.md`) 설치. Bootstrap
+  1단계에서 자동 설치.
+- **AutoGoal + 시간 기반 종료.** `go vet`, `golangci-lint --fast-only`,
+  TODO/FIXME 스캔으로 다음 목표 자동 발견. `MaxDurationMinutes`로 실행
+  시간 제한; 코드베이스가 깨끗하면 `HaltSuccess`로 graceful 종료.
+
 ## [0.3.0] - 2026-05-20
 
 ### 추가됨

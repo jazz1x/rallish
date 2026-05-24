@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`rallish cycle` — autonomous-cycle subsystem.** One-shot `cycle start`
+  (create → orchestrate → watch) with `--max-cycles`, `--max-duration`,
+  `--auto-goal`, and `--log-file`. `cycle status` shows agent-rotation
+  hint every 3 cycles. `cycle halt` / `cycle next` / `cycle watch` for
+  interactive control.
+- **`rallish trigger` — natural-language skill invocation.**
+  `rallish trigger "자율 사이클"` matches embedded skill triggers and
+  auto-invokes `cycle start` with SKILL.md defaults (max-cycles=10,
+  max-duration=240, auto-goal, log-file). `--dry-run` prints the
+  equivalent command without executing it.
+- **Companion files for autonomous-cycle.** `skill install --name
+  autonomous-cycle` writes the skill to `~/.claude/skills/autonomous-cycle`
+  plus driver script (`~/.claude/scripts/autonomous-cycle.sh`) and handoff
+  runbook (`~/.claude/runbooks/cycle-handoff.md`). Bootstrap step 1
+  installs them automatically.
+- **AutoGoal + time-based termination.** `autogoal.go` discovers next
+  goals via `go vet`, `golangci-lint --fast-only`, and TODO/FIXME scan.
+  `MaxDurationMinutes` caps runtime; `HaltSuccess` exits cleanly when the
+  codebase is clean.
+
 ## [0.3.0] - 2026-05-20
 
 ### Added
