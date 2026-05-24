@@ -166,3 +166,81 @@ func TestOrchestratorAdapterNotFound(t *testing.T) {
 		t.Logf("error: %v", err)
 	}
 }
+
+func TestSummariseStateCapsSlices(t *testing.T) {
+	state := State{CycleState: contract.CycleState{
+		ID:              "cyc_1",
+		Phase:           contract.CyclePhaseAudit,
+		CompletedCycles: 5,
+		MaxCycles:       10,
+		Branch:          "feat/test",
+		BaselineSHA:     "abc123",
+		NextCycleGoal:   "fix lint",
+		Halted:          false,
+	}}
+	// Fill slices beyond caps.
+	for i := 0; i < 30; i++ {
+		state.PendingFiles = append(state.PendingFiles, fmt.Sprintf("file%d.go", i))
+	}
+	for i := 0; i < 15; i++ {
+		state.ViolationsFound = append(state.ViolationsFound, contract.Violation{File: "a.go", Line: i, Type: "rop", Message: "msg"})
+	}
+
+	sum := summariseState(state)
+	if len(sum.PendingFiles) != 20 {
+		t.Fatalf("pending_files capped to %d, want 20", len(sum.PendingFiles))
+	}
+	if len(sum.ViolationsFound) != 10 {
+		t.Fatalf("violations capped to %d, want 10", len(sum.ViolationsFound))
+	}
+	if sum.ID != state.ID {
+		t.Fatalf("ID mismatch")
+	}
+}
+
+func TestApplyResponseJSON(t *testing.T) {
+	state := State{CycleState: contract.CycleState{ID: "cyc_1", NextCycleGoal: "old"}}
+	orch := &MultiAgentOrchestrator{}
+
+	// Structured JSON response.
+	resp := contract.TurnResponse{Summary: `{"next_goal":"new-goal","violations_found":[{"file":"x.go","line":1,"type":"rop","message":"m"}]}`}
+	if err := orch.applyResponse(&state, resp); err != nil {
+		t.Fatalf("applyResponse: %v", err)
+	}
+	if state.NextCycleGoal != "new-goal" {
+		t.Fatalf("next_cycle_goal = %q, want new-goal", state.NextCycleGoal)
+	}
+	if len(state.ViolationsFound) != 1 {
+		t.Fatalf("violations = %d, want 1", len(state.ViolationsFound))
+	}
+}
+
+func TestApplyResponseHaltRequested(t *testing.T) {
+	state := State{CycleState: contract.CycleState{ID: "cyc_1", Halted: false}}
+	orch := &MultiAgentOrchestrator{}
+
+	resp := contract.TurnResponse{Summary: `{"halt_requested":true}`}
+	if err := orch.applyResponse(&state, resp); err != nil {
+		t.Fatalf("applyResponse: %v", err)
+	}
+	if !state.Halted {
+		t.Fatal("expected halted")
+	}
+	if state.HaltReason != contract.HaltUserRequested {
+		t.Fatalf("halt_reason = %q, want user-requested", state.HaltReason)
+	}
+}
+
+func TestApplyResponseFallback(t *testing.T) {
+	state := State{CycleState: contract.CycleState{ID: "cyc_1", NextCycleGoal: "old"}}
+	orch := &MultiAgentOrchestrator{}
+
+	// Non-JSON summary becomes the next goal.
+	resp := contract.TurnResponse{Summary: "plain text goal"}
+	if err := orch.applyResponse(&state, resp); err != nil {
+		t.Fatalf("applyResponse: %v", err)
+	}
+	if state.NextCycleGoal != "plain text goal" {
+		t.Fatalf("next_cycle_goal = %q, want plain text goal", state.NextCycleGoal)
+	}
+}
