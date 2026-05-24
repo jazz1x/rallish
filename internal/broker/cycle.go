@@ -110,6 +110,9 @@ func (cs *cycleStore) closeAll(id string) {
 
 func (s *Server) registerCycleRoutes() {
 	s.cycleStore = newCycleStore()
+	if s.cyclePipeline == nil {
+		s.cyclePipeline = buildStandardPipeline()
+	}
 	s.mux.HandleFunc("POST /cycles", s.handleCreateCycle)
 	s.mux.HandleFunc("GET /cycles/{id}", s.handleGetCycle)
 	s.mux.HandleFunc("POST /cycles/{id}/step", s.handleStepCycle)
@@ -201,8 +204,7 @@ func (s *Server) handleStepCycle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pipeline := buildStandardPipeline()
-	result := pipeline.Execute(ctx, state)
+	result := s.cyclePipeline.Execute(ctx, state)
 
 	if result.IsSuccess() {
 		st := result.Value()

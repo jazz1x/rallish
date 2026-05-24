@@ -1,0 +1,12 @@
+{
+  "id": "cyc_1779580868232_d9c44acc",
+  "phase": "preflight",
+  "completed_cycles": 1,
+  "max_cycles": 10,
+  "branch": "feat/autonomous-cycle",
+  "baseline_sha": "",
+  "next_cycle_goal": "",
+  "halted": false,
+  "created_at": 1779580868232,
+  "updated_at": 1779580868233
+}
