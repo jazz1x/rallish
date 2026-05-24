@@ -15,6 +15,17 @@ type Sleeper interface {
 	Sleep(ctx context.Context, d time.Duration) error
 }
 
+// NoOpSleeper returns immediately. Useful in tests to avoid real sleeps.
+type NoOpSleeper struct{}
+
+// Sleep returns immediately without blocking.
+func (NoOpSleeper) Sleep(ctx context.Context, _ time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
 // defaultSleeper uses time.Sleep, respecting context cancellation.
 type defaultSleeper struct{}
 

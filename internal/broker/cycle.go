@@ -65,6 +65,20 @@ func (cs *cycleStore) put(id string, state cycle.State) {
 	cs.states[id] = state
 }
 
+// refreshFromFile re-reads the state from disk and updates the in-memory cache.
+func (cs *cycleStore) refreshFromFile(id string) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	fs, err := loadCycleFromFile(id)
+	if err != nil || fs.ID == "" {
+		return
+	}
+	cs.states[id] = fs
+	if cs.syncs[id] == nil {
+		cs.syncs[id] = cycle.NewStateFileSync(fmt.Sprintf("tmp/cycle-%s.json", id))
+	}
+}
+
 func (cs *cycleStore) subscribe(id string) chan contract.CycleEvent {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
@@ -368,7 +382,14 @@ func (s *Server) handleOrchestrate(w http.ResponseWriter, r *http.Request) {
 	s.cycleStore.mu.Unlock()
 
 	orch := cycle.NewMultiAgentOrchestrator(s.adapterRegistry, sync)
-	orch.SetDriverPipeline(buildStandardPipeline())
+	pipeline := s.cyclePipeline
+	if pipeline == nil {
+		pipeline = buildStandardPipeline()
+	}
+	orch.SetDriverPipeline(pipeline)
+	if s.cycleSleeper != nil {
+		orch.SetDriverSleeper(s.cycleSleeper)
+	}
 
 	// Run orchestration asynchronously so the HTTP request returns immediately.
 	go func() {

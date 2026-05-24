@@ -32,6 +32,7 @@ type Server struct {
 	cycleStore      *cycleStore
 	adapterRegistry *adapter.Registry
 	cyclePipeline   cycle.Pipeline
+	cycleSleeper    cycle.Sleeper
 }
 
 type sessionState struct {
@@ -81,6 +82,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // SetAdapterRegistry injects the adapter registry for orchestration support.
 func (s *Server) SetAdapterRegistry(reg *adapter.Registry) {
 	s.adapterRegistry = reg
+}
+
+// SetCycleSleeper injects a custom sleeper for orchestration (useful in tests).
+func (s *Server) SetCycleSleeper(slp cycle.Sleeper) {
+	s.cycleSleeper = slp
 }
 
 func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
