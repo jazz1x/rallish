@@ -69,6 +69,7 @@ const (
 	HaltGateFailure        HaltReason = "gate-failure"
 	HaltUserRequested      HaltReason = "user-requested"
 	HaltPreflightFailed    HaltReason = "preflight-failed"
+	HaltSuccess            HaltReason = "success"
 )
 
 // ParseHaltReason converts a string to a validated HaltReason.
@@ -76,7 +77,7 @@ const (
 func ParseHaltReason(s string) (HaltReason, error) {
 	switch HaltReason(s) {
 	case HaltSelfAuditViolation, HaltSSHAuthFailed, HaltMaxCyclesReached,
-		HaltGateFailure, HaltUserRequested, HaltPreflightFailed:
+		HaltGateFailure, HaltUserRequested, HaltPreflightFailed, HaltSuccess:
 		return HaltReason(s), nil
 	default:
 		return "", fmt.Errorf("halt reason %q: %w", s, ErrInvalidHaltReason)
@@ -181,15 +182,27 @@ type CycleState struct {
 	History []GateReport `json:"history,omitempty"`
 	// LastFailedGate names the gate that caused the most recent halt.
 	LastFailedGate string `json:"last_failed_gate,omitempty"`
+	// AutoGoal, when true, enables automatic goal discovery after each cycle.
+	AutoGoal bool `json:"auto_goal,omitempty"`
+	// MaxDurationMinutes caps the total runtime (0 = unlimited).
+	MaxDurationMinutes int `json:"max_duration_minutes,omitempty"`
+	// StartedAt is the Unix millisecond timestamp when the cycle was created.
+	StartedAt int64 `json:"started_at"`
 }
 
-// CanAdvance returns true if the cycle is not halted and has not reached max cycles.
+// CanAdvance returns true if the cycle is not halted, has not reached max cycles,
+// and has not exceeded the max duration.
 func (s *CycleState) CanAdvance() bool {
 	if s.Halted {
 		return false
 	}
 	if s.MaxCycles > 0 && s.CompletedCycles >= s.MaxCycles {
 		return false
+	}
+	if s.MaxDurationMinutes > 0 && s.StartedAt > 0 {
+		if int(time.Since(time.UnixMilli(s.StartedAt)).Minutes()) >= s.MaxDurationMinutes {
+			return false
+		}
 	}
 	return true
 }
@@ -251,8 +264,12 @@ type NewCycleRequest struct {
 	Goal string `json:"goal"`
 	// Branch is the target git branch (must not be "main").
 	Branch string `json:"branch,omitempty"`
-	// MaxCycles caps the run (default 10).
+	// MaxCycles caps the run (0 = unlimited, default 10).
 	MaxCycles int `json:"max_cycles,omitempty"`
+	// MaxDurationMinutes caps total runtime in minutes (0 = unlimited).
+	MaxDurationMinutes int `json:"max_duration_minutes,omitempty"`
+	// AutoGoal enables automatic goal discovery after each cycle.
+	AutoGoal bool `json:"auto_goal,omitempty"`
 	// PendingFiles lists files the cycle should focus on.
 	PendingFiles []string `json:"pending_files,omitempty"`
 	// Orchestrator, when set, enables multi-agent ping-pong.

@@ -42,21 +42,23 @@ func (defaultSleeper) Sleep(ctx context.Context, d time.Duration) error {
 
 // Driver runs the autonomous cycle loop for a single agent.
 type Driver struct {
-	pipeline    Pipeline
-	sync        *StateFileSync
-	sleeper     Sleeper
-	StepTimeout time.Duration
-	ReadRetries int
+	pipeline       Pipeline
+	sync           *StateFileSync
+	sleeper        Sleeper
+	StepTimeout    time.Duration
+	ReadRetries    int
+	goalDiscoverer func(context.Context, State) (string, error)
 }
 
 // NewCycleDriver creates a driver with the standard gate pipeline.
 func NewCycleDriver(sync *StateFileSync) *Driver {
 	return &Driver{
-		pipeline:    StandardPipeline(),
-		sync:        sync,
-		sleeper:     defaultSleeper{},
-		StepTimeout: 10 * time.Minute,
-		ReadRetries: 3,
+		pipeline:       StandardPipeline(),
+		sync:           sync,
+		sleeper:        defaultSleeper{},
+		StepTimeout:    10 * time.Minute,
+		ReadRetries:    3,
+		goalDiscoverer: discoverNextGoal,
 	}
 }
 
@@ -102,6 +104,21 @@ func (d *Driver) Run(ctx context.Context) error {
 		}
 
 		next := result.Value()
+
+		if next.AutoGoal && !next.Halted && strings.TrimSpace(next.NextCycleGoal) == "" {
+			goal, err := d.goalDiscoverer(ctx, next)
+			if err != nil {
+				return fmt.Errorf("goal discovery: %w", err)
+			}
+			if goal == "" {
+				halted := next.Halt(contract.HaltSuccess).Value()
+				_ = d.sync.Write(halted)
+				return nil
+			}
+			next.NextCycleGoal = goal
+			next.UpdatedAt = time.Now().UnixMilli()
+		}
+
 		if err := d.sync.Write(next); err != nil {
 			return fmt.Errorf("write state: %w", err)
 		}

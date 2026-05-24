@@ -3,6 +3,7 @@ package contract
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 func TestParseCyclePhase(t *testing.T) {
@@ -107,6 +108,8 @@ func TestCycleStateCanAdvance(t *testing.T) {
 		{"over limit", &CycleState{Halted: false, CompletedCycles: 6, MaxCycles: 5}, false},
 		{"halted", &CycleState{Halted: true, CompletedCycles: 0, MaxCycles: 5}, false},
 		{"no limit", &CycleState{Halted: false, CompletedCycles: 100, MaxCycles: 0}, true},
+		{"duration exceeded", &CycleState{Halted: false, CompletedCycles: 0, MaxCycles: 0, MaxDurationMinutes: 1, StartedAt: time.Now().Add(-2 * time.Minute).UnixMilli()}, false},
+		{"duration not exceeded", &CycleState{Halted: false, CompletedCycles: 0, MaxCycles: 0, MaxDurationMinutes: 60, StartedAt: time.Now().UnixMilli()}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -114,6 +117,16 @@ func TestCycleStateCanAdvance(t *testing.T) {
 				t.Fatalf("CanAdvance() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseHaltReasonSuccess(t *testing.T) {
+	r, err := ParseHaltReason("success")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r != HaltSuccess {
+		t.Fatalf("got %q, want success", r)
 	}
 }
 

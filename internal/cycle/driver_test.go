@@ -3,6 +3,7 @@ package cycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -243,5 +244,65 @@ func TestStateFileSyncRemove(t *testing.T) {
 
 	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
 		t.Fatalf("file should not exist")
+	}
+}
+
+func TestDriverAutoGoalDiscoversNextGoal(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "cycle-test.json")
+	sync := NewStateFileSync(tmp)
+
+	state, _ := NewState(contract.NewCycleRequest{Goal: "feat: test", MaxCycles: 5, AutoGoal: true}, "cyc_ag_1")
+	_ = sync.Write(state)
+
+	d := NewCycleDriver(sync)
+	d.SetSleeper(instantSleeper{})
+	d.SetPipeline(Pipeline{passGate{name: "ok"}})
+
+	callCount := 0
+	d.goalDiscoverer = func(_ context.Context, _ State) (string, error) {
+		callCount++
+		if callCount <= 2 {
+			return fmt.Sprintf("auto-goal-%d", callCount), nil
+		}
+		return "", nil
+	}
+
+	if err := d.Run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	final, _ := sync.Read()
+	if final.CompletedCycles != 3 {
+		t.Fatalf("completed_cycles = %d, want 3", final.CompletedCycles)
+	}
+	if final.HaltReason != contract.HaltSuccess {
+		t.Fatalf("halt_reason = %q, want success", final.HaltReason)
+	}
+}
+
+func TestDriverAutoGoalHaltWhenNoMoreWork(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "cycle-test.json")
+	sync := NewStateFileSync(tmp)
+
+	state, _ := NewState(contract.NewCycleRequest{Goal: "feat: test", MaxCycles: 10, AutoGoal: true}, "cyc_ag_2")
+	_ = sync.Write(state)
+
+	d := NewCycleDriver(sync)
+	d.SetSleeper(instantSleeper{})
+	d.SetPipeline(Pipeline{passGate{name: "ok"}})
+	d.goalDiscoverer = func(_ context.Context, _ State) (string, error) {
+		return "", nil // no more work found
+	}
+
+	if err := d.Run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	final, _ := sync.Read()
+	if final.CompletedCycles != 1 {
+		t.Fatalf("completed_cycles = %d, want 1", final.CompletedCycles)
+	}
+	if final.HaltReason != contract.HaltSuccess {
+		t.Fatalf("halt_reason = %q, want success", final.HaltReason)
 	}
 }

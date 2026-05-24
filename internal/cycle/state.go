@@ -34,16 +34,19 @@ func NewState(req contract.NewCycleRequest, id string) (State, error) {
 	now := time.Now().UnixMilli()
 	return State{
 		CycleState: contract.CycleState{
-			ID:              id,
-			Phase:           contract.CyclePhasePreflight,
-			CompletedCycles: 0,
-			MaxCycles:       maxCycles,
-			Branch:          branch,
-			PendingFiles:    req.PendingFiles,
-			NextCycleGoal:   req.Goal,
-			Halted:          false,
-			CreatedAt:       now,
-			UpdatedAt:       now,
+			ID:                 id,
+			Phase:              contract.CyclePhasePreflight,
+			CompletedCycles:    0,
+			MaxCycles:          maxCycles,
+			Branch:             branch,
+			PendingFiles:       req.PendingFiles,
+			NextCycleGoal:      req.Goal,
+			Halted:             false,
+			CreatedAt:          now,
+			UpdatedAt:          now,
+			StartedAt:          now,
+			AutoGoal:           req.AutoGoal,
+			MaxDurationMinutes: req.MaxDurationMinutes,
 		},
 	}, nil
 }

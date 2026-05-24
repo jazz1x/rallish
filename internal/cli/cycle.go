@@ -35,11 +35,13 @@ func CycleCmd() *cobra.Command {
 // CycleNewCmd returns the `cycle new` subcommand.
 func CycleNewCmd() *cobra.Command {
 	var (
-		goal       string
-		branch     string
-		maxCycles  int
-		agents     string
-		workingDir string
+		goal               string
+		branch             string
+		maxCycles          int
+		maxDurationMinutes int
+		autoGoal           bool
+		agents             string
+		workingDir         string
 	)
 	cmd := &cobra.Command{
 		Use:   "new",
@@ -49,12 +51,14 @@ func CycleNewCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("get home dir: %w", err)
 			}
-			return runCycleNew(cmd.Context(), home, goal, branch, maxCycles, agents, workingDir, cmd.OutOrStdout())
+			return runCycleNew(cmd.Context(), home, goal, branch, maxCycles, maxDurationMinutes, autoGoal, agents, workingDir, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().StringVar(&goal, "goal", "", "One-sentence objective for the first cycle (required)")
 	cmd.Flags().StringVar(&branch, "branch", "", "Git branch to work on (default: feat/autonomous-cycle)")
-	cmd.Flags().IntVar(&maxCycles, "max-cycles", 10, "Maximum number of cycles")
+	cmd.Flags().IntVar(&maxCycles, "max-cycles", 10, "Maximum number of cycles (0 = unlimited)")
+	cmd.Flags().IntVar(&maxDurationMinutes, "max-duration", 0, "Maximum runtime in minutes (0 = unlimited)")
+	cmd.Flags().BoolVar(&autoGoal, "auto-goal", false, "Automatically discover next goal after each cycle")
 	cmd.Flags().StringVar(&agents, "agents", "", "Comma-separated adapter names for multi-agent orchestration")
 	cmd.Flags().StringVar(&workingDir, "working-dir", "", "Working directory for the cycle")
 	_ = cmd.MarkFlagRequired("goal")
@@ -145,16 +149,18 @@ func CycleWatchCmd() *cobra.Command {
 	return cmd
 }
 
-func runCycleNew(ctx context.Context, home, goal, branch string, maxCycles int, agents, workingDir string, out io.Writer) error {
+func runCycleNew(ctx context.Context, home, goal, branch string, maxCycles, maxDurationMinutes int, autoGoal bool, agents, workingDir string, out io.Writer) error {
 	bc, err := resolveBrokerClient(home, 0)
 	if err != nil {
 		return err
 	}
 
 	req := contract.NewCycleRequest{
-		Goal:      goal,
-		Branch:    branch,
-		MaxCycles: maxCycles,
+		Goal:               goal,
+		Branch:             branch,
+		MaxCycles:          maxCycles,
+		MaxDurationMinutes: maxDurationMinutes,
+		AutoGoal:           autoGoal,
 	}
 	if agents != "" || workingDir != "" {
 		req.Orchestrator = &contract.OrchestratorConfig{
