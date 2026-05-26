@@ -218,7 +218,7 @@ func (s *Server) handleStepCycle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := s.cyclePipeline.Execute(ctx, state)
+	result := s.pipelineForState(state).Execute(ctx, state)
 
 	if result.IsSuccess() {
 		st := result.Value()
@@ -382,11 +382,7 @@ func (s *Server) handleOrchestrate(w http.ResponseWriter, r *http.Request) {
 	s.cycleStore.mu.Unlock()
 
 	orch := cycle.NewMultiAgentOrchestrator(s.adapterRegistry, sync)
-	pipeline := s.cyclePipeline
-	if pipeline == nil {
-		pipeline = buildStandardPipeline()
-	}
-	orch.SetDriverPipeline(pipeline)
+	orch.SetPipelineFactory(s.pipelineForState)
 	if s.cycleSleeper != nil {
 		orch.SetDriverSleeper(s.cycleSleeper)
 	}
@@ -425,6 +421,28 @@ func buildStandardPipeline() cycle.Pipeline {
 		gates.PolishGate{},
 		gates.CommitGate{},
 	}
+}
+
+func (s *Server) pipelineForState(state cycle.State) cycle.Pipeline {
+	base := s.cyclePipeline
+	if base == nil {
+		base = buildStandardPipeline()
+	}
+	if len(state.LocalGates) == 0 {
+		return base
+	}
+
+	pipeline := make(cycle.Pipeline, 0, len(base)+len(state.LocalGates))
+	for _, gate := range base {
+		pipeline = append(pipeline, gate)
+		if gate.Name() != "audit" {
+			continue
+		}
+		for _, rawCmd := range state.LocalGates {
+			pipeline = append(pipeline, gates.CommandGate{RawCmd: rawCmd})
+		}
+	}
+	return pipeline
 }
 
 func randomHex(n int) string {

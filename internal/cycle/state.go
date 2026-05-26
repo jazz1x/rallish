@@ -3,6 +3,7 @@ package cycle
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jazz1x/rallish/pkg/contract"
@@ -40,6 +41,7 @@ func NewState(req contract.NewCycleRequest, id string) (State, error) {
 			MaxCycles:          maxCycles,
 			Branch:             branch,
 			PendingFiles:       req.PendingFiles,
+			LocalGates:         normaliseLocalGates(req.LocalGates),
 			NextCycleGoal:      req.Goal,
 			Halted:             false,
 			CreatedAt:          now,
@@ -49,6 +51,18 @@ func NewState(req contract.NewCycleRequest, id string) (State, error) {
 			MaxDurationMinutes: req.MaxDurationMinutes,
 		},
 	}, nil
+}
+
+func normaliseLocalGates(gates []string) []string {
+	normalised := make([]string, 0, len(gates))
+	for _, gate := range gates {
+		gate = strings.TrimSpace(gate)
+		if gate == "" {
+			continue
+		}
+		normalised = append(normalised, gate)
+	}
+	return normalised
 }
 
 // Advance transitions the state to the next phase.

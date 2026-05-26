@@ -4,7 +4,11 @@
 
 ```bash
 # Start an overnight cycle
-nohup ~/.claude/scripts/autonomous-cycle.sh > tmp/nightly.log 2>&1 &
+rallish cycle start \
+  --goal "feat: continue autonomous-cycle hardening" \
+  --agents claude,kimi \
+  --local-gate "make check-all" \
+  --log-file tmp/nightly.log
 
 # Check status anytime
 rallish cycle status --cycle-id <id>
@@ -45,6 +49,7 @@ rallish cycle watch --cycle-id <id> --log-file tmp/watch.log
 - `branch`: git branch being worked on
 - `baseline_sha`: commit SHA to diff against
 - `pending_files`: files still needing work
+- `local_gates`: repository-specific validation commands run after the built-in audit gate
 - `halted`: true if stopped
 - `halt_reason`: why it stopped
 - `last_failed_gate`: gate that caused failure

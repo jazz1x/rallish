@@ -128,3 +128,106 @@ func TestRunCycleWatch_NonOKStatus(t *testing.T) {
 		t.Fatalf("expected 404 in error, got: %v", err)
 	}
 }
+
+func TestRunCycleNewSendsLocalGates(t *testing.T) {
+	var got contract.NewCycleRequest
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { //nolint:revive // standard handler signature
+		if r.URL.Path != "/cycles" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(contract.CycleState{
+			ID:            "cyc_local_gate",
+			Branch:        got.Branch,
+			MaxCycles:     got.MaxCycles,
+			NextCycleGoal: got.Goal,
+			LocalGates:    got.LocalGates,
+		})
+	}))
+	defer ts.Close()
+
+	home := t.TempDir()
+	if err := writePortFile(home, ts.URL); err != nil {
+		t.Fatalf("writePortFile: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := runCycleNew(
+		context.Background(),
+		home,
+		"feat: local gate",
+		"feat/local-gate",
+		2,
+		30,
+		true,
+		"",
+		"",
+		[]string{"bun test", "cargo clippy"},
+		&out,
+	)
+	if err != nil {
+		t.Fatalf("runCycleNew: %v", err)
+	}
+
+	want := []string{"bun test", "cargo clippy"}
+	if len(got.LocalGates) != len(want) {
+		t.Fatalf("local_gates = %v, want %v", got.LocalGates, want)
+	}
+	for i := range want {
+		if got.LocalGates[i] != want[i] {
+			t.Fatalf("local_gates = %v, want %v", got.LocalGates, want)
+		}
+	}
+	gotOut := out.String()
+	for _, want := range []string{"cycle created: cyc_local_gate", "  local_gates: 2", "    - bun test", "    - cargo clippy"} {
+		if !strings.Contains(gotOut, want) {
+			t.Fatalf("output missing %q:\n%s", want, gotOut)
+		}
+	}
+}
+
+func TestRunCycleStatusPrintsLocalGates(t *testing.T) {
+	state := contract.CycleState{
+		ID:              "cyc_status_local_gate",
+		Phase:           contract.CyclePhasePreflight,
+		CompletedCycles: 1,
+		MaxCycles:       3,
+		Branch:          "feat/local-gate",
+		BaselineSHA:     "abc123",
+		NextCycleGoal:   "feat: continue",
+		LocalGates:      []string{"bun test", "cargo clippy"},
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { //nolint:revive // standard handler signature
+		if r.URL.Path != "/cycles/cyc_status_local_gate" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(state)
+	}))
+	defer ts.Close()
+
+	home := t.TempDir()
+	if err := writePortFile(home, ts.URL); err != nil {
+		t.Fatalf("writePortFile: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := runCycleStatus(context.Background(), home, "cyc_status_local_gate", &out); err != nil {
+		t.Fatalf("runCycleStatus: %v", err)
+	}
+
+	got := out.String()
+	for _, want := range []string{"local_gates:  2", "  - bun test", "  - cargo clippy"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status output missing %q:\n%s", want, got)
+		}
+	}
+}

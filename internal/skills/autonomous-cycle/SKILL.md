@@ -58,11 +58,12 @@ Multi-agent ping-pong is supported: rallish rotates adapters every 3 cycles.
 │  1. Read tmp/cycle-<id>.json (resume point)        │
 │  2. Preflight gate (branch, clean, goal, SSH)      │
 │  3. Audit gate (make check-all)                    │
-│  4. Philosophy gate (ROP / SSOT / SRP sweep)       │
-│  5. Polish gate (tests, lint, no-raw-ansi)         │
-│  6. Commit gate (conventional message, never amend)│
-│  7. Update tmp/cycle-<id>.json                     │
-│  8. Fresh-agent reset every 3 cycles               │
+│  4. Local gates (--local-gate, if configured)      │
+│  5. Philosophy gate (ROP / SSOT / SRP sweep)       │
+│  6. Polish gate (tests, lint, no-raw-ansi)         │
+│  7. Commit gate (conventional message, never amend)│
+│  8. Update tmp/cycle-<id>.json                     │
+│  9. Fresh-agent reset every 3 cycles               │
 └────────────────────────────────────────────────────┘
        ↓ rate-limit / token exhaust
    write handoff notes → graceful exit
@@ -76,7 +77,7 @@ User: "autonomous cycle" / "자율 사이클 시작"
 Agent:
   1. Ensure daemon is running:  rallish doctor
   2. One-shot start (blocks and streams events):
-       rallish cycle start --goal "feat: refactor adapter package" --agents claude,kimi
+       rallish cycle start --goal "feat: refactor adapter package" --agents claude,kimi --local-gate "make check-all"
      - This creates the cycle, starts orchestration, and watches SSE in one command.
      - Ctrl+C detaches; the cycle continues in the background.
   3. To resume watching later:  rallish cycle watch --cycle-id <id>
@@ -121,12 +122,13 @@ For overnight or extended autonomous runs:
 
 1. **Set `--max-cycles` to 8–10** (safe default for one session).
 2. **Use `--agents claude,kimi`** for multi-agent ping-pong.
-3. **Start in a terminal multiplexer** (`tmux`, `screen`) so the daemon survives SSH disconnect.
-4. **Redirect logs to a file**:
+3. **Use `--local-gate "<command>"`** for project-specific validation beyond the built-in Go gate.
+4. **Start in a terminal multiplexer** (`tmux`, `screen`) so the daemon survives SSH disconnect.
+5. **Redirect logs to a file**:
    ```bash
    rallish daemon > tmp/autonomous-$(date +%Y%m%d-%H%M).log 2>&1 &
    ```
-5. **Graceful degradation**: if any gate fails, the cycle halts, writes `halt_reason`, and the daemon keeps serving other requests.
+6. **Graceful degradation**: if any gate fails, the cycle halts, writes `halt_reason`, and the daemon keeps serving other requests.
 
 ## 20-minute watch round
 

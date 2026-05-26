@@ -166,6 +166,8 @@ type CycleState struct {
 	BaselineSHA string `json:"baseline_sha"`
 	// PendingFiles lists files still needing work.
 	PendingFiles []string `json:"pending_files,omitempty"`
+	// LocalGates lists repository-specific validation commands to run after the built-in audit gate.
+	LocalGates []string `json:"local_gates,omitempty"`
 	// ViolationsFound accumulates issues discovered but not yet fixed.
 	ViolationsFound []Violation `json:"violations_found,omitempty"`
 	// NextCycleGoal is the mandatory one-sentence goal for the next cycle.
@@ -272,6 +274,8 @@ type NewCycleRequest struct {
 	AutoGoal bool `json:"auto_goal,omitempty"`
 	// PendingFiles lists files the cycle should focus on.
 	PendingFiles []string `json:"pending_files,omitempty"`
+	// LocalGates lists repository-specific validation commands to run after the built-in audit gate.
+	LocalGates []string `json:"local_gates,omitempty"`
 	// Orchestrator, when set, enables multi-agent ping-pong.
 	Orchestrator *OrchestratorConfig `json:"orchestrator,omitempty"`
 }

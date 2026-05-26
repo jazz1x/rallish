@@ -44,6 +44,7 @@ func CycleNewCmd() *cobra.Command {
 		autoGoal           bool
 		agents             string
 		workingDir         string
+		localGates         []string
 	)
 	cmd := &cobra.Command{
 		Use:   "new",
@@ -53,7 +54,7 @@ func CycleNewCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("get home dir: %w", err)
 			}
-			return runCycleNew(cmd.Context(), home, goal, branch, maxCycles, maxDurationMinutes, autoGoal, agents, workingDir, cmd.OutOrStdout())
+			return runCycleNew(cmd.Context(), home, goal, branch, maxCycles, maxDurationMinutes, autoGoal, agents, workingDir, localGates, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().StringVar(&goal, "goal", "", "One-sentence objective for the first cycle (required)")
@@ -63,6 +64,7 @@ func CycleNewCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&autoGoal, "auto-goal", false, "Automatically discover next goal after each cycle")
 	cmd.Flags().StringVar(&agents, "agents", "", "Comma-separated adapter names for multi-agent orchestration")
 	cmd.Flags().StringVar(&workingDir, "working-dir", "", "Working directory for the cycle")
+	cmd.Flags().StringArrayVar(&localGates, "local-gate", nil, "Repository-specific validation command to run after audit (repeatable)")
 	_ = cmd.MarkFlagRequired("goal")
 	return cmd
 }
@@ -164,6 +166,7 @@ func CycleStartCmd() *cobra.Command {
 		maxDurationMinutes int
 		autoGoal           bool
 		agents             string
+		localGates         []string
 	)
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -183,6 +186,7 @@ func CycleStartCmd() *cobra.Command {
 				MaxCycles:          maxCycles,
 				MaxDurationMinutes: maxDurationMinutes,
 				AutoGoal:           autoGoal,
+				LocalGates:         localGates,
 			}
 			if agents != "" {
 				req.Orchestrator = &contract.OrchestratorConfig{
@@ -200,6 +204,7 @@ func CycleStartCmd() *cobra.Command {
 	cmd.Flags().IntVar(&maxDurationMinutes, "max-duration", 240, "Maximum runtime in minutes (default: 240 = 4 hours)")
 	cmd.Flags().BoolVar(&autoGoal, "auto-goal", true, "Automatically discover next goal after each cycle")
 	cmd.Flags().StringVar(&agents, "agents", "", "Comma-separated adapter names for multi-agent orchestration")
+	cmd.Flags().StringArrayVar(&localGates, "local-gate", nil, "Repository-specific validation command to run after audit (repeatable)")
 	cmd.Flags().String("log-file", "", "Append event stream to file (e.g. /tmp/cycle.log)")
 	_ = cmd.MarkFlagRequired("goal")
 	return cmd
@@ -240,6 +245,12 @@ func runCycleStart(ctx context.Context, home string, req contract.NewCycleReques
 	_, _ = fmt.Fprintf(out, "  max_cycles:  %d\n", state.MaxCycles)
 	_, _ = fmt.Fprintf(out, "  max_duration:%d min\n", state.MaxDurationMinutes)
 	_, _ = fmt.Fprintf(out, "  auto_goal:   %v\n", state.AutoGoal)
+	if len(state.LocalGates) > 0 {
+		_, _ = fmt.Fprintf(out, "  local_gates: %d\n", len(state.LocalGates))
+		for _, gate := range state.LocalGates {
+			_, _ = fmt.Fprintf(out, "    - %s\n", gate)
+		}
+	}
 	_, _ = fmt.Fprintf(out, "  state_file:  tmp/cycle-%s.json\n", state.ID)
 
 	// 2. Start orchestration if agents are configured.
@@ -271,7 +282,7 @@ func runCycleStart(ctx context.Context, home string, req contract.NewCycleReques
 	return runCycleWatch(ctx, home, state.ID, logFile, out)
 }
 
-func runCycleNew(ctx context.Context, home, goal, branch string, maxCycles, maxDurationMinutes int, autoGoal bool, agents, workingDir string, out io.Writer) error {
+func runCycleNew(ctx context.Context, home, goal, branch string, maxCycles, maxDurationMinutes int, autoGoal bool, agents, workingDir string, localGates []string, out io.Writer) error {
 	bc, err := resolveBrokerClient(home, 0)
 	if err != nil {
 		return err
@@ -283,6 +294,7 @@ func runCycleNew(ctx context.Context, home, goal, branch string, maxCycles, maxD
 		MaxCycles:          maxCycles,
 		MaxDurationMinutes: maxDurationMinutes,
 		AutoGoal:           autoGoal,
+		LocalGates:         localGates,
 	}
 	if agents != "" || workingDir != "" {
 		req.Orchestrator = &contract.OrchestratorConfig{
@@ -318,6 +330,12 @@ func runCycleNew(ctx context.Context, home, goal, branch string, maxCycles, maxD
 	_, _ = fmt.Fprintf(out, "  branch:       %s\n", state.Branch)
 	_, _ = fmt.Fprintf(out, "  max_cycles:   %d\n", state.MaxCycles)
 	_, _ = fmt.Fprintf(out, "  goal:         %s\n", state.NextCycleGoal)
+	if len(state.LocalGates) > 0 {
+		_, _ = fmt.Fprintf(out, "  local_gates: %d\n", len(state.LocalGates))
+		for _, gate := range state.LocalGates {
+			_, _ = fmt.Fprintf(out, "    - %s\n", gate)
+		}
+	}
 	_, _ = fmt.Fprintf(out, "  state_file:   tmp/cycle-%s.json\n", state.ID)
 	return nil
 }
@@ -362,6 +380,12 @@ func runCycleStatus(ctx context.Context, home, cycleID string, out io.Writer) er
 	_, _ = fmt.Fprintf(out, "branch:       %s\n", state.Branch)
 	_, _ = fmt.Fprintf(out, "baseline:     %s\n", state.BaselineSHA)
 	_, _ = fmt.Fprintf(out, "goal:         %s\n", state.NextCycleGoal)
+	if len(state.LocalGates) > 0 {
+		_, _ = fmt.Fprintf(out, "local_gates:  %d\n", len(state.LocalGates))
+		for _, gate := range state.LocalGates {
+			_, _ = fmt.Fprintf(out, "  - %s\n", gate)
+		}
+	}
 	if state.ShouldRotateAgent() {
 		_, _ = fmt.Fprintf(out, "agent_rotate: yes (3-cycle reset)\n")
 	}

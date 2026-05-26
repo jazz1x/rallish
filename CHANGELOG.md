@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   goals via `go vet`, `golangci-lint --fast-only`, and TODO/FIXME scan.
   `MaxDurationMinutes` caps runtime; `HaltSuccess` exits cleanly when the
   codebase is clean.
+- **Project-specific cycle gates.** `cycle new` / `cycle start` accept
+  repeatable `--local-gate "<command>"` checks that run after the built-in
+  audit gate, persist in `CycleState.local_gates`, appear in `cycle status`,
+  and are included in multi-agent cycle summaries.
 
 ## [0.3.0] - 2026-05-20
 

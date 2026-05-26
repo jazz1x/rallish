@@ -24,6 +24,10 @@
 - **AutoGoal + 시간 기반 종료.** `go vet`, `golangci-lint --fast-only`,
   TODO/FIXME 스캔으로 다음 목표 자동 발견. `MaxDurationMinutes`로 실행
   시간 제한; 코드베이스가 깨끗하면 `HaltSuccess`로 graceful 종료.
+- **프로젝트별 사이클 게이트.** `cycle new` / `cycle start`에서 반복 가능한
+  `--local-gate "<command>"` 검증을 받아 내장 audit 게이트 뒤에 실행하고,
+  `CycleState.local_gates`에 저장하며 `cycle status` 및 멀티 에이전트
+  사이클 요약에 포함.
 
 ## [0.3.0] - 2026-05-20
 

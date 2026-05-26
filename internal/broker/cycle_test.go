@@ -31,9 +31,10 @@ func TestHandleCreateCycle(t *testing.T) {
 	srv := newTestBroker(t)
 
 	reqBody, _ := json.Marshal(contract.NewCycleRequest{
-		Goal:      "feat: test create",
-		Branch:    "feat/test",
-		MaxCycles: 5,
+		Goal:       "feat: test create",
+		Branch:     "feat/test",
+		MaxCycles:  5,
+		LocalGates: []string{" go test ./... ", ""},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/cycles", bytes.NewReader(reqBody))
 	rec := httptest.NewRecorder()
@@ -55,6 +56,9 @@ func TestHandleCreateCycle(t *testing.T) {
 	}
 	if state.Branch != "feat/test" {
 		t.Fatalf("branch = %q", state.Branch)
+	}
+	if len(state.LocalGates) != 1 || state.LocalGates[0] != "go test ./..." {
+		t.Fatalf("local_gates = %v", state.LocalGates)
 	}
 }
 
@@ -286,6 +290,36 @@ func TestCycleEventLastFailedGate(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestPipelineForStateInsertsLocalGatesAfterAudit(t *testing.T) {
+	srv := newTestBroker(t)
+	state, err := cycle.NewState(contract.NewCycleRequest{
+		Goal:       "feat: test local gates",
+		LocalGates: []string{"go test ./...", "go vet ./..."},
+	}, "cyc_local_gates")
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+
+	names := srv.pipelineForState(state).Names()
+	want := []string{
+		"preflight",
+		"audit",
+		"cmd:go test ./...",
+		"cmd:go vet ./...",
+		"philosophy",
+		"polish",
+		"commit",
+	}
+	if len(names) != len(want) {
+		t.Fatalf("names = %v, want %v", names, want)
+	}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("names = %v, want %v", names, want)
+		}
 	}
 }
 

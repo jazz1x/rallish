@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewStateDefaults(t *testing.T) {
-	req := contract.NewCycleRequest{Goal: "feat: test"}
+	req := contract.NewCycleRequest{Goal: "feat: test", LocalGates: []string{" go test ./... ", "", "   "}}
 	state, err := NewState(req, "cyc_1_abcd")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -27,6 +27,9 @@ func TestNewStateDefaults(t *testing.T) {
 	}
 	if state.NextCycleGoal != "feat: test" {
 		t.Fatalf("goal = %q", state.NextCycleGoal)
+	}
+	if len(state.LocalGates) != 1 || state.LocalGates[0] != "go test ./..." {
+		t.Fatalf("local_gates = %v", state.LocalGates)
 	}
 }
 

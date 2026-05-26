@@ -17,6 +17,7 @@ type MultiAgentOrchestrator struct {
 	registry *adapter.Registry
 	sync     *StateFileSync
 	driver   *Driver
+	pipeline func(State) Pipeline
 }
 
 // NewMultiAgentOrchestrator creates an orchestrator.
@@ -31,6 +32,12 @@ func NewMultiAgentOrchestrator(reg *adapter.Registry, sync *StateFileSync) *Mult
 // SetDriverPipeline injects a pipeline into the underlying driver.
 func (o *MultiAgentOrchestrator) SetDriverPipeline(p Pipeline) {
 	o.driver.SetPipeline(p)
+	o.pipeline = nil
+}
+
+// SetPipelineFactory injects a state-aware pipeline into the underlying driver.
+func (o *MultiAgentOrchestrator) SetPipelineFactory(fn func(State) Pipeline) {
+	o.pipeline = fn
 }
 
 // SetDriverSleeper injects a sleeper into the underlying driver.
@@ -83,6 +90,9 @@ func (o *MultiAgentOrchestrator) Run(ctx context.Context, cfg contract.Orchestra
 		if err := o.applyResponse(&state, resp); err != nil {
 			return fmt.Errorf("orchestrator apply response: %w", err)
 		}
+		if o.pipeline != nil {
+			o.driver.SetPipeline(o.pipeline(state))
+		}
 
 		// Run the driver step (pipeline + commit).
 		result := o.driver.Step(ctx, state)
@@ -120,6 +130,7 @@ type cycleStateSummary struct {
 	Branch          string               `json:"branch"`
 	BaselineSHA     string               `json:"baseline_sha,omitempty"`
 	PendingFiles    []string             `json:"pending_files,omitempty"`
+	LocalGates      []string             `json:"local_gates,omitempty"`
 	NextCycleGoal   string               `json:"next_cycle_goal"`
 	ViolationsFound []contract.Violation `json:"violations_found,omitempty"`
 	Halted          bool                 `json:"halted"`
@@ -143,6 +154,11 @@ func summariseState(state State) cycleStateSummary {
 		s.PendingFiles = state.PendingFiles[:20]
 	} else {
 		s.PendingFiles = append([]string(nil), state.PendingFiles...)
+	}
+	if len(state.LocalGates) > 20 {
+		s.LocalGates = state.LocalGates[:20]
+	} else {
+		s.LocalGates = append([]string(nil), state.LocalGates...)
 	}
 	if len(state.ViolationsFound) > 10 {
 		s.ViolationsFound = state.ViolationsFound[:10]

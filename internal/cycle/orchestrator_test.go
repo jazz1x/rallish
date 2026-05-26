@@ -181,6 +181,7 @@ func TestSummariseStateCapsSlices(t *testing.T) {
 	// Fill slices beyond caps.
 	for i := 0; i < 30; i++ {
 		state.PendingFiles = append(state.PendingFiles, fmt.Sprintf("file%d.go", i))
+		state.LocalGates = append(state.LocalGates, fmt.Sprintf("check-%d", i))
 	}
 	for i := 0; i < 15; i++ {
 		state.ViolationsFound = append(state.ViolationsFound, contract.Violation{File: "a.go", Line: i, Type: "rop", Message: "msg"})
@@ -189,6 +190,9 @@ func TestSummariseStateCapsSlices(t *testing.T) {
 	sum := summariseState(state)
 	if len(sum.PendingFiles) != 20 {
 		t.Fatalf("pending_files capped to %d, want 20", len(sum.PendingFiles))
+	}
+	if len(sum.LocalGates) != 20 {
+		t.Fatalf("local_gates capped to %d, want 20", len(sum.LocalGates))
 	}
 	if len(sum.ViolationsFound) != 10 {
 		t.Fatalf("violations capped to %d, want 10", len(sum.ViolationsFound))

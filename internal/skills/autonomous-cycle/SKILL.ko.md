@@ -58,11 +58,12 @@ ssl:
 │  1. tmp/cycle-<id>.json 읽기 (재개점)              │
 │  2. Preflight 게이트 (브랜치, 클린, 목표, SSH)     │
 │  3. Audit 게이트 (make check-all)                  │
-│  4. Philosophy 게이트 (ROP / SSOT / SRP 스위프)    │
-│  5. Polish 게이트 (테스트, 린트, no-raw-ansi)      │
-│  6. Commit 게이트 (conventional message, amend 금지)│
-│  7. tmp/cycle-<id>.json 업데이트                   │
-│  8. 3사이클 마다 에이전트 리셋                     │
+│  4. Local 게이트 (--local-gate, 설정 시)           │
+│  5. Philosophy 게이트 (ROP / SSOT / SRP 스위프)    │
+│  6. Polish 게이트 (테스트, 린트, no-raw-ansi)      │
+│  7. Commit 게이트 (conventional message, amend 금지)│
+│  8. tmp/cycle-<id>.json 업데이트                   │
+│  9. 3사이클 마다 에이전트 리셋                     │
 └────────────────────────────────────────────────────┘
        ↓ rate-limit / token exhaust
    handoff 노트 작성 → graceful exit
@@ -76,7 +77,7 @@ ssl:
 에이전트:
   1. rallish daemon 실행 확인:  rallish doctor
   2. 원샷 시작 (이벤트를 실시간 스트리밍하며 블록):
-       rallish cycle start --goal "feat: refactor adapter package" --agents claude,kimi
+       rallish cycle start --goal "feat: refactor adapter package" --agents claude,kimi --local-gate "make check-all"
      - 사이클 생성, 오케스트레이션 시작, SSE 감시를 한 번에 처리.
      - Ctrl+C로 detach 가능; 백그라운드에서 계속 실행.
   3. 나중에 감시 재개:  rallish cycle watch --cycle-id <id>
@@ -121,12 +122,13 @@ ssl:
 
 1. **`--max-cycles`를 8–10으로 설정** (한 세션의 안전한 기본값).
 2. **`--agents claude,kimi`로 멀티 에이전트 핑퐁 사용**.
-3. **터미널 멀티플렉서** (`tmux`, `screen`)에서 시작해 SSH 연결 끊김에도 데몬이 살아남도록 한다.
-4. **로그를 파일로 리다이렉트**:
+3. **`--local-gate "<command>"`로 내장 Go 게이트 외 프로젝트별 검증 명령을 추가**.
+4. **터미널 멀티플렉서** (`tmux`, `screen`)에서 시작해 SSH 연결 끊김에도 데몬이 살아남도록 한다.
+5. **로그를 파일로 리다이렉트**:
    ```bash
    rallish daemon > tmp/autonomous-$(date +%Y%m%d-%H%M).log 2>&1 &
    ```
-5. **우아한 성능 저하**: 게이트 실패 시 사이클이 중단되고 `halt_reason`을 기록하지만, 데몬은 다른 요청을 계속 처리한다.
+6. **우아한 성능 저하**: 게이트 실패 시 사이클이 중단되고 `halt_reason`을 기록하지만, 데몬은 다른 요청을 계속 처리한다.
 
 ## 20분 감시 라운드
 
