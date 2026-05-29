@@ -4,6 +4,7 @@
 package contract
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -72,6 +73,11 @@ const (
 	HaltSuccess            HaltReason = "success"
 	HaltStuck              HaltReason = "stuck"
 	HaltBudgetExceeded     HaltReason = "budget-exceeded"
+	// HaltUnparseableTurn is raised when an agent turn carries a non-empty
+	// handshake payload that does not parse into the typed TurnPayload. The
+	// harness trusts structural facts, not self-report: an unparseable turn is
+	// an error, never silently coerced into a goal (parse-don't-validate).
+	HaltUnparseableTurn HaltReason = "unparseable-turn"
 )
 
 // ParseHaltReason converts a string to a validated HaltReason.
@@ -80,7 +86,7 @@ func ParseHaltReason(s string) (HaltReason, error) {
 	switch HaltReason(s) {
 	case HaltSelfAuditViolation, HaltSSHAuthFailed, HaltMaxCyclesReached,
 		HaltGateFailure, HaltUserRequested, HaltPreflightFailed, HaltSuccess,
-		HaltStuck, HaltBudgetExceeded:
+		HaltStuck, HaltBudgetExceeded, HaltUnparseableTurn:
 		return HaltReason(s), nil
 	default:
 		return "", fmt.Errorf("halt reason %q: %w", s, ErrInvalidHaltReason)
@@ -89,6 +95,38 @@ func ParseHaltReason(s string) (HaltReason, error) {
 
 // String returns the canonical string representation.
 func (r HaltReason) String() string { return string(r) }
+
+// TurnPayload is the typed handshake an agent encodes into TurnResponse.Summary
+// for the autonomous cycle. It is the structured contract between the agent and
+// the orchestrator — parsed strictly, never inferred from free text.
+type TurnPayload struct {
+	// NextGoal is the one-sentence objective the agent proposes for the next cycle.
+	NextGoal string `json:"next_goal,omitempty"`
+	// ViolationsFound carries issues the agent reported during its turn.
+	ViolationsFound []Violation `json:"violations_found,omitempty"`
+	// HaltRequested, when true, asks the orchestrator to stop the cycle.
+	HaltRequested bool `json:"halt_requested,omitempty"`
+}
+
+// ParseTurnPayload parses an agent handshake summary into a typed TurnPayload.
+//
+// It is parse-don't-validate at the agent boundary:
+//   - An empty summary is a no-op turn (handoff/Done with nothing to apply) and
+//     returns the zero payload with ok=true — the downstream goal gate decides
+//     whether a missing goal is fatal, not the handshake.
+//   - A non-empty summary MUST be valid JSON for the typed payload. If it does
+//     not parse, ok=false and the caller MUST halt (HaltUnparseableTurn). Prose
+//     is never coerced into a goal — the harness trusts structure, not text.
+func ParseTurnPayload(summary string) (TurnPayload, bool) {
+	if summary == "" {
+		return TurnPayload{}, true
+	}
+	var p TurnPayload
+	if err := json.Unmarshal([]byte(summary), &p); err != nil {
+		return TurnPayload{}, false
+	}
+	return p, true
+}
 
 // Violation records a single issue discovered by a gate or philosophy sweep.
 type Violation struct {

@@ -300,6 +300,8 @@ func TestBuildRequestIncludesWorkContract(t *testing.T) {
 	}
 }
 
+// TestApplyResponseJSON is the false-positive guard: a well-formed structured
+// handshake MUST still parse and advance (do not over-tighten the new strict path).
 func TestApplyResponseJSON(t *testing.T) {
 	state := State{CycleState: contract.CycleState{ID: "cyc_1", NextCycleGoal: "old"}}
 	orch := &MultiAgentOrchestrator{}
@@ -309,6 +311,9 @@ func TestApplyResponseJSON(t *testing.T) {
 	if err := orch.applyResponse(&state, resp); err != nil {
 		t.Fatalf("applyResponse: %v", err)
 	}
+	if state.Halted {
+		t.Fatal("a well-formed handshake must not halt")
+	}
 	if state.NextCycleGoal != "new-goal" {
 		t.Fatalf("next_cycle_goal = %q, want new-goal", state.NextCycleGoal)
 	}
@@ -317,33 +322,67 @@ func TestApplyResponseJSON(t *testing.T) {
 	}
 }
 
+// TestApplyResponseEmptySummaryIsNoOp is the second false-positive guard: an
+// empty summary (a Done / pure-handoff turn) is a legitimate no-op, NOT a halt.
+// The downstream goal gate — not the handshake parser — decides whether a
+// missing goal is fatal.
+func TestApplyResponseEmptySummaryIsNoOp(t *testing.T) {
+	state := State{CycleState: contract.CycleState{ID: "cyc_1", NextCycleGoal: "keep"}}
+	orch := &MultiAgentOrchestrator{}
+
+	if err := orch.applyResponse(&state, contract.TurnResponse{Summary: ""}); err != nil {
+		t.Fatalf("applyResponse: %v", err)
+	}
+	if state.Halted {
+		t.Fatal("an empty summary must not halt")
+	}
+	if state.NextCycleGoal != "keep" {
+		t.Fatalf("next_cycle_goal = %q, want unchanged keep", state.NextCycleGoal)
+	}
+}
+
 func TestApplyResponseHaltRequested(t *testing.T) {
 	state := State{CycleState: contract.CycleState{ID: "cyc_1", Halted: false}}
 	orch := &MultiAgentOrchestrator{}
 
+	// An explicit halt request now surfaces a *HaltedError (ROP): the orchestrator
+	// must stop, not silently advance.
 	resp := contract.TurnResponse{Summary: `{"halt_requested":true}`}
-	if err := orch.applyResponse(&state, resp); err != nil {
-		t.Fatalf("applyResponse: %v", err)
+	err := orch.applyResponse(&state, resp)
+	var he *HaltedError
+	if !errors.As(err, &he) {
+		t.Fatalf("expected *HaltedError, got %T: %v", err, err)
 	}
-	if !state.Halted {
-		t.Fatal("expected halted")
+	if he.Reason != contract.HaltUserRequested {
+		t.Fatalf("reason = %q, want user-requested", he.Reason)
 	}
-	if state.HaltReason != contract.HaltUserRequested {
-		t.Fatalf("halt_reason = %q, want user-requested", state.HaltReason)
+	if !state.Halted || state.HaltReason != contract.HaltUserRequested {
+		t.Fatalf("state halted=%v reason=%q, want halted=true reason=user-requested", state.Halted, state.HaltReason)
 	}
 }
 
-func TestApplyResponseFallback(t *testing.T) {
+// TestApplyResponseUnparseableHalts encodes the NEW strict contract (replacing
+// the old loose fallback): a non-empty summary that is NOT valid typed JSON must
+// HALT with HaltUnparseableTurn. Prose is never coerced into the next goal —
+// the harness trusts structural facts, not self-report (parse-don't-validate).
+func TestApplyResponseUnparseableHalts(t *testing.T) {
 	state := State{CycleState: contract.CycleState{ID: "cyc_1", NextCycleGoal: "old"}}
 	orch := &MultiAgentOrchestrator{}
 
-	// Non-JSON summary becomes the next goal.
 	resp := contract.TurnResponse{Summary: "plain text goal"}
-	if err := orch.applyResponse(&state, resp); err != nil {
-		t.Fatalf("applyResponse: %v", err)
+	err := orch.applyResponse(&state, resp)
+	var he *HaltedError
+	if !errors.As(err, &he) {
+		t.Fatalf("expected *HaltedError for unparseable turn, got %T: %v", err, err)
 	}
-	if state.NextCycleGoal != "plain text goal" {
-		t.Fatalf("next_cycle_goal = %q, want plain text goal", state.NextCycleGoal)
+	if he.Reason != contract.HaltUnparseableTurn {
+		t.Fatalf("reason = %q, want unparseable-turn", he.Reason)
+	}
+	if !state.Halted {
+		t.Fatal("expected halted state on unparseable turn")
+	}
+	if state.NextCycleGoal != "old" {
+		t.Fatalf("next_cycle_goal = %q, want unchanged old (prose must NOT become the goal)", state.NextCycleGoal)
 	}
 }
 
@@ -585,5 +624,87 @@ func TestOrchestratorHaltsWhenStuck(t *testing.T) {
 	}
 	if he.Reason != contract.HaltStuck {
 		t.Fatalf("reason = %q, want %q", he.Reason, contract.HaltStuck)
+	}
+}
+
+// TestOrchestratorHaltsOnUnparseableTurn proves the strict handshake end-to-end:
+// an adapter that returns a non-JSON summary halts the run with
+// HaltUnparseableTurn, persists the sealed state, and records a cycle_halted
+// ledger entry (so the reviver guard then seals resume). Parse-don't-validate at
+// the agent boundary, wired through the live loop — not just the unit.
+func TestOrchestratorHaltsOnUnparseableTurn(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateSync := NewStateFileSync(filepath.Join(tmpDir, "cycle.json"))
+	ledger := NewLedgerFileSync(filepath.Join(tmpDir, "cycle-ledger.jsonl"))
+
+	const cycleID = "cyc_unparseable_1"
+	state, err := NewState(contract.NewCycleRequest{Goal: "feat: handshake-test", MaxCycles: 10}, cycleID)
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+	if err := stateSync.Write(state); err != nil {
+		t.Fatalf("write initial state: %v", err)
+	}
+
+	// The adapter returns prose, not the typed JSON handshake. The old loose
+	// fallback would have treated this as the next goal and advanced; the strict
+	// contract halts.
+	reg := adapter.NewRegistry()
+	if err := reg.Register("builder", fake.New(func(_ int) contract.TurnResponse {
+		return contract.TurnResponse{Done: false, Summary: "I made some progress on the refactor"}
+	})); err != nil {
+		t.Fatalf("register builder: %v", err)
+	}
+
+	orch := NewMultiAgentOrchestrator(reg, stateSync)
+	orch.SetLedger(ledger)
+	orch.SetDriverPipeline(Pipeline{passGate{name: "ok"}})
+	orch.SetDriverSleeper(instantSleeper{})
+
+	runErr := orch.Run(context.Background(), contract.OrchestratorConfig{
+		Agents:     []string{"builder"},
+		WorkingDir: tmpDir,
+	})
+
+	if runErr == nil {
+		t.Fatal("expected an unparseable-turn halt, got nil")
+	}
+	var he *HaltedError
+	if !errors.As(runErr, &he) {
+		t.Fatalf("expected *HaltedError, got %T: %v", runErr, runErr)
+	}
+	if he.Reason != contract.HaltUnparseableTurn {
+		t.Fatalf("reason = %q, want %q", he.Reason, contract.HaltUnparseableTurn)
+	}
+
+	final, err := stateSync.Read()
+	if err != nil {
+		t.Fatalf("read final state: %v", err)
+	}
+	if !final.Halted || final.HaltReason != contract.HaltUnparseableTurn {
+		t.Fatalf("final state halted=%v reason=%q, want halted=true reason=%q",
+			final.Halted, final.HaltReason, contract.HaltUnparseableTurn)
+	}
+	// The cycle halted at the handshake, before the pipeline could complete a cycle.
+	if final.CompletedCycles != 0 {
+		t.Fatalf("completed_cycles = %d, want 0 (halt must precede pipeline completion)", final.CompletedCycles)
+	}
+
+	// A cycle_halted entry must be recorded so the reviver guard seals resume.
+	entries, err := ledger.ReadAll()
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	halts := 0
+	for _, e := range entries {
+		if e.Type == contract.LedgerEventCycleHalted {
+			halts++
+			if e.Summary != string(contract.HaltUnparseableTurn) {
+				t.Fatalf("halt summary = %q, want %q", e.Summary, contract.HaltUnparseableTurn)
+			}
+		}
+	}
+	if halts != 1 {
+		t.Fatalf("recorded %d cycle_halted entries, want 1", halts)
 	}
 }

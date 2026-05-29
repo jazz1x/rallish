@@ -4,6 +4,7 @@ package cycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -138,8 +139,14 @@ func (o *MultiAgentOrchestrator) Run(ctx context.Context, cfg contract.Orchestra
 			return err
 		}
 
-		// Parse response into cycle state mutations.
+		// Parse response into cycle state mutations. An unparseable handshake (or
+		// an explicit halt request) returns a *HaltedError: seal the cycle, record
+		// the halt, and stop — never advance on a turn we could not parse.
 		if err := o.applyResponse(&state, resp); err != nil {
+			var he *HaltedError
+			if errors.As(err, &he) {
+				return o.handleHandshakeHalt(state, he)
+			}
 			return fmt.Errorf("orchestrator apply response: %w", err)
 		}
 		if o.pipeline != nil {
@@ -262,28 +269,46 @@ func (o *MultiAgentOrchestrator) buildRequest(state State, agentName string, cfg
 	}, nil
 }
 
+// applyResponse parses the agent handshake (TurnResponse.Summary) into a typed
+// payload and applies it to the cycle state.
+//
+// Parse-don't-validate at the agent boundary: a non-empty summary that does not
+// parse into contract.TurnPayload HALTS the cycle (HaltUnparseableTurn). Prose
+// is never silently coerced into the next goal — the harness trusts structural
+// facts, not self-report. An empty summary is a legitimate no-op turn (the
+// downstream goal gate, not the handshake, decides whether a missing goal halts).
+//
+// When a halt is warranted (unparseable, or an explicit halt_requested), it
+// returns a *HaltedError so the orchestrator persists the sealed state and
+// records the halt to the ledger via handleHandshakeHalt.
 func (o *MultiAgentOrchestrator) applyResponse(state *State, resp contract.TurnResponse) error {
-	// Parse structured fields from the response summary if present.
-	var payload struct {
-		NextGoal        string               `json:"next_goal"`
-		ViolationsFound []contract.Violation `json:"violations_found"`
-		HaltRequested   bool                 `json:"halt_requested"`
+	payload, ok := contract.ParseTurnPayload(resp.Summary)
+	if !ok {
+		return state.Halt(contract.HaltUnparseableTurn).Err()
 	}
-	if err := json.Unmarshal([]byte(resp.Summary), &payload); err == nil {
-		if payload.HaltRequested {
-			state.Halt(contract.HaltUserRequested)
-			return nil
-		}
-		if payload.NextGoal != "" {
-			state.NextCycleGoal = payload.NextGoal
-		}
-		if len(payload.ViolationsFound) > 0 {
-			state.AppendViolations(payload.ViolationsFound)
-		}
-	} else if resp.Summary != "" {
-		// Fallback: treat the entire summary as the next goal.
-		state.NextCycleGoal = resp.Summary
+	if payload.HaltRequested {
+		return state.Halt(contract.HaltUserRequested).Err()
+	}
+	if payload.NextGoal != "" {
+		state.NextCycleGoal = payload.NextGoal
+	}
+	if len(payload.ViolationsFound) > 0 {
+		state.AppendViolations(payload.ViolationsFound)
 	}
 	state.UpdatedAt = time.Now().UnixMilli()
 	return nil
+}
+
+// handleHandshakeHalt persists a handshake-driven halt (unparseable turn or
+// explicit halt request) and records it to the ledger, mirroring the Stuck /
+// budget halt path so the reviver guard sees a sticky cycle_halted entry.
+func (o *MultiAgentOrchestrator) handleHandshakeHalt(state State, he *HaltedError) error {
+	if o.ledger != nil {
+		_ = o.ledger.Append(contract.NewHarnessLedgerEntry(
+			time.Now().UnixMilli(), state.ID, contract.LedgerEventCycleHalted, string(he.Reason), nil))
+	}
+	if werr := o.sync.Write(state); werr != nil {
+		return fmt.Errorf("orchestrator write halted state: %w", werr)
+	}
+	return he
 }

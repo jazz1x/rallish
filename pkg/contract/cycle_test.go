@@ -77,6 +77,7 @@ func TestParseHaltReason(t *testing.T) {
 		{"preflight-failed", HaltPreflightFailed, false},
 		{"stuck", HaltStuck, false},
 		{"budget-exceeded", HaltBudgetExceeded, false},
+		{"unparseable-turn", HaltUnparseableTurn, false},
 		{"unknown", "", true},
 		{"", "", true},
 	}
@@ -97,6 +98,46 @@ func TestParseHaltReason(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseTurnPayload(t *testing.T) {
+	t.Run("empty is no-op ok", func(t *testing.T) {
+		p, ok := ParseTurnPayload("")
+		if !ok {
+			t.Fatal("empty summary must parse ok as a no-op turn")
+		}
+		if p.NextGoal != "" || p.HaltRequested || len(p.ViolationsFound) != 0 {
+			t.Fatalf("empty summary must yield zero payload, got %#v", p)
+		}
+	})
+
+	t.Run("valid structured handshake", func(t *testing.T) {
+		p, ok := ParseTurnPayload(`{"next_goal":"fix lint","violations_found":[{"file":"a.go","line":2,"type":"rop","message":"m"}],"halt_requested":true}`)
+		if !ok {
+			t.Fatal("a well-formed handshake must parse ok")
+		}
+		if p.NextGoal != "fix lint" {
+			t.Fatalf("next_goal = %q, want fix lint", p.NextGoal)
+		}
+		if !p.HaltRequested {
+			t.Fatal("halt_requested = false, want true")
+		}
+		if len(p.ViolationsFound) != 1 || p.ViolationsFound[0].Type != "rop" {
+			t.Fatalf("violations = %#v", p.ViolationsFound)
+		}
+	})
+
+	t.Run("prose is unparseable", func(t *testing.T) {
+		if _, ok := ParseTurnPayload("I made progress on the refactor"); ok {
+			t.Fatal("prose must NOT parse (parse-don't-validate: it is an error, not a goal)")
+		}
+	})
+
+	t.Run("malformed json is unparseable", func(t *testing.T) {
+		if _, ok := ParseTurnPayload(`{"next_goal":"x"`); ok {
+			t.Fatal("truncated JSON must NOT parse")
+		}
+	})
 }
 
 func TestCycleStateCanAdvance(t *testing.T) {
