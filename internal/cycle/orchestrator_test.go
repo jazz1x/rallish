@@ -346,3 +346,56 @@ func TestApplyResponseFallback(t *testing.T) {
 		t.Fatalf("next_cycle_goal = %q, want plain text goal", state.NextCycleGoal)
 	}
 }
+
+func TestOrchestratorHaltsWhenStuck(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateSync := NewStateFileSync(filepath.Join(tmpDir, "cycle.json"))
+	ledger := NewLedgerFileSync(filepath.Join(tmpDir, "cycle-ledger.jsonl"))
+
+	const cycleID = "cyc_stuck_1"
+	state, err := NewState(contract.NewCycleRequest{Goal: "feat: stuck-test", MaxCycles: 10}, cycleID)
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+	if err := stateSync.Write(state); err != nil {
+		t.Fatalf("write initial state: %v", err)
+	}
+
+	// Pre-seed the ledger with StuckRepeatTurnThreshold identical agent-turn
+	// entries so predicate (a) of Stuck() fires immediately.
+	stuckResp := contract.TurnResponse{Summary: "same"}
+	for i := 0; i < StuckRepeatTurnThreshold; i++ {
+		entry := contract.NewAgentTurnLedgerEntry(int64(1000+i), cycleID, "builder", stuckResp)
+		if err := ledger.Append(entry); err != nil {
+			t.Fatalf("seed ledger entry %d: %v", i, err)
+		}
+	}
+
+	reg := adapter.NewRegistry()
+	if err := reg.Register("builder", fake.New(func(_ int) contract.TurnResponse {
+		return contract.TurnResponse{Done: false, Summary: `{"next_goal":"should-never-run"}`}
+	})); err != nil {
+		t.Fatalf("register builder: %v", err)
+	}
+
+	orch := NewMultiAgentOrchestrator(reg, stateSync)
+	orch.SetLedger(ledger)
+	orch.SetDriverPipeline(Pipeline{passGate{name: "ok"}})
+	orch.SetDriverSleeper(instantSleeper{})
+
+	runErr := orch.Run(context.Background(), contract.OrchestratorConfig{
+		Agents:     []string{"builder"},
+		WorkingDir: tmpDir,
+	})
+
+	if runErr == nil {
+		t.Fatal("expected a halt error, got nil")
+	}
+	var he *HaltedError
+	if !errors.As(runErr, &he) {
+		t.Fatalf("expected *HaltedError, got %T: %v", runErr, runErr)
+	}
+	if he.Reason != contract.HaltStuck {
+		t.Fatalf("reason = %q, want %q", he.Reason, contract.HaltStuck)
+	}
+}

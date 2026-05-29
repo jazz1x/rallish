@@ -70,6 +70,27 @@ func (o *MultiAgentOrchestrator) Run(ctx context.Context, cfg contract.Orchestra
 			return nil
 		}
 
+		// Anti-spin (G5): halt a spinning / no-progress run before it bleeds
+		// tokens. Stuck() is a cheap ledger-reader; halting reuses the canonical
+		// HaltedError flow and records a cycle_halted entry so a reviver sees a
+		// sticky halt.
+		if o.ledger != nil {
+			entries, lerr := o.ledger.ReadAll()
+			if lerr != nil {
+				return fmt.Errorf("orchestrator read ledger: %w", lerr)
+			}
+			if reason, stuck := Stuck(entries); stuck {
+				halted := state.Halt(reason)
+				st := halted.Value()
+				_ = o.ledger.Append(contract.NewHarnessLedgerEntry(
+					time.Now().UnixMilli(), st.ID, contract.LedgerEventCycleHalted, string(reason), nil))
+				if werr := o.sync.Write(st); werr != nil {
+					return fmt.Errorf("orchestrator write halted state: %w", werr)
+				}
+				return halted.Err()
+			}
+		}
+
 		// Determine current agent.
 		agentIdx := state.CompletedCycles / resetEvery
 		agentIdx %= len(cfg.Agents)
