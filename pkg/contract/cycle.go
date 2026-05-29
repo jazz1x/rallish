@@ -70,6 +70,7 @@ const (
 	HaltUserRequested      HaltReason = "user-requested"
 	HaltPreflightFailed    HaltReason = "preflight-failed"
 	HaltSuccess            HaltReason = "success"
+	HaltStuck              HaltReason = "stuck"
 )
 
 // ParseHaltReason converts a string to a validated HaltReason.
@@ -77,7 +78,8 @@ const (
 func ParseHaltReason(s string) (HaltReason, error) {
 	switch HaltReason(s) {
 	case HaltSelfAuditViolation, HaltSSHAuthFailed, HaltMaxCyclesReached,
-		HaltGateFailure, HaltUserRequested, HaltPreflightFailed, HaltSuccess:
+		HaltGateFailure, HaltUserRequested, HaltPreflightFailed, HaltSuccess,
+		HaltStuck:
 		return HaltReason(s), nil
 	default:
 		return "", fmt.Errorf("halt reason %q: %w", s, ErrInvalidHaltReason)
