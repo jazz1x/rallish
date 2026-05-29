@@ -56,6 +56,33 @@
 - **サイクル状態の台帳サマリー.** `rallish cycle status` が台帳を読める場合に
   entry 数と最後のイベントを表示します.
 
+- **アンチスピン活性性 (G5).** 無進捗/スピンする実行はトークンを浪費する前に自ら
+  halt: `cycle.Stuck` が反復ターン・反復ゲート失敗・ピンポン・停滞した frontier を
+  検出し、sticky-halt reviver ガードが halt 済みサイクルの再開を拒否、ハードな累積
+  コスト上限が revival をまたぐ productive runaway を捕捉.
+- **実行前 action-gate (G6).** `contract.DecideToolUse`(破壊的 deny-list +
+  シークレット封じ込め)が保留中のコマンドを分類し、`rallish gate tooluse` が意味の
+  ある exit code で verdict を返す — rallish はポリシーを宣言・記録し、ランタイム
+  フックが強制.
+- **改ざん検知・再現可能な監査 (G4).** 台帳エントリに `schema_version` + ハッシュ
+  チェーン (`prev_hash`/`hash`); `contract.VerifyChain` が内容改ざんを検出、
+  `contract.Replay` が制御グラフを再構築 (verify-before-reconstruct)、CT スタイルの
+  Merkle 層 (RFC 9162) が inclusion + consistency 証明を追加.
+- **ゲーム不可能な検証ゲート (G2).** エージェントのハンドシェイクを厳格にパース
+  (パース不能なターンは halt、暗黙の prose フォールバックなし); gate self-eval が
+  philosophy スキャナがシードされた違反を捕まえることを証明; ゲート定義をハッシュ
+  ピン留めして in-cycle 編集を検出.
+- **A2A v1.0 準拠 (G3).** ブローカーが `/.well-known/agent-card.json` に実際の
+  `protocolVersion` を持つ署名付き Agent Card を提供、PascalCase RPC
+  (`SendMessage`/`GetTask`/`CancelTask`/`SubscribeToTask`)、未知フィールドを拒否
+  する厳格な型付き intake; レガシーパスは後方互換のため維持.
+- **バウンド付き resume リファレンスドライバー (G1).** `rallish cycle run --once`
+  が単一の非監視パスを実行し halt 理由から導出したコードで終了 — cron/スケジューラ
+  が駆動する安全な呼び出し点; resume は既存の atomic 状態ファイルで検証.
+- **不変条件としてのガードレール.** CI import-guard テストがコアの
+  loop/scheduler/graph-DB パッケージの import を禁止; `go mod verify` を push
+  ゲートに連結; AGENTS.md/CLAUDE.md を構造化された convention ソースとして取り込み.
+
 ## [0.3.0] - 2026-05-20
 
 ### 追加

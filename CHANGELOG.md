@@ -57,6 +57,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cycle status ledger summary.** `rallish cycle status` shows the ledger entry
   count and last event when ledger readback is available.
 
+- **Anti-spin liveness (G5).** A no-progress / spinning run halts itself before
+  it bleeds tokens: `cycle.Stuck` detects repeated turns, repeated gate failures,
+  ping-pong, and a stalled frontier; a sticky-halt reviver guard refuses to
+  resume a halted cycle; and a hard lifetime cost ceiling catches a productive
+  runaway summed across revivals.
+- **Pre-execution action-gate (G6).** `contract.DecideToolUse` (destructive
+  deny-list + secret containment) classifies a pending command and `rallish gate
+  tooluse` returns the verdict with a meaningful exit code — rallish declares the
+  policy and records the decision, the runtime hook enforces.
+- **Tamper-evident, replayable audit (G4).** Ledger entries carry a
+  `schema_version` and are hash-chained (`prev_hash`/`hash`); `contract.VerifyChain`
+  detects content tampering, `contract.Replay` reconstructs the control graph
+  (verify-before-reconstruct), and a CT-style Merkle layer (RFC 9162) adds
+  inclusion + consistency proofs.
+- **Un-gameable verification gates (G2).** The agent handshake is parsed strictly
+  (an unparseable turn halts, never a silent prose fallback); a gate self-eval
+  proves the philosophy scanners catch seeded violations; gate definitions are
+  hash-pinned so an in-cycle edit is detectable.
+- **A2A v1.0 conformance (G3).** The broker serves a signed Agent Card at
+  `/.well-known/agent-card.json` with a real `protocolVersion`, PascalCase RPCs
+  (`SendMessage`/`GetTask`/`CancelTask`/`SubscribeToTask`), and strict typed
+  intake that rejects unknown fields; the legacy path stays for back-compat.
+- **Bounded resume reference driver (G1).** `rallish cycle run --once` runs one
+  non-watching pass and exits with a code derived from the halt reason — the safe
+  invocation a cron / scheduler drives; resume rides the existing atomic state file.
+- **Guardrails as invariants.** A CI import-guard test forbids the core from
+  importing a loop/scheduler/graph-DB package; `go mod verify` is wired into the
+  push gate; AGENTS.md / CLAUDE.md are ingested as a structured convention source.
+
 ## [0.3.0] - 2026-05-20
 
 ### Added
