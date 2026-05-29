@@ -28,6 +28,33 @@
   繰り返し指定できる `--local-gate "<command>"` チェックを受け取り、内蔵
   audit ゲート後に実行し、`CycleState.local_gates` に保存して `cycle status`
   とマルチエージェントのサイクル要約に含めます.
+- **自律作業ハーネス契約.** `pkg/contract.WorkContract` が、特定の
+  エージェントランタイムに依存しない作業目標、スコープ、ゲート、予算、
+  オーケストレーション形状を定義し、アダプターが共通利用できるようにしました.
+- **ハーネス台帳イベント契約.** `pkg/contract.HarnessLedgerEntry` が、将来の
+  サイクル台帳向けの append-only 監査イベント形状を定義しました.
+- **サイクル台帳ファイル同期.** `internal/cycle.LedgerFileSync` がハーネス
+  台帳イベントを JSONL として append/read し、監査ログの保存点を確立しました.
+- **ゲートから台帳への projection.** `contract.NewGateLedgerEntry` がゲート
+  レポートを append-only の成功/失敗監査イベントへ変換します.
+- **ハンドオフから台帳への projection.** `contract.NewHandoffLedgerEntry` が
+  エージェントのハンドオフ応答を `handoff_to` を保持した append-only 監査
+  イベントへ変換します.
+- **オーケストレーターのハンドオフ台帳連携.** マルチエージェントサイクルは
+  アダプターが `handoff_to` を返したとき `handoff_created` イベントを append
+  します.
+- **エージェントターン台帳イベント.** マルチエージェントサイクルは完了した
+  アダプターターンを、任意のハンドオフイベントとは別の `agent_turn` イベント
+  として append します.
+- **台帳失敗ポリシー.** ハーネス PRD とランブックに、broker の台帳 append は
+  best-effort、orchestrator turn append は fail-fast であることを文書化しました.
+- **サイクル台帳の読み出し.** `GET /cycles/{id}/ledger` が append-only の
+  ハーネス台帳イベントを返し、mutable state が削除済みの halt サイクルも
+  参照できます.
+- **サイクル台帳 CLI.** `rallish cycle ledger --cycle-id <id>` がハーネス
+  台帳を、人と後続エージェントの両方が読みやすい pretty JSON で出力します.
+- **サイクル状態の台帳サマリー.** `rallish cycle status` が台帳を読める場合に
+  entry 数と最後のイベントを表示します.
 
 ## [0.3.0] - 2026-05-20
 

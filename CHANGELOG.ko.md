@@ -28,6 +28,29 @@
   `--local-gate "<command>"` 검증을 받아 내장 audit 게이트 뒤에 실행하고,
   `CycleState.local_gates`에 저장하며 `cycle status` 및 멀티 에이전트
   사이클 요약에 포함.
+- **자율 작업 하네스 계약.** `pkg/contract.WorkContract`가 특정 에이전트
+  런타임에 묶이지 않는 작업 목표, 범위, 게이트, 예산, 오케스트레이션 형태를
+  정의해 어댑터가 공통으로 사용할 수 있게 함.
+- **하네스 원장 이벤트 계약.** `pkg/contract.HarnessLedgerEntry`가 향후
+  사이클 원장을 위한 append-only 감사 이벤트 형태를 정의.
+- **사이클 원장 파일 동기화.** `internal/cycle.LedgerFileSync`가 하네스
+  원장 이벤트를 JSONL로 append/read하여 감사 로그 저장 지점을 마련.
+- **게이트-원장 projection.** `contract.NewGateLedgerEntry`가 게이트 리포트를
+  append-only 통과/실패 감사 이벤트로 변환.
+- **핸드오프-원장 projection.** `contract.NewHandoffLedgerEntry`가 에이전트
+  핸드오프 응답을 `handoff_to`가 보존된 append-only 감사 이벤트로 변환.
+- **오케스트레이터 핸드오프 원장 연결.** 멀티 에이전트 사이클은 어댑터가
+  `handoff_to`를 반환하면 `handoff_created` 이벤트를 append.
+- **에이전트 턴 원장 이벤트.** 멀티 에이전트 사이클은 완료된 어댑터 턴을
+  선택적 핸드오프 이벤트와 분리된 `agent_turn` 이벤트로 append.
+- **원장 실패 정책.** 하네스 PRD와 런북에 broker 원장 append는 best-effort,
+  orchestrator turn append는 fail-fast임을 문서화.
+- **사이클 원장 조회.** `GET /cycles/{id}/ledger`가 append-only 하네스
+  원장 이벤트를 반환하며, mutable state가 이미 제거된 halt 사이클도 조회 가능.
+- **사이클 원장 CLI.** `rallish cycle ledger --cycle-id <id>`가 하네스
+  원장을 사람과 후속 에이전트가 모두 읽기 쉬운 pretty JSON으로 출력.
+- **사이클 상태 원장 요약.** `rallish cycle status`가 원장 조회 가능 시
+  entry 수와 마지막 이벤트를 표시.
 
 ## [0.3.0] - 2026-05-20
 

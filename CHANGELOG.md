@@ -32,6 +32,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repeatable `--local-gate "<command>"` checks that run after the built-in
   audit gate, persist in `CycleState.local_gates`, appear in `cycle status`,
   and are included in multi-agent cycle summaries.
+- **Autonomous work harness contract.** `pkg/contract.WorkContract` defines
+  the vendor-neutral work objective, scope, gates, budget, and orchestration
+  shape that adapters can use independently of any specific agent runtime.
+- **Harness ledger event contract.** `pkg/contract.HarnessLedgerEntry` defines
+  the append-only audit event shape for future cycle ledgers.
+- **Cycle ledger file sync.** `internal/cycle.LedgerFileSync` appends and reads
+  harness ledger events as JSONL, establishing the storage seam for audit logs.
+- **Gate-to-ledger projection.** `contract.NewGateLedgerEntry` maps gate reports
+  into append-only pass/fail audit events.
+- **Handoff-to-ledger projection.** `contract.NewHandoffLedgerEntry` maps agent
+  handoff responses into append-only audit events with `handoff_to` preserved.
+- **Orchestrator handoff ledger wiring.** Multi-agent cycles append
+  `handoff_created` events when adapters return `handoff_to`.
+- **Agent-turn ledger events.** Multi-agent cycles append `agent_turn` events
+  for completed adapter turns, separate from optional handoff events.
+- **Ledger failure policy.** The harness PRD and runbook now document
+  best-effort broker ledger appends versus fail-fast orchestrator turn appends.
+- **Cycle ledger readback.** `GET /cycles/{id}/ledger` returns append-only
+  harness ledger entries, including halted cycles whose mutable state was
+  already removed.
+- **Cycle ledger CLI.** `rallish cycle ledger --cycle-id <id>` prints the
+  harness ledger as pretty JSON for human review and downstream agents.
+- **Cycle status ledger summary.** `rallish cycle status` shows the ledger entry
+  count and last event when ledger readback is available.
 
 ## [0.3.0] - 2026-05-20
 
