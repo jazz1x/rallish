@@ -41,4 +41,6 @@ var (
 	ErrMainBranchForbidden = errors.New("cycle: main branch is forbidden")
 	// ErrGoalRequired is returned when next_cycle_goal is empty.
 	ErrGoalRequired = errors.New("cycle: next_cycle_goal is required")
+	// ErrInvalidActionVerdict is returned when an action-gate verdict string is not recognised.
+	ErrInvalidActionVerdict = errors.New("cycle: invalid action verdict")
 )

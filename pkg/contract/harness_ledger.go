@@ -13,6 +13,12 @@ const (
 	LedgerEventCycleHalted     LedgerEventType = "cycle_halted"
 	LedgerEventCycleCompleted  LedgerEventType = "cycle_completed"
 	LedgerEventValidationGreen LedgerEventType = "validation_green"
+	// LedgerEventActionDenied records that a pre-execution policy check denied or
+	// flagged a pending action (G6 action-gate). It is a DECISION RECORD only:
+	// rallish declares the policy and audits the decision; the runtime hook or
+	// sandbox enforces. The entry never implies rallish executed or blocked a
+	// command itself.
+	LedgerEventActionDenied LedgerEventType = "action_denied"
 )
 
 // LedgerSchemaVersion is stamped on every ledger entry so the append-only JSONL
