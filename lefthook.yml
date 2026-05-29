@@ -34,8 +34,9 @@ commit-msg:
         exit 1
       fail_text: "use a conventional-commits prefix on the subject line"
 
-# Belt-and-braces before push: build + vet + race tests one more time so a
-# failing branch can't sneak past pre-commit (e.g. via --no-verify or rebase).
+# Belt-and-braces before push: build + vet + race tests + supply-chain
+# integrity check. Catches tampering in the module cache (go.sum already
+# hashes deps; this asserts the verify step runs at push time).
 pre-push:
   parallel: true
   commands:
@@ -48,3 +49,6 @@ pre-push:
     test:
       run: go test ./... -race -count=1
       fail_text: "race tests failed — push aborted"
+    mod-verify:
+      run: go mod verify
+      fail_text: "go mod verify failed — module cache tampered or go.sum mismatch; run 'go clean -modcache && go mod download' to restore"

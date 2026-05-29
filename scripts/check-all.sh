@@ -53,5 +53,13 @@ echo "→ scripts/check-no-raw-ansi.sh"
 bash "$ROOT/scripts/check-no-raw-ansi.sh"
 echo "  ok"
 
+# 6. Supply-chain integrity: assert the module cache matches go.sum hashes.
+# go.sum already hashes every dep; this step asserts the verify pass runs in CI
+# so a tampered/corrupt cache is caught before the build is trusted.
+# (G2 follow-on: supply-chain dep-pin, docs/north-star.md §G2)
+echo "→ go mod verify"
+go mod verify
+echo "  ok"
+
 echo
 echo "✓ all gates green — safe to push"
