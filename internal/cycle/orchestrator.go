@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jazz1x/rallish/internal/adapter"
+	"github.com/jazz1x/rallish/internal/budget"
 	"github.com/jazz1x/rallish/pkg/contract"
 )
 
@@ -84,16 +85,23 @@ func (o *MultiAgentOrchestrator) Run(ctx context.Context, cfg contract.Orchestra
 			return nil
 		}
 
-		// Anti-spin (G5): halt a spinning / no-progress run before it bleeds
-		// tokens. Stuck() is a cheap ledger-reader; halting reuses the canonical
-		// HaltedError flow and records a cycle_halted entry so a reviver sees a
-		// sticky halt.
+		// Anti-spin (G5): halt before the run bleeds resources. Two distinct
+		// breakers share one ledger read:
+		//   - Stuck() — a cheap diagnostic for a spinning / no-progress run.
+		//   - the hard cost ceiling — a lifetime turn bound (summed across
+		//     revivals) that catches a *productive* runaway Stuck() cannot see.
+		// Both halt via the canonical HaltedError flow and record a cycle_halted
+		// entry so the reviver guard then sees a sticky halt.
 		if o.ledger != nil {
 			entries, lerr := o.ledger.ReadAll()
 			if lerr != nil {
 				return fmt.Errorf("orchestrator read ledger: %w", lerr)
 			}
-			if reason, stuck := Stuck(entries); stuck {
+			reason, halt := Stuck(entries)
+			if !halt && budget.ExceedsLifetimeCeiling(entries, cfg.MaxLifetimeTurns) {
+				reason, halt = contract.HaltBudgetExceeded, true
+			}
+			if halt {
 				halted := state.Halt(reason)
 				st := halted.Value()
 				_ = o.ledger.Append(contract.NewHarnessLedgerEntry(

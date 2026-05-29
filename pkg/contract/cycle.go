@@ -71,6 +71,7 @@ const (
 	HaltPreflightFailed    HaltReason = "preflight-failed"
 	HaltSuccess            HaltReason = "success"
 	HaltStuck              HaltReason = "stuck"
+	HaltBudgetExceeded     HaltReason = "budget-exceeded"
 )
 
 // ParseHaltReason converts a string to a validated HaltReason.
@@ -79,7 +80,7 @@ func ParseHaltReason(s string) (HaltReason, error) {
 	switch HaltReason(s) {
 	case HaltSelfAuditViolation, HaltSSHAuthFailed, HaltMaxCyclesReached,
 		HaltGateFailure, HaltUserRequested, HaltPreflightFailed, HaltSuccess,
-		HaltStuck:
+		HaltStuck, HaltBudgetExceeded:
 		return HaltReason(s), nil
 	default:
 		return "", fmt.Errorf("halt reason %q: %w", s, ErrInvalidHaltReason)
@@ -260,6 +261,12 @@ type OrchestratorConfig struct {
 	RepoURL string `json:"repo_url,omitempty"`
 	// WorkingDir is the local working directory for this cycle.
 	WorkingDir string `json:"working_dir,omitempty"`
+	// MaxLifetimeTurns is a hard ceiling on agent turns summed across ALL
+	// revivals from the ledger (0 = unlimited). Distinct from the stuck-breaker:
+	// it halts a productive runaway that never trips Stuck(). Enforcing it across
+	// revivals depends on a cooperating driver re-running orchestration against
+	// the same persisted ledger.
+	MaxLifetimeTurns int `json:"max_lifetime_turns,omitempty"`
 }
 
 // NewCycleRequest is the body for POST /cycles.

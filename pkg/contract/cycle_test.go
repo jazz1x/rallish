@@ -75,6 +75,8 @@ func TestParseHaltReason(t *testing.T) {
 		{"gate-failure", HaltGateFailure, false},
 		{"user-requested", HaltUserRequested, false},
 		{"preflight-failed", HaltPreflightFailed, false},
+		{"stuck", HaltStuck, false},
+		{"budget-exceeded", HaltBudgetExceeded, false},
 		{"unknown", "", true},
 		{"", "", true},
 	}

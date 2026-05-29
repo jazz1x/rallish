@@ -452,6 +452,89 @@ func TestOrchestratorResumesAfterProgress(t *testing.T) {
 	}
 }
 
+func TestOrchestratorHaltsOnLifetimeCeiling(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateSync := NewStateFileSync(filepath.Join(tmpDir, "cycle.json"))
+	ledger := NewLedgerFileSync(filepath.Join(tmpDir, "cycle-ledger.jsonl"))
+
+	const cycleID = "cyc_ceiling_1"
+	const ceiling = 3
+	state, err := NewState(contract.NewCycleRequest{Goal: "feat: ceiling-test", MaxCycles: 100}, cycleID)
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+	if err := stateSync.Write(state); err != nil {
+		t.Fatalf("write initial state: %v", err)
+	}
+
+	// A PRODUCTIVE runaway: every turn emits a NOVEL goal so Stuck() never
+	// fires (distinct fingerprints, no repeat / ping-pong / no-progress). Only
+	// the hard lifetime ceiling can stop it.
+	reg := adapter.NewRegistry()
+	if err := reg.Register("builder", fake.New(func(turn int) contract.TurnResponse {
+		return contract.TurnResponse{Done: false, Summary: fmt.Sprintf(`{"next_goal":"novel-goal-%d"}`, turn)}
+	})); err != nil {
+		t.Fatalf("register builder: %v", err)
+	}
+
+	orch := NewMultiAgentOrchestrator(reg, stateSync)
+	orch.SetLedger(ledger)
+	orch.SetDriverPipeline(Pipeline{passGate{name: "ok"}})
+	orch.SetDriverSleeper(instantSleeper{})
+
+	runErr := orch.Run(context.Background(), contract.OrchestratorConfig{
+		Agents:           []string{"builder"},
+		WorkingDir:       tmpDir,
+		MaxLifetimeTurns: ceiling,
+	})
+
+	if runErr == nil {
+		t.Fatal("expected a budget-exceeded halt, got nil")
+	}
+	var he *HaltedError
+	if !errors.As(runErr, &he) {
+		t.Fatalf("expected *HaltedError, got %T: %v", runErr, runErr)
+	}
+	if he.Reason != contract.HaltBudgetExceeded {
+		t.Fatalf("reason = %q, want %q", he.Reason, contract.HaltBudgetExceeded)
+	}
+
+	// The ceiling is enforced before a turn runs, so exactly `ceiling` turns are
+	// recorded before the halt — proof it bounds a productive loop, not a stuck one.
+	entries, err := ledger.ReadAll()
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	turns := 0
+	halts := 0
+	for _, e := range entries {
+		switch e.Type {
+		case contract.LedgerEventAgentTurn:
+			turns++
+		case contract.LedgerEventCycleHalted:
+			halts++
+			if e.Summary != string(contract.HaltBudgetExceeded) {
+				t.Fatalf("halt summary = %q, want %q", e.Summary, contract.HaltBudgetExceeded)
+			}
+		}
+	}
+	if turns != ceiling {
+		t.Fatalf("recorded %d turns, want exactly %d before the ceiling halt", turns, ceiling)
+	}
+	if halts != 1 {
+		t.Fatalf("recorded %d cycle_halted entries, want 1", halts)
+	}
+
+	final, err := stateSync.Read()
+	if err != nil {
+		t.Fatalf("read final state: %v", err)
+	}
+	if !final.Halted || final.HaltReason != contract.HaltBudgetExceeded {
+		t.Fatalf("final state halted=%v reason=%q, want halted=true reason=%q",
+			final.Halted, final.HaltReason, contract.HaltBudgetExceeded)
+	}
+}
+
 func TestOrchestratorHaltsWhenStuck(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateSync := NewStateFileSync(filepath.Join(tmpDir, "cycle.json"))
