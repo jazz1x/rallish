@@ -60,6 +60,15 @@ func TestHandleCreateCycle(t *testing.T) {
 	if len(state.LocalGates) != 1 || state.LocalGates[0] != "go test ./..." {
 		t.Fatalf("local_gates = %v", state.LocalGates)
 	}
+
+	ledger := cycle.NewLedgerFileSync("tmp/cycle-" + state.ID + "-ledger.jsonl")
+	entries, err := ledger.ReadAll()
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Type != contract.LedgerEventCycleCreated {
+		t.Fatalf("ledger entries = %#v", entries)
+	}
 }
 
 func TestHandleCreateCycleRejectsMain(t *testing.T) {
@@ -105,10 +114,84 @@ func TestHandleGetCycle(t *testing.T) {
 	}
 }
 
+func TestHandleGetCycleLedger(t *testing.T) {
+	srv := newTestBroker(t)
+
+	reqBody, _ := json.Marshal(contract.NewCycleRequest{Goal: "feat: test ledger"})
+	req := httptest.NewRequest(http.MethodPost, "/cycles", bytes.NewReader(reqBody))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	var created contract.CycleState
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+
+	req = httptest.NewRequest(http.MethodGet, "/cycles/"+created.ID+"/ledger", nil)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var entries []contract.HarnessLedgerEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &entries); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Type != contract.LedgerEventCycleCreated {
+		t.Fatalf("ledger entries = %#v", entries)
+	}
+}
+
+func TestHandleGetCycleLedgerAfterHalt(t *testing.T) {
+	srv := newTestBroker(t)
+
+	reqBody, _ := json.Marshal(contract.NewCycleRequest{Goal: "feat: test halted ledger"})
+	req := httptest.NewRequest(http.MethodPost, "/cycles", bytes.NewReader(reqBody))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	var created contract.CycleState
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+
+	haltBody, _ := json.Marshal(contract.HaltRequest{Reason: "user-requested"})
+	req = httptest.NewRequest(http.MethodPost, "/cycles/"+created.ID+"/halt", bytes.NewReader(haltBody))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("halt status = %d, want 200", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/cycles/"+created.ID+"/ledger", nil)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ledger status = %d, want 200", rec.Code)
+	}
+	var entries []contract.HarnessLedgerEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &entries); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(entries) != 2 || entries[1].Type != contract.LedgerEventCycleHalted {
+		t.Fatalf("ledger entries = %#v", entries)
+	}
+}
+
 func TestHandleGetCycleNotFound(t *testing.T) {
 	srv := newTestBroker(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/cycles/nonexistent", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestHandleGetCycleLedgerNotFound(t *testing.T) {
+	srv := newTestBroker(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/cycles/nonexistent/ledger", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -147,6 +230,17 @@ func TestHandleHaltCycle(t *testing.T) {
 	}
 	if halted.HaltReason != contract.HaltUserRequested {
 		t.Fatalf("reason = %q", halted.HaltReason)
+	}
+	ledger := cycle.NewLedgerFileSync("tmp/cycle-" + created.ID + "-ledger.jsonl")
+	entries, err := ledger.ReadAll()
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("ledger entries = %#v, want create and halt", entries)
+	}
+	if entries[1].Type != contract.LedgerEventCycleHalted || entries[1].Summary != "user-requested" {
+		t.Fatalf("halt ledger entry = %#v", entries[1])
 	}
 
 	// After halt, GET should return 404 because the file is removed.
@@ -187,6 +281,20 @@ func TestHandleStepCycleRequiresGoal(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("first step status = %d, want 200", rec.Code)
+	}
+	ledger := cycle.NewLedgerFileSync("tmp/cycle-" + created.ID + "-ledger.jsonl")
+	entries, err := ledger.ReadAll()
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	if len(entries) < 3 {
+		t.Fatalf("ledger entries = %#v, want at least create/complete/gate", entries)
+	}
+	if entries[1].Type != contract.LedgerEventCycleCompleted {
+		t.Fatalf("second ledger entry = %q, want cycle_completed", entries[1].Type)
+	}
+	if entries[2].Type != contract.LedgerEventGatePassed || entries[2].Gate != "mock" {
+		t.Fatalf("third ledger entry = %#v, want mock gate passed", entries[2])
 	}
 
 	// Step again without a new goal should fail because CompleteCycle cleared it.

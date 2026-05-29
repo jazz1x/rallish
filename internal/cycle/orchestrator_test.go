@@ -167,6 +167,69 @@ func TestOrchestratorAdapterNotFound(t *testing.T) {
 	}
 }
 
+func TestOrchestratorAppendsTurnAndHandoffLedger(t *testing.T) {
+	tmpDir := t.TempDir()
+	sync := NewStateFileSync(filepath.Join(tmpDir, "cycle.json"))
+	ledger := NewLedgerFileSync(filepath.Join(tmpDir, "cycle-ledger.jsonl"))
+
+	state, err := NewState(contract.NewCycleRequest{Goal: "feat: handoff", MaxCycles: 1}, "cyc_handoff")
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+	if err := sync.Write(state); err != nil {
+		t.Fatalf("write initial state: %v", err)
+	}
+
+	reg := adapter.NewRegistry()
+	if err := reg.Register("builder", fake.New(func(_ int) contract.TurnResponse {
+		return contract.TurnResponse{
+			HandoffTo: "reviewer",
+			Summary:   `{"next_goal":"review handoff"}`,
+			Artifacts: []string{"handoff.md"},
+		}
+	})); err != nil {
+		t.Fatalf("register builder: %v", err)
+	}
+
+	orch := NewMultiAgentOrchestrator(reg, sync)
+	orch.SetLedger(ledger)
+	orch.SetDriverPipeline(Pipeline{passGate{name: "ok"}})
+	orch.SetDriverSleeper(instantSleeper{})
+
+	if err := orch.Run(context.Background(), contract.OrchestratorConfig{
+		Agents:     []string{"builder"},
+		WorkingDir: tmpDir,
+	}); err != nil {
+		t.Fatalf("orchestrator run: %v", err)
+	}
+
+	entries, err := ledger.ReadAll()
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries = %#v, want 2", entries)
+	}
+	if entries[0].Type != contract.LedgerEventAgentTurn {
+		t.Fatalf("first type = %q, want %q", entries[0].Type, contract.LedgerEventAgentTurn)
+	}
+	if entries[0].Agent != "builder" || entries[0].HandoffTo != "" {
+		t.Fatalf("first entry = %#v", entries[0])
+	}
+	if len(entries[0].Files) != 1 || entries[0].Files[0] != "handoff.md" {
+		t.Fatalf("first files = %v", entries[0].Files)
+	}
+	if entries[1].Type != contract.LedgerEventHandoffCreated {
+		t.Fatalf("second type = %q, want %q", entries[1].Type, contract.LedgerEventHandoffCreated)
+	}
+	if entries[1].Agent != "builder" || entries[1].HandoffTo != "reviewer" {
+		t.Fatalf("second entry = %#v", entries[1])
+	}
+	if len(entries[1].Files) != 1 || entries[1].Files[0] != "handoff.md" {
+		t.Fatalf("second files = %v", entries[1].Files)
+	}
+}
+
 func TestSummariseStateCapsSlices(t *testing.T) {
 	state := State{CycleState: contract.CycleState{
 		ID:              "cyc_1",
@@ -199,6 +262,41 @@ func TestSummariseStateCapsSlices(t *testing.T) {
 	}
 	if sum.ID != state.ID {
 		t.Fatalf("ID mismatch")
+	}
+}
+
+func TestBuildRequestIncludesWorkContract(t *testing.T) {
+	state, err := NewState(contract.NewCycleRequest{
+		Goal:       "feat: harness contract",
+		Branch:     "feat/harness",
+		MaxCycles:  5,
+		AutoGoal:   true,
+		LocalGates: []string{"make check-all"},
+	}, "cyc_contract")
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+	orch := &MultiAgentOrchestrator{}
+	cfg := contract.OrchestratorConfig{
+		Agents:     []string{"codex"},
+		WorkingDir: "/repo",
+	}
+
+	req, err := orch.buildRequest(state, "codex", cfg)
+	if err != nil {
+		t.Fatalf("buildRequest: %v", err)
+	}
+	if req.WorkContract == nil {
+		t.Fatal("work_contract is nil")
+	}
+	if req.WorkContract.Objective != "feat: harness contract" {
+		t.Fatalf("objective = %q", req.WorkContract.Objective)
+	}
+	if req.WorkContract.RepoRoot != "/repo" {
+		t.Fatalf("repo_root = %q", req.WorkContract.RepoRoot)
+	}
+	if len(req.WorkContract.LocalGates) != 1 || req.WorkContract.LocalGates[0] != "make check-all" {
+		t.Fatalf("local_gates = %v", req.WorkContract.LocalGates)
 	}
 }
 

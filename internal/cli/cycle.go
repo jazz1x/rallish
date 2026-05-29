@@ -27,6 +27,7 @@ func CycleCmd() *cobra.Command {
 		CycleNewCmd(),
 		CycleStartCmd(),
 		CycleStatusCmd(),
+		CycleLedgerCmd(),
 		CycleNextCmd(),
 		CycleHaltCmd(),
 		CycleWatchCmd(),
@@ -81,6 +82,25 @@ func CycleStatusCmd() *cobra.Command {
 				return fmt.Errorf("get home dir: %w", err)
 			}
 			return runCycleStatus(cmd.Context(), home, cycleID, cmd.OutOrStdout())
+		},
+	}
+	cmd.Flags().StringVar(&cycleID, "cycle-id", "", "Cycle ID (required)")
+	_ = cmd.MarkFlagRequired("cycle-id")
+	return cmd
+}
+
+// CycleLedgerCmd returns the `cycle ledger` subcommand.
+func CycleLedgerCmd() *cobra.Command {
+	var cycleID string
+	cmd := &cobra.Command{
+		Use:   "ledger",
+		Short: "Print the append-only harness ledger for a cycle",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("get home dir: %w", err)
+			}
+			return runCycleLedger(cmd.Context(), home, cycleID, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().StringVar(&cycleID, "cycle-id", "", "Cycle ID (required)")
@@ -345,7 +365,10 @@ func runCycleStatus(ctx context.Context, home, cycleID string, out io.Writer) er
 	if err != nil {
 		return err
 	}
+	return runCycleStatusWithClient(ctx, bc, cycleID, out)
+}
 
+func runCycleStatusWithClient(ctx context.Context, bc brokerClient, cycleID string, out io.Writer) error {
 	// Try broker first.
 	r, err := http.NewRequestWithContext(ctx, http.MethodGet, bc.URL+"/cycles/"+cycleID, nil)
 	if err != nil {
@@ -386,6 +409,15 @@ func runCycleStatus(ctx context.Context, home, cycleID string, out io.Writer) er
 			_, _ = fmt.Fprintf(out, "  - %s\n", gate)
 		}
 	}
+	if entries, err := readCycleLedgerWithClient(ctx, bc, cycleID); err == nil && len(entries) > 0 {
+		last := entries[len(entries)-1]
+		_, _ = fmt.Fprintf(out, "ledger:       %d entries\n", len(entries))
+		_, _ = fmt.Fprintf(out, "ledger_last:  %s", last.Type)
+		if last.Gate != "" {
+			_, _ = fmt.Fprintf(out, " gate=%s", last.Gate)
+		}
+		_, _ = fmt.Fprintln(out)
+	}
 	if state.ShouldRotateAgent() {
 		_, _ = fmt.Fprintf(out, "agent_rotate: yes (3-cycle reset)\n")
 	}
@@ -400,6 +432,51 @@ func runCycleStatus(ctx context.Context, home, cycleID string, out io.Writer) er
 		}
 	}
 	return nil
+}
+
+func runCycleLedger(ctx context.Context, home, cycleID string, out io.Writer) error {
+	bc, err := resolveBrokerClient(home, 0)
+	if err != nil {
+		return err
+	}
+	return runCycleLedgerWithClient(ctx, bc, cycleID, out)
+}
+
+func runCycleLedgerWithClient(ctx context.Context, bc brokerClient, cycleID string, out io.Writer) error {
+	entries, err := readCycleLedgerWithClient(ctx, bc, cycleID)
+	if err != nil {
+		return err
+	}
+	encoded, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode ledger: %w", err)
+	}
+	_, _ = fmt.Fprintln(out, string(encoded))
+	return nil
+}
+
+func readCycleLedgerWithClient(ctx context.Context, bc brokerClient, cycleID string) ([]contract.HarnessLedgerEntry, error) {
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, bc.URL+"/cycles/"+cycleID+"/ledger", nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+
+	resp, err := bc.Client.Do(r)
+	if err != nil {
+		return nil, fmt.Errorf("get cycle ledger: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("cycle ledger failed (%d): %s", resp.StatusCode, string(b))
+	}
+
+	var entries []contract.HarnessLedgerEntry
+	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+		return nil, fmt.Errorf("decode ledger: %w", err)
+	}
+	return entries, nil
 }
 
 func runCycleNext(ctx context.Context, home, cycleID, goal string, out io.Writer) error {

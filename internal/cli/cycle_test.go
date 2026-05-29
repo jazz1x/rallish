@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -230,4 +231,96 @@ func TestRunCycleStatusPrintsLocalGates(t *testing.T) {
 			t.Fatalf("status output missing %q:\n%s", want, got)
 		}
 	}
+}
+
+func TestRunCycleStatusPrintsLedgerSummary(t *testing.T) {
+	state := contract.CycleState{
+		ID:              "cyc_status_ledger",
+		Phase:           contract.CyclePhaseCommit,
+		CompletedCycles: 1,
+		MaxCycles:       3,
+		Branch:          "feat/ledger",
+		NextCycleGoal:   "feat: continue",
+	}
+	entries := []contract.HarnessLedgerEntry{
+		contract.NewHarnessLedgerEntry(123, "cyc_status_ledger", contract.LedgerEventCycleCreated, "cycle created", nil),
+		contract.NewHarnessLedgerEntry(456, "cyc_status_ledger", contract.LedgerEventGatePassed, "ok", nil),
+	}
+	entries[1].Gate = "make check-all"
+	stateBody, _ := json.Marshal(state)
+	ledgerBody, _ := json.Marshal(entries)
+
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var body []byte
+		switch r.URL.Path {
+		case "/cycles/cyc_status_ledger":
+			body = stateBody
+		case "/cycles/cyc_status_ledger/ledger":
+			body = ledgerBody
+		default:
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader(body)),
+			Request:    r,
+		}, nil
+	})}
+
+	var out bytes.Buffer
+	if err := runCycleStatusWithClient(context.Background(), brokerClient{URL: "http://rallish.local", Client: client}, "cyc_status_ledger", &out); err != nil {
+		t.Fatalf("runCycleStatus: %v", err)
+	}
+
+	got := out.String()
+	for _, want := range []string{"ledger:       2 entries", "ledger_last:  gate_passed gate=make check-all"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRunCycleLedgerPrintsJSON(t *testing.T) {
+	entries := []contract.HarnessLedgerEntry{
+		contract.NewHarnessLedgerEntry(123, "cyc_ledger", contract.LedgerEventCycleCreated, "cycle created", []string{"a.go"}),
+		contract.NewHarnessLedgerEntry(456, "cyc_ledger", contract.LedgerEventCycleHalted, "user-requested", nil),
+	}
+	body, _ := json.Marshal(entries)
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/cycles/cyc_ledger/ledger" {
+			t.Fatalf("path = %s, want /cycles/cyc_ledger/ledger", r.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader(body)),
+			Request:    r,
+		}, nil
+	})}
+
+	var out bytes.Buffer
+	if err := runCycleLedgerWithClient(context.Background(), brokerClient{URL: "http://rallish.local", Client: client}, "cyc_ledger", &out); err != nil {
+		t.Fatalf("runCycleLedger: %v", err)
+	}
+
+	var got []contract.HarnessLedgerEntry
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal output: %v\n%s", err, out.String())
+	}
+	if len(got) != 2 {
+		t.Fatalf("entries = %#v, want 2", got)
+	}
+	if got[0].Type != contract.LedgerEventCycleCreated || got[1].Type != contract.LedgerEventCycleHalted {
+		t.Fatalf("entries = %#v", got)
+	}
+	if !strings.Contains(out.String(), "\n  {") {
+		t.Fatalf("output is not pretty JSON:\n%s", out.String())
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
 }

@@ -16,6 +16,7 @@ import (
 type MultiAgentOrchestrator struct {
 	registry *adapter.Registry
 	sync     *StateFileSync
+	ledger   *LedgerFileSync
 	driver   *Driver
 	pipeline func(State) Pipeline
 }
@@ -43,6 +44,11 @@ func (o *MultiAgentOrchestrator) SetPipelineFactory(fn func(State) Pipeline) {
 // SetDriverSleeper injects a sleeper into the underlying driver.
 func (o *MultiAgentOrchestrator) SetDriverSleeper(s Sleeper) {
 	o.driver.SetSleeper(s)
+}
+
+// SetLedger injects an append-only harness ledger for orchestration events.
+func (o *MultiAgentOrchestrator) SetLedger(ledger *LedgerFileSync) {
+	o.ledger = ledger
 }
 
 // Run executes the orchestration loop until halted or max cycles reached.
@@ -85,6 +91,9 @@ func (o *MultiAgentOrchestrator) Run(ctx context.Context, cfg contract.Orchestra
 		if err != nil {
 			return fmt.Errorf("orchestrator adapter %q run: %w", agentName, err)
 		}
+		if err := o.appendTurnLedger(state.ID, agentName, resp); err != nil {
+			return err
+		}
 
 		// Parse response into cycle state mutations.
 		if err := o.applyResponse(&state, resp); err != nil {
@@ -118,6 +127,23 @@ func (o *MultiAgentOrchestrator) Run(ctx context.Context, cfg contract.Orchestra
 			return err
 		}
 	}
+}
+
+func (o *MultiAgentOrchestrator) appendTurnLedger(cycleID, agentName string, resp contract.TurnResponse) error {
+	if o.ledger == nil {
+		return nil
+	}
+	if err := o.ledger.Append(contract.NewAgentTurnLedgerEntry(time.Now().UnixMilli(), cycleID, agentName, resp)); err != nil {
+		return fmt.Errorf("orchestrator append agent turn ledger: %w", err)
+	}
+	if resp.HandoffTo == "" {
+		return nil
+	}
+	entry := contract.NewHandoffLedgerEntry(time.Now().UnixMilli(), cycleID, agentName, resp)
+	if err := o.ledger.Append(entry); err != nil {
+		return fmt.Errorf("orchestrator append handoff ledger: %w", err)
+	}
+	return nil
 }
 
 // cycleStateSummary is a slim view of CycleState to avoid overflowing the
@@ -174,6 +200,7 @@ func (o *MultiAgentOrchestrator) buildRequest(state State, agentName string, cfg
 	if err != nil {
 		return contract.TurnRequest{}, fmt.Errorf("marshal state summary: %w", err)
 	}
+	workContract := state.WorkContract(cfg.WorkingDir, &cfg)
 
 	return contract.TurnRequest{
 		Session:     state.ID,
@@ -188,6 +215,7 @@ func (o *MultiAgentOrchestrator) buildRequest(state State, agentName string, cfg
 		Budget: contract.Budget{
 			TurnsLeft: state.MaxCycles - state.CompletedCycles,
 		},
+		WorkContract: &workContract,
 	}, nil
 }
 

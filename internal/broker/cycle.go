@@ -129,6 +129,7 @@ func (s *Server) registerCycleRoutes() {
 	}
 	s.mux.HandleFunc("POST /cycles", s.handleCreateCycle)
 	s.mux.HandleFunc("GET /cycles/{id}", s.handleGetCycle)
+	s.mux.HandleFunc("GET /cycles/{id}/ledger", s.handleCycleLedger)
 	s.mux.HandleFunc("POST /cycles/{id}/step", s.handleStepCycle)
 	s.mux.HandleFunc("POST /cycles/{id}/halt", s.handleHaltCycle)
 	s.mux.HandleFunc("GET /cycles/{id}/events", s.handleCycleEvents)
@@ -163,6 +164,13 @@ func (s *Server) handleCreateCycle(w http.ResponseWriter, r *http.Request) {
 
 	s.cycleStore.put(id, state)
 	s.cycleStore.syncs[id] = sync
+	s.appendLedger(ctx, id, contract.NewHarnessLedgerEntry(
+		time.Now().UnixMilli(),
+		id,
+		contract.LedgerEventCycleCreated,
+		"cycle created",
+		state.PendingFiles,
+	))
 
 	logger.InfoContext(ctx, "cycle_created", "cycle_id", id, "branch", state.Branch, "max_cycles", state.MaxCycles)
 
@@ -197,6 +205,30 @@ func (s *Server) handleGetCycle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleCycleLedger(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	logger := slog.With("handler", "cycle_ledger")
+
+	id := r.PathValue("id")
+	entries, err := cycle.NewLedgerFileSync(fmt.Sprintf("tmp/cycle-%s-ledger.jsonl", id)).ReadAll()
+	if err != nil {
+		logger.ErrorContext(ctx, "read ledger", "cycle_id", id, "error", err)
+		http.Error(w, fmt.Sprintf("read ledger: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if len(entries) == 0 {
+		if _, ok := s.cycleStore.get(id); !ok {
+			http.Error(w, "cycle ledger not found", http.StatusNotFound)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(entries); err != nil {
+		logger.ErrorContext(ctx, "encode response", "error", err)
+	}
+}
+
 func (s *Server) handleStepCycle(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := slog.With("handler", "step_cycle")
@@ -225,8 +257,18 @@ func (s *Server) handleStepCycle(w http.ResponseWriter, r *http.Request) {
 		completed := st.CompleteCycle()
 		state = completed.Value()
 		state.NextCycleGoal = ""
+		s.appendLedger(ctx, id, contract.NewHarnessLedgerEntry(
+			time.Now().UnixMilli(),
+			id,
+			contract.LedgerEventCycleCompleted,
+			"cycle step completed",
+			nil,
+		))
 	} else {
 		state = result.Value()
+	}
+	for _, report := range result.Reports() {
+		s.appendLedger(ctx, id, contract.NewGateLedgerEntry(time.Now().UnixMilli(), id, report))
 	}
 
 	if sync, ok := s.cycleStore.syncs[id]; ok {
@@ -273,6 +315,13 @@ func (s *Server) handleHaltCycle(w http.ResponseWriter, r *http.Request) {
 		_ = sync.Write(halted)
 		_ = sync.Remove() // prevent zombie resurrection after halt
 	}
+	s.appendLedger(ctx, id, contract.NewHarnessLedgerEntry(
+		time.Now().UnixMilli(),
+		id,
+		contract.LedgerEventCycleHalted,
+		string(reason),
+		nil,
+	))
 	s.cycleStore.put(id, halted)
 	s.cycleStore.broadcast(id, contract.NewCycleEvent(&halted.CycleState))
 	s.cycleStore.closeAll(id)
@@ -382,6 +431,7 @@ func (s *Server) handleOrchestrate(w http.ResponseWriter, r *http.Request) {
 	s.cycleStore.mu.Unlock()
 
 	orch := cycle.NewMultiAgentOrchestrator(s.adapterRegistry, sync)
+	orch.SetLedger(cycle.NewLedgerFileSync(fmt.Sprintf("tmp/cycle-%s-ledger.jsonl", id)))
 	orch.SetPipelineFactory(s.pipelineForState)
 	if s.cycleSleeper != nil {
 		orch.SetDriverSleeper(s.cycleSleeper)
@@ -411,6 +461,13 @@ func (s *Server) handleOrchestrate(w http.ResponseWriter, r *http.Request) {
 func loadCycleFromFile(id string) (cycle.State, error) {
 	sync := cycle.NewStateFileSync(fmt.Sprintf("tmp/cycle-%s.json", id))
 	return sync.Read()
+}
+
+func (s *Server) appendLedger(ctx context.Context, id string, entry contract.HarnessLedgerEntry) {
+	ledger := cycle.NewLedgerFileSync(fmt.Sprintf("tmp/cycle-%s-ledger.jsonl", id))
+	if err := ledger.Append(entry); err != nil {
+		slog.With("component", "cycle_ledger").WarnContext(ctx, "append ledger", "cycle_id", id, "error", err)
+	}
 }
 
 func buildStandardPipeline() cycle.Pipeline {
