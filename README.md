@@ -18,7 +18,7 @@ Everything runs locally. No cloud broker, no external coordination service. The 
 |---------|-------------|
 | **Squash (headless)** | `rallish squash` runs headless preset sessions (`solo-ralph`, `pair-review`); broker spawns adapters automatically |
 | **Rally (interactive)** | `rallish rally` provides live baton-passing between two coding-CLI sessions; agents self-loop the ping-pong (no per-turn user trigger needed); exclusive holder enforcement via SSE |
-| **A2A Protocol** | `/.well-known/agent.json`, JSON-RPC 2.0 tasks, SSE streaming |
+| **A2A Protocol** | partial A2A v1.0: `/.well-known/agent-card.json` + `protocolVersion`, PascalCase JSON-RPC tasks (strict typed intake), SSE streaming |
 | **Token Budgets** | Hard caps on tokens, turns, and wall-clock time per session |
 | **Scratchpad** | Rolling shared scratch with automatic compaction |
 | **Presets** | YAML templates for roles, routing, and exit conditions |
@@ -34,7 +34,7 @@ Everything runs locally. No cloud broker, no external coordination service. The 
 │  POST /sessions                          │
 │  GET  /sessions/:id/next?as=<role> (SSE) │
 │  POST /sessions/:id/turn                 │
-│  GET  /.well-known/agent.json            │
+│  GET  /.well-known/agent-card.json       │
 │  POST /a2a                               │
 └──┬───────────────┬───────────────────┬───┘
    │ unix socket   │ unix socket       │ tcp loopback
@@ -153,12 +153,12 @@ SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-u
 ./dist/rallish rally done   --session-id $SESSION --as server --note "draft v1"
 
 # A2A discovery (external clients use TCP loopback)
-curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent.json
+curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent-card.json
 
-# A2A send task
+# A2A send task (v1.0 method name; tasks/send still works as a legacy alias)
 curl -X POST http://127.0.0.1:$(cat ~/.rallish/port)/a2a \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"Hello"}]}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"parts":[{"text":"Hello"}]}}}'
 ```
 
 Per-turn requests and responses land in `~/.rallish/sessions/<id>/log.jsonl`.
@@ -227,8 +227,8 @@ Any A2A-compliant client can discover and send tasks:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/.well-known/agent.json` | Agent Card |
-| `POST` | `/a2a` | JSON-RPC 2.0 (tasks/send, tasks/get, tasks/cancel, tasks/sendSubscribe) |
+| `GET` | `/.well-known/agent-card.json` | Agent Card (v1.0; `/.well-known/agent.json` legacy alias) |
+| `POST` | `/a2a` | JSON-RPC 2.0 (SendMessage, GetTask, CancelTask, SubscribeToTask; legacy `tasks/*` aliases) |
 
 See [docs/a2a-compatibility.md](docs/a2a-compatibility.md) for the full mapping.
 

@@ -1,13 +1,20 @@
 # A2A Compatibility Map
 
-This document maps rallish internals to the Google A2A Protocol v1.0 concepts.
+This document maps rallish internals to the Linux-Foundation A2A Protocol v1.0
+concepts. Conformance is **partial**: the v1.0 discovery path, `protocolVersion`,
+PascalCase RPC method names, and strict typed intake are implemented; **signed
+agent cards (F16) and mutual auth are deferred** (see Limitations).
 
 ## Endpoints
 
 | A2A Concept | rallish Endpoint |
 |-------------|------------------|
-| Agent Card | `GET /.well-known/agent.json` |
+| Agent Card (v1.0) | `GET /.well-known/agent-card.json` |
+| Agent Card (legacy alias) | `GET /.well-known/agent.json` |
 | JSON-RPC 2.0 | `POST /a2a` |
+
+The card carries `protocolVersion` (currently `"1.0"`) so a client can negotiate
+the wire shape (versioned public surface).
 
 ## Data Model Mapping
 
@@ -33,22 +40,30 @@ This document maps rallish internals to the Google A2A Protocol v1.0 concepts.
 
 ## Methods
 
-### `tasks/send`
+The v1.0 PascalCase method name is primary; the legacy lowercase name is kept as
+a back-compat alias.
+
+JSON-RPC params are decoded into typed structs with `DisallowUnknownFields`
+(parse-don't-validate; RFC 9413 / Postel critique) — an unknown or extra field is
+a JSON-RPC error (`-32602` for params, `-32700` for the envelope), never silently
+dropped.
+
+### `SendMessage` (legacy alias: `tasks/send`)
 
 - Creates a new task or appends a message to an existing one.
 - Blocks until the task reaches a terminal state.
 - Returns the full `Task` object.
 
-### `tasks/sendSubscribe`
+### `SubscribeToTask` (legacy alias: `tasks/sendSubscribe`)
 
-- Same as `tasks/send` but streams `TaskStatusUpdateEvent` and `TaskArtifactUpdateEvent` via SSE.
+- Same as `SendMessage` but streams `TaskStatusUpdateEvent` and `TaskArtifactUpdateEvent` via SSE.
 - Each turn completion triggers a status update.
 
-### `tasks/get`
+### `GetTask` (legacy alias: `tasks/get`)
 
 - Returns the current `Task` snapshot without sending a new message.
 
-### `tasks/cancel`
+### `CancelTask` (legacy alias: `tasks/cancel`)
 
 - Sets the task state to `canceled`.
 - Stops any pending SSE streams.
@@ -64,4 +79,7 @@ This document maps rallish internals to the Google A2A Protocol v1.0 concepts.
 
 - No `tasks/resubscribe` (not needed; sessions are short-lived).
 - No `tasks/pushNotifications` (no outbound push in v0).
-- Authentication is not implemented in v0; use a local-only binding or reverse proxy.
+- **Signed agent cards (F16) are deferred** — the card is served unsigned, so a
+  client cannot yet verify card authenticity. This is why conformance is
+  **partial**, not full.
+- **Mutual auth is deferred**; use a local-only binding or reverse proxy.

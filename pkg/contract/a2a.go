@@ -1,9 +1,33 @@
 // Package contract defines the public wire types for rallish.
 //
 // This file contains A2A (Agent2Agent) protocol extensions layered on top of
-// the internal turn-taking contract. All A2A structs follow the Google A2A
-// Protocol specification (https://github.com/a2aproject/A2A) where applicable.
+// the internal turn-taking contract. All A2A structs follow the Linux-Foundation
+// A2A Protocol v1.0 specification (https://a2a-protocol.org) where applicable.
 package contract
+
+import "encoding/json"
+
+// ProtocolVersion is the A2A protocol version this broker conforms to.
+// It is advertised in the AgentCard so clients can negotiate the wire shape
+// (versioned public surface; Hyrum's law). Distinct from the agent's own
+// build version carried in AgentCard.Version.
+const ProtocolVersion = "1.0"
+
+// A2A v1.0 JSON-RPC method names (PascalCase, per the Linux-Foundation spec).
+// The legacy lowercase tasks/* names are retained as back-compat aliases in the
+// broker dispatch but are NOT the conformance target.
+const (
+	MethodSendMessage     = "SendMessage"
+	MethodGetTask         = "GetTask"
+	MethodCancelTask      = "CancelTask"
+	MethodSubscribeToTask = "SubscribeToTask"
+
+	// Legacy draft method names (back-compat aliases only).
+	LegacyMethodTasksSend          = "tasks/send"
+	LegacyMethodTasksSendSubscribe = "tasks/sendSubscribe"
+	LegacyMethodTasksGet           = "tasks/get"
+	LegacyMethodTasksCancel        = "tasks/cancel"
+)
 
 // TaskState represents the A2A task lifecycle states.
 type TaskState string
@@ -45,8 +69,12 @@ type AgentSkill struct {
 }
 
 // AgentCard is the well-known discovery document for A2A clients.
-// Published at GET /.well-known/agent.json
+// Published at GET /.well-known/agent-card.json (A2A v1.0 path); the legacy
+// GET /.well-known/agent.json path is served as a back-compat alias.
 type AgentCard struct {
+	// ProtocolVersion is the A2A protocol version the agent conforms to
+	// (e.g. "1.0"). A v1.0 client uses this to negotiate the wire shape.
+	ProtocolVersion    string          `json:"protocolVersion"`
 	Name               string          `json:"name"`
 	Description        string          `json:"description"`
 	Version            string          `json:"version"`
@@ -101,11 +129,26 @@ type A2ATaskUpdateEvent struct {
 }
 
 // JSONRPCRequest is the envelope for A2A JSON-RPC 2.0 requests.
+//
+// Params is kept as a raw message so the dispatcher can decode it into the
+// per-method typed param struct under DisallowUnknownFields (parse-don't-validate;
+// strict, not liberal, at the interface — RFC 9413 / Postel critique). An
+// unknown or extra field is an ERROR, never silently dropped.
 type JSONRPCRequest struct {
-	JSONRPC string         `json:"jsonrpc"`
-	ID      any            `json:"id,omitempty"`
-	Method  string         `json:"method"`
-	Params  map[string]any `json:"params,omitempty"`
+	JSONRPC string          `json:"jsonrpc"`
+	ID      any             `json:"id,omitempty"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+}
+
+// SendMessageParams is the typed param set for the SendMessage method.
+type SendMessageParams struct {
+	Message A2AMessage `json:"message"`
+}
+
+// TaskIDParams is the typed param set for GetTask / CancelTask / SubscribeToTask.
+type TaskIDParams struct {
+	ID string `json:"id"`
 }
 
 // JSONRPCResponse is the envelope for A2A JSON-RPC 2.0 responses.

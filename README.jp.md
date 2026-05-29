@@ -18,7 +18,7 @@
 |------|------|
 | **Squash（ヘッドレス）** | `rallish squash` でヘッドレスプリセットセッションを実行（`solo-ralph`、`pair-review`）; ブローカーがアダプターを自動スポーン |
 | **Rally（インタラクティブ）** | `rallish rally` で 2 つのコーディング CLI セッション間のライブバトン受け渡し; エージェントがピンポンを自律ループ (ターンごとのユーザートリガー不要); SSE による排他的ホルダー強制 |
-| **A2A プロトコル** | `/.well-known/agent.json`, JSON-RPC 2.0 タスク, SSE ストリーミング |
+| **A2A プロトコル** | 部分 A2A v1.0: `/.well-known/agent-card.json` + `protocolVersion`, PascalCase JSON-RPC タスク（厳格な型付きインテーク）, SSE ストリーミング |
 | **トークン予算** | セッションごとのトークン、ターン数、時間の上限を強制 |
 | **スクラッチパッド** | 自動圧縮(compaction)が適用されたローリング共有スクラッチ |
 | **プリセット** | 役割、ルーティング、終了条件を定義した YAML テンプレート |
@@ -34,7 +34,7 @@
 │  POST /sessions                          │
 │  GET  /sessions/:id/next?as=<role> (SSE) │
 │  POST /sessions/:id/turn                 │
-│  GET  /.well-known/agent.json            │
+│  GET  /.well-known/agent-card.json       │
 │  POST /a2a                               │
 └──┬───────────────┬───────────────────┬───┘
    │ unix socket   │ unix socket       │ tcp ループバック
@@ -155,12 +155,12 @@ SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-u
 ./dist/rallish rally done   --session-id $SESSION --as server --note "draft v1"
 
 # A2A discovery (外部クライアントは TCP ループバックを使用)
-curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent.json
+curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent-card.json
 
-# A2A タスク送信
+# A2A タスク送信 (v1.0 メソッド名; tasks/send はレガシーエイリアスとして引き続き動作)
 curl -X POST http://127.0.0.1:$(cat ~/.rallish/port)/a2a \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"Hello"}]}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"parts":[{"text":"Hello"}]}}}'
 ```
 
 ターンごとのリクエスト/レスポンスは `~/.rallish/sessions/<id>/log.jsonl` に記録されます。
@@ -212,8 +212,8 @@ A2A 対応クライアントはタスクを発見して送信できます:
 
 | メソッド | パス | 説明 |
 |----------|------|------|
-| `GET` | `/.well-known/agent.json` | Agent Card |
-| `POST` | `/a2a` | JSON-RPC 2.0 (tasks/send, tasks/get, tasks/cancel, tasks/sendSubscribe) |
+| `GET` | `/.well-known/agent-card.json` | Agent Card (v1.0; `/.well-known/agent.json` レガシーエイリアス) |
+| `POST` | `/a2a` | JSON-RPC 2.0 (SendMessage, GetTask, CancelTask, SubscribeToTask; レガシー `tasks/*` エイリアス) |
 
 完全なマッピングは [docs/a2a-compatibility.md](docs/a2a-compatibility.md) を参照してください。
 

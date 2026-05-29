@@ -18,7 +18,7 @@
 |------|------|
 | **Squash (헤드리스)** | `rallish squash`로 헤드리스 프리셋 세션 실행(`solo-ralph`, `pair-review`); 브로커가 어댑터를 자동으로 스폰 |
 | **Rally (인터랙티브)** | `rallish rally`로 두 코딩 CLI 세션 간 라이브 바톤 전달; 에이전트가 핑퐁을 자율 루프 (턴마다 사용자 트리거 불필요); SSE를 통한 독점 홀더 강제 |
-| **A2A 프로토콜** | `/.well-known/agent.json`, JSON-RPC 2.0 태스크, SSE 스트리밍 |
+| **A2A 프로토콜** | 부분 A2A v1.0: `/.well-known/agent-card.json` + `protocolVersion`, PascalCase JSON-RPC 태스크(엄격 타입 인테이크), SSE 스트리밍 |
 | **토큰 예산** | 세션당 토큰, 턴 수, 시간의 상한선을 강제 |
 | **스크래치패드** | 자동 압축(compaction)이 적용된 롤링 공유 스크래치 |
 | **프리셋** | 역할, 라우팅, 종료 조건을 정의한 YAML 템플릿 |
@@ -34,7 +34,7 @@
 │  POST /sessions                          │
 │  GET  /sessions/:id/next?as=<role> (SSE) │
 │  POST /sessions/:id/turn                 │
-│  GET  /.well-known/agent.json            │
+│  GET  /.well-known/agent-card.json       │
 │  POST /a2a                               │
 └──┬───────────────┬───────────────────┬───┘
    │ unix socket   │ unix socket       │ tcp 루프백
@@ -152,12 +152,12 @@ SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-u
 ./dist/rallish rally done   --session-id $SESSION --as server --note "draft v1"
 
 # A2A discovery (외부 클라이언트는 TCP 루프백 사용)
-curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent.json
+curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent-card.json
 
-# A2A 태스크 전송
+# A2A 태스크 전송 (v1.0 메서드명; tasks/send는 레거시 별칭으로 계속 동작)
 curl -X POST http://127.0.0.1:$(cat ~/.rallish/port)/a2a \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"Hello"}]}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"parts":[{"text":"Hello"}]}}}'
 ```
 
 턴별 요청/응답은 `~/.rallish/sessions/<id>/log.jsonl`에 기록됩니다.
@@ -207,8 +207,8 @@ A2A 호환 클라이언트는 태스크를 발견하고 전송할 수 있습니�
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| `GET` | `/.well-known/agent.json` | Agent Card |
-| `POST` | `/a2a` | JSON-RPC 2.0 (tasks/send, tasks/get, tasks/cancel, tasks/sendSubscribe) |
+| `GET` | `/.well-known/agent-card.json` | Agent Card (v1.0; `/.well-known/agent.json` 레거시 별칭) |
+| `POST` | `/a2a` | JSON-RPC 2.0 (SendMessage, GetTask, CancelTask, SubscribeToTask; 레거시 `tasks/*` 별칭) |
 
 전체 매핑은 [docs/a2a-compatibility.md](docs/a2a-compatibility.md)를 참조하세요.
 

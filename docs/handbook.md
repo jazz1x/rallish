@@ -170,19 +170,19 @@ Field reference:
 
 ## A2A Integration
 
-rallish exposes:
+rallish exposes (partial A2A v1.0 — signed cards / mutual auth deferred):
 
-- `GET /.well-known/agent.json` — Agent Card
-- `POST /a2a` — JSON-RPC 2.0 task methods
+- `GET /.well-known/agent-card.json` — Agent Card (v1.0 path; `/.well-known/agent.json` is a legacy alias)
+- `POST /a2a` — JSON-RPC 2.0 task methods (strict typed intake; unknown fields rejected)
 
-Supported methods:
+Supported methods (v1.0 name; legacy alias in parentheses):
 
 | Method | Description |
 |---|---|
-| `tasks/send` | Send a message, return final task state |
-| `tasks/sendSubscribe` | Send a message, stream SSE updates |
-| `tasks/get` | Get current task state by ID |
-| `tasks/cancel` | Cancel a running task |
+| `SendMessage` (`tasks/send`) | Send a message, return final task state |
+| `SubscribeToTask` (`tasks/sendSubscribe`) | Send a message, stream SSE updates |
+| `GetTask` (`tasks/get`) | Get current task state by ID |
+| `CancelTask` (`tasks/cancel`) | Cancel a running task |
 
 A2A clients reach the broker via TCP loopback at the port written to
 `~/.rallish/port`. The Unix socket is reserved for the rallish CLI
