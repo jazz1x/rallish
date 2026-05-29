@@ -240,6 +240,19 @@ and [docs/prd-rally-autoflow.md](prd-rally-autoflow.md). For cases where both
 sides are known-ready and you prefer a blocking wait, set `WAIT_MODE=block` in
 the skill invocation.
 
+### Autonomous harness commands
+
+rallish also ships a repo-local work harness for long autonomous runs (G1–G6 guardrails: safety, verification gates, A2A interop, audit ledger, anti-spin, action-gate). Two harness-specific commands:
+
+```bash
+# Bounded one-shot pass a cron/scheduler drives (exit code = halt reason)
+rallish cycle run --once --cycle-id <id>
+# Pre-execution policy gate a runtime PreToolUse hook calls (declare + record; the hook enforces)
+rallish gate tooluse --command 'rm -rf /'    # -> {"verdict":"deny",...}  exit 13
+```
+
+Full direction + rationale: `docs/north-star.md`.
+
 ## Using rallish from any project
 
 rallish is installed once, globally. Nothing in the skill bundle,

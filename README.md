@@ -26,6 +26,19 @@ Everything runs locally. No cloud broker, no external coordination service. The 
 | **Auto-daemon** | `rallish squash` spawns the broker if none is running; `rallish doctor` reports socket reachability |
 | **Security** | Path traversal guards, secret redaction, minimal env allowlists |
 
+## Autonomous Work Harness
+
+rallish is a vendor-neutral, repo-local **work harness**: it makes any agent runtime safe, resumable, verifiable, and auditable for long autonomous repository work — without being the loop. Six guardrail pillars:
+
+- **Safety & resumability** — atomic, `.bak`-recovering checkpointed state; `cycle run --once` is the bounded reference driver a cron/scheduler invokes (exit code = halt reason).
+- **Verification gates** — parse-don't-validate agent handshake, a gate self-eval, hash-pinned gate definitions.
+- **Interop** — A2A **v1.0** (signed Agent Card at `/.well-known/agent-card.json`, real `protocolVersion`, strict typed intake).
+- **Audit** — `schema_version`-stamped, hash-chained, replayable ledger with RFC 9162 Merkle inclusion/consistency proofs.
+- **Anti-spin** — stuck/budget circuit-breakers + a sticky-halt reviver guard (a cron-revived spinning run self-halts and is not resurrected).
+- **Action-gate** — pre-execution destructive-command deny-list + secret containment; rallish declares + records the decision, the runtime hook enforces.
+
+Full direction + rationale: `docs/north-star.md`.
+
 ## Architecture
 
 ```
@@ -151,6 +164,11 @@ EOF
 SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-up rally")
 ./dist/rallish rally status --session-id $SESSION
 ./dist/rallish rally done   --session-id $SESSION --as server --note "draft v1"
+
+# Bounded one-shot pass a cron/scheduler drives (exit code = halt reason)
+rallish cycle run --once --cycle-id <id>
+# Pre-execution policy gate a runtime PreToolUse hook calls (declare + record; the hook enforces)
+rallish gate tooluse --command 'rm -rf /'    # -> {"verdict":"deny",...}  exit 13
 
 # A2A discovery (external clients use TCP loopback)
 curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent-card.json

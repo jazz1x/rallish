@@ -26,6 +26,19 @@
 | **自動デーモン** | `rallish squash` がブローカー未起動時に自動スポーン。`rallish doctor` がソケット到達性を報告 |
 | **セキュリティ** | パストラバーサル防御、シークレットマスキング、最小限の環境変数許可リスト |
 
+## 自律作業ハーネス (Autonomous Work Harness)
+
+rallish はベンダー中立・リポローカルの**作業ハーネス**です。エージェントランタイムが長期の自律リポジトリ作業を安全に、再開可能に、検証可能に、監査可能に実行できるようにします — ループそのものにはなりません。六つのガードレール柱:
+
+- **Safety & resumability** — アトミックな `.bak` 回復チェックポイント状態; `cycle run --once` は cron/スケジューラが呼び出す有界基準ドライバです (終了コード = 停止理由)。
+- **Verification gates** — parse-don't-validate エージェントハンドシェイク、gate self-eval、ハッシュ固定 gate 定義。
+- **Interop** — A2A **v1.0** (`/.well-known/agent-card.json` の署名済み Agent Card、実際の `protocolVersion`、厳格な型付きインテーク)。
+- **Audit** — `schema_version` スタンプ、ハッシュチェーン、再生可能な台帳 + RFC 9162 Merkle 包含/一貫性証明。
+- **Anti-spin** — スタック/予算サーキットブレーカー + スティッキーホルト復活防止ガード (cron が再起動したスピニング実行は自己停止し、復活しない)。
+- **Action-gate** — 実行前の破壊的コマンド拒否リスト + シークレット封じ込め; rallish が決定を宣言・記録し、ランタイムフックが強制します。
+
+全体の方針と根拠: `docs/north-star.md`.
+
 ## アーキテクチャ
 
 ```
@@ -153,6 +166,11 @@ EOF
 SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-up rally")
 ./dist/rallish rally status --session-id $SESSION
 ./dist/rallish rally done   --session-id $SESSION --as server --note "draft v1"
+
+# cron/スケジューラが呼び出す有界ワンショットパス (終了コード = 停止理由)
+rallish cycle run --once --cycle-id <id>
+# ランタイム PreToolUse フックが呼び出す実行前ポリシーゲート (宣言 + 記録; フックが強制)
+rallish gate tooluse --command 'rm -rf /'    # -> {"verdict":"deny",...}  exit 13
 
 # A2A discovery (外部クライアントは TCP ループバックを使用)
 curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent-card.json

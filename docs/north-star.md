@@ -1,11 +1,11 @@
 # Rallish — Goals & North Star
 
 **Status:** v7 (graph-unified, validated) · 2026-05-29
-**Grounding:** [direction decision](reports/2026-05-29-harness-direction-decision.md) ·
-[three-lens foundations](reports/2026-05-29-foundations-three-lens-validation.md) ·
-[anti-spin guardrail](reports/2026-05-29-anti-spin-guardrail.md) ·
-[guardrails catalog](reports/2026-05-29-guardrails-catalog-research.md) ·
-[graph-model validation](reports/2026-05-29-graph-model-validation.md)
+**Grounding:** distilled from a multi-round validation arc — direction decision,
+three-lens foundations (SWE philosophy + decision methods + 2026 conventions),
+anti-spin guardrail, guardrails catalog, and graph-model validation (incl. a
+4-judge ratification panel + adversarial stress-test). The per-session report
+artifacts were pruned as process noise; their conclusions are folded into this doc.
 **Maturity legend:** ✅ built · ◑ partial · ○ planned (little/no code yet).
 Pillars are tagged honestly; most objectives are ○ — this is a direction, not a claim of done.
 

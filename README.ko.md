@@ -26,6 +26,19 @@
 | **자동 데몬** | `rallish squash`가 브로커 미실행 시 자동 스폰. `rallish doctor`가 소켓 도달성 보고 |
 | **보안** | 경로 탐색 방어, 비밀 정보 마스킹, 최소한의 환경 변수 허용 목록 |
 
+## 자율 작업 하네스 (Autonomous Work Harness)
+
+rallish는 벤더 중립, 리포 로컬 **작업 하네스**입니다. 에이전트 런타임이 장기 자율 리포지토리 작업을 안전하게, 재개 가능하게, 검증 가능하게, 감사 가능하게 실행할 수 있도록 합니다 — 루프 자체는 되지 않습니다. 여섯 가지 가드레일 기둥:
+
+- **Safety & resumability** — 원자적 `.bak` 복구 체크포인트 상태; `cycle run --once`는 cron/스케줄러가 호출하는 경계 기준 드라이버입니다 (종료 코드 = 중단 이유).
+- **Verification gates** — parse-don't-validate 에이전트 핸드셰이크, gate self-eval, 해시 고정 gate 정의.
+- **Interop** — A2A **v1.0** (`/.well-known/agent-card.json`의 서명된 Agent Card, 실제 `protocolVersion`, 엄격한 타입 인테이크).
+- **Audit** — `schema_version` 스탬프, 해시 체인, 재생 가능한 원장 + RFC 9162 Merkle 포함/일관성 증명.
+- **Anti-spin** — 스턱/예산 회로 차단기 + 고착 중단 부활 방지 가드 (cron이 재가동한 스피닝 실행은 스스로 중단되며 재부활하지 않음).
+- **Action-gate** — 실행 전 파괴적 명령 거부 목록 + 시크릿 격리; rallish가 결정을 선언·기록하고, 런타임 훅이 강제합니다.
+
+전체 방향 및 근거: `docs/north-star.md`.
+
 ## 아키텍처
 
 ```
@@ -150,6 +163,11 @@ EOF
 SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-up rally")
 ./dist/rallish rally status --session-id $SESSION
 ./dist/rallish rally done   --session-id $SESSION --as server --note "draft v1"
+
+# cron/스케줄러가 호출하는 경계 원샷 패스 (종료 코드 = 중단 이유)
+rallish cycle run --once --cycle-id <id>
+# 런타임 PreToolUse 훅이 호출하는 실행 전 정책 게이트 (선언 + 기록; 훅이 강제)
+rallish gate tooluse --command 'rm -rf /'    # -> {"verdict":"deny",...}  exit 13
 
 # A2A discovery (외부 클라이언트는 TCP 루프백 사용)
 curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent-card.json
