@@ -49,6 +49,15 @@ const (
 	// silently mutate control flow beyond recording; the entry itself is the
 	// tamper-evidence signal for the audit / governance layer.
 	LedgerEventGateTampered LedgerEventType = "gate_tampered"
+	// LedgerEventToolUseDecision records the combined G6 pre-execution decision for
+	// a pending tool/command invocation (DecideToolUse: the most-severe verdict
+	// across the destructive-action deny-list and the secret-containment policy).
+	// Like LedgerEventActionDenied / LedgerEventSecretFlagged it is a DECISION
+	// RECORD only: rallish declares the policy and audits the verdict; the runtime
+	// PreToolUse hook / sandbox enforces. The entry never implies rallish executed
+	// or blocked the command. Only blocking verdicts (deny / needs-hitl) are
+	// recorded; an allowed (safe) command is not noise-recorded.
+	LedgerEventToolUseDecision LedgerEventType = "tooluse_decision"
 )
 
 // LedgerSchemaVersion is stamped on every ledger entry so the append-only JSONL
