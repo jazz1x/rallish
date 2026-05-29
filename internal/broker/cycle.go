@@ -421,6 +421,21 @@ func (s *Server) handleOrchestrate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reviver guard (G5): refuse to (re)start a cycle the ledger has already
+	// sealed with a sticky halt. The orchestrator enforces the same rule, but
+	// returning 409 here avoids spawning a goroutine that would only halt.
+	ledgerEntries, lerr := cycle.NewLedgerFileSync(fmt.Sprintf("tmp/cycle-%s-ledger.jsonl", id)).ReadAll()
+	if lerr != nil {
+		logger.ErrorContext(ctx, "orchestrate read ledger", "cycle_id", id, "error", lerr)
+		http.Error(w, fmt.Sprintf("read ledger: %v", lerr), http.StatusInternalServerError)
+		return
+	}
+	if reason, sealed := cycle.LedgerSealsResume(ledgerEntries); sealed {
+		logger.InfoContext(ctx, "orchestrate refused: cycle sealed by halt", "cycle_id", id, "halt_reason", reason)
+		http.Error(w, fmt.Sprintf("cycle halted (%s); resume refused", reason), http.StatusConflict)
+		return
+	}
+
 	s.cycleStore.mu.Lock()
 	if s.cycleStore.orchestrating[id] {
 		s.cycleStore.mu.Unlock()

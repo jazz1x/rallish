@@ -347,6 +347,111 @@ func TestApplyResponseFallback(t *testing.T) {
 	}
 }
 
+func TestOrchestratorRefusesToResumeSealedCycle(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateSync := NewStateFileSync(filepath.Join(tmpDir, "cycle.json"))
+	ledger := NewLedgerFileSync(filepath.Join(tmpDir, "cycle-ledger.jsonl"))
+
+	const cycleID = "cyc_sealed_1"
+	state, err := NewState(contract.NewCycleRequest{Goal: "feat: sealed-test", MaxCycles: 10}, cycleID)
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+	// A re-trigger would write a state file again; simulate that to prove the
+	// guard reads the ledger, not the (re-created) state file.
+	if err := stateSync.Write(state); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+
+	// Ledger ends in a sticky cycle_halted with no later validation_green.
+	if err := ledger.Append(contract.NewAgentTurnLedgerEntry(1000, cycleID, "builder", contract.TurnResponse{Summary: "work"})); err != nil {
+		t.Fatalf("seed turn: %v", err)
+	}
+	if err := ledger.Append(contract.NewHarnessLedgerEntry(1001, cycleID, contract.LedgerEventCycleHalted, string(contract.HaltStuck), nil)); err != nil {
+		t.Fatalf("seed halt: %v", err)
+	}
+
+	ranCalls := 0
+	reg := adapter.NewRegistry()
+	if err := reg.Register("builder", fake.New(func(_ int) contract.TurnResponse {
+		ranCalls++
+		return contract.TurnResponse{Done: false, Summary: `{"next_goal":"should-never-run"}`}
+	})); err != nil {
+		t.Fatalf("register builder: %v", err)
+	}
+
+	orch := NewMultiAgentOrchestrator(reg, stateSync)
+	orch.SetLedger(ledger)
+	orch.SetDriverPipeline(Pipeline{passGate{name: "ok"}})
+	orch.SetDriverSleeper(instantSleeper{})
+
+	runErr := orch.Run(context.Background(), contract.OrchestratorConfig{
+		Agents:     []string{"builder"},
+		WorkingDir: tmpDir,
+	})
+
+	if runErr == nil {
+		t.Fatal("expected a halt error refusing resume, got nil")
+	}
+	var he *HaltedError
+	if !errors.As(runErr, &he) {
+		t.Fatalf("expected *HaltedError, got %T: %v", runErr, runErr)
+	}
+	if he.Reason != contract.HaltStuck {
+		t.Fatalf("reason = %q, want %q", he.Reason, contract.HaltStuck)
+	}
+	if ranCalls != 0 {
+		t.Fatalf("adapter ran %d times; a sealed cycle must not resume", ranCalls)
+	}
+}
+
+func TestOrchestratorResumesAfterProgress(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateSync := NewStateFileSync(filepath.Join(tmpDir, "cycle.json"))
+	ledger := NewLedgerFileSync(filepath.Join(tmpDir, "cycle-ledger.jsonl"))
+
+	const cycleID = "cyc_resume_1"
+	state, err := NewState(contract.NewCycleRequest{Goal: "feat: resume-test", MaxCycles: 1}, cycleID)
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+	if err := stateSync.Write(state); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+
+	// A halt followed by a validation_green: measurable progress lifts the seal.
+	if err := ledger.Append(contract.NewHarnessLedgerEntry(1000, cycleID, contract.LedgerEventCycleHalted, string(contract.HaltStuck), nil)); err != nil {
+		t.Fatalf("seed halt: %v", err)
+	}
+	if err := ledger.Append(contract.NewHarnessLedgerEntry(1001, cycleID, contract.LedgerEventValidationGreen, "tests green", nil)); err != nil {
+		t.Fatalf("seed green: %v", err)
+	}
+
+	ranCalls := 0
+	reg := adapter.NewRegistry()
+	if err := reg.Register("builder", fake.New(func(_ int) contract.TurnResponse {
+		ranCalls++
+		return contract.TurnResponse{Done: false, Summary: `{"next_goal":"keep-going"}`}
+	})); err != nil {
+		t.Fatalf("register builder: %v", err)
+	}
+
+	orch := NewMultiAgentOrchestrator(reg, stateSync)
+	orch.SetLedger(ledger)
+	orch.SetDriverPipeline(Pipeline{passGate{name: "ok"}})
+	orch.SetDriverSleeper(instantSleeper{})
+
+	if err := orch.Run(context.Background(), contract.OrchestratorConfig{
+		Agents:     []string{"builder"},
+		WorkingDir: tmpDir,
+	}); err != nil {
+		t.Fatalf("orchestrator run: %v", err)
+	}
+	if ranCalls == 0 {
+		t.Fatal("adapter never ran; a cycle with progress after halt must resume")
+	}
+}
+
 func TestOrchestratorHaltsWhenStuck(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateSync := NewStateFileSync(filepath.Join(tmpDir, "cycle.json"))
