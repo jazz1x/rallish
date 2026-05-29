@@ -127,7 +127,13 @@ func main() {
 	}()
 
 	if err := root.ExecuteContext(context.Background()); err != nil {
+		var coded interface{ ExitCode() int }
 		switch {
+		case errors.As(err, &coded):
+			// A command (e.g. `cycle run --once`) that carries its own exit code.
+			// The code mapping is the command's SSOT; the root just honours it.
+			_, _ = fmt.Fprintln(os.Stderr, "Error:", err)
+			exitCode = coded.ExitCode()
 		case errors.Is(err, cli.ErrTimeoutWaitingForBaton):
 			exitCode = 2
 		case errors.Is(err, contract.ErrInvalidName),
