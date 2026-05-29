@@ -113,8 +113,14 @@ type AgentCardSignature struct {
 }
 
 // A2APart is a polymorphic message part (text or structured data).
+//
+// The discriminator field is "kind" per A2A v1.0 (Linux-Foundation spec).
+// The legacy draft name "type" is no longer used on the wire; a client
+// sending the legacy field will receive a parse error under DisallowUnknownFields
+// (parse-don't-validate; RFC 9413 / Postel critique), which is intentional —
+// v1.0 conformance is the target.
 type A2APart struct {
-	Type string         `json:"type"` // "text" | "data"
+	Kind string         `json:"kind"` // "text" | "data"
 	Text string         `json:"text,omitempty"`
 	Data map[string]any `json:"data,omitempty"`
 }

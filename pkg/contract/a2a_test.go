@@ -93,6 +93,34 @@ func TestJSONRPCRequestRoundTrip(t *testing.T) {
 	}
 }
 
+// TestA2APart_KindFieldWireShape is the v1.0 wire-shape false-positive guard:
+// an A2APart with "kind" round-trips correctly and the Go field name is Kind.
+// This confirms the A2A v1.0 rename (type→kind) on the Part discriminator.
+func TestA2APart_KindFieldWireShape(t *testing.T) {
+	raw := `{"kind":"text","text":"hello"}`
+	var part A2APart
+	if err := json.Unmarshal([]byte(raw), &part); err != nil {
+		t.Fatalf("unmarshal A2APart with 'kind': %v", err)
+	}
+	if part.Kind != "text" {
+		t.Errorf("Kind = %q, want %q", part.Kind, "text")
+	}
+	if part.Text != "hello" {
+		t.Errorf("Text = %q, want %q", part.Text, "hello")
+	}
+	// Round-trip: marshal must emit "kind", not "type".
+	b, err := json.Marshal(part)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"kind":"text"`) {
+		t.Errorf("marshaled A2APart missing \"kind\" field: %s", b)
+	}
+	if strings.Contains(string(b), `"type"`) {
+		t.Errorf("marshaled A2APart must NOT contain legacy \"type\" field: %s", b)
+	}
+}
+
 func TestJSONRPCResponseWithError(t *testing.T) {
 	resp := JSONRPCResponse{
 		JSONRPC: "2.0",
