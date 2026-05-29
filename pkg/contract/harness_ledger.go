@@ -19,6 +19,13 @@ const (
 	// sandbox enforces. The entry never implies rallish executed or blocked a
 	// command itself.
 	LedgerEventActionDenied LedgerEventType = "action_denied"
+	// LedgerEventSecretFlagged records that a secret-containment check flagged a
+	// pending action as touching a sensitive path or carrying an over-broad token
+	// (G6 containment). Like LedgerEventActionDenied it is a DECISION RECORD only:
+	// rallish declares the policy and audits it; the runtime hook / sandbox
+	// enforces. The entry never implies rallish read, redacted, or blocked the
+	// secret itself.
+	LedgerEventSecretFlagged LedgerEventType = "secret_flagged"
 )
 
 // LedgerSchemaVersion is stamped on every ledger entry so the append-only JSONL
