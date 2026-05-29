@@ -84,6 +84,32 @@ type AgentCard struct {
 	Skills             []AgentSkill    `json:"skills"`
 	DefaultInputModes  []string        `json:"defaultInputModes"`
 	DefaultOutputModes []string        `json:"defaultOutputModes"`
+	// Signature is an optional ed25519 signature over the canonical form of this
+	// card (F16, verifiable interop). It is additive and EXCLUDED from its own
+	// signed input to avoid circularity; see SignAgentCard / VerifyAgentCard. A
+	// card with a nil Signature is an unsigned card (the broker default today).
+	Signature *AgentCardSignature `json:"signature,omitempty"`
+}
+
+// AgentCardSignature is an embedded, self-certifying ed25519 signature over an
+// AgentCard (F16 — a client can verify the card's authenticity). It carries the
+// signer's public key so verification needs no out-of-band key fetch.
+//
+// KEY-MANAGEMENT BOUNDARY (deferred, per north-star §G3): this is a "signed card
+// with a caller-supplied key; key provenance/distribution is deferred." There is
+// deliberately NO secure key storage, rotation, CA, or PKI here — the caller
+// supplies (or generates) the ed25519 key, and trust in the embedded public key
+// is established out-of-band by the consumer. Mutual auth is also still deferred.
+type AgentCardSignature struct {
+	// Algorithm is the JOSE-style signature algorithm identifier. Only "EdDSA"
+	// (ed25519) is produced/accepted today; an unknown alg fails verification.
+	Algorithm string `json:"algorithm"`
+	// PublicKey is the base64 (std, padded) ed25519 public key the signature
+	// verifies against (32 bytes when decoded).
+	PublicKey string `json:"publicKey"`
+	// Signature is the base64 (std, padded) ed25519 signature over the canonical
+	// form of the card with this Signature field excluded (non-circular).
+	Signature string `json:"signature"`
 }
 
 // A2APart is a polymorphic message part (text or structured data).
