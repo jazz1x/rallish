@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jazz1x/rallish/internal/adapter"
 	"github.com/jazz1x/rallish/internal/budget"
+	"github.com/jazz1x/rallish/internal/cycle"
 	"github.com/jazz1x/rallish/internal/exit"
 	"github.com/jazz1x/rallish/internal/router"
 	"github.com/jazz1x/rallish/internal/session"
@@ -26,6 +28,11 @@ type Server struct {
 	mu            sync.Mutex
 	pendingReqs   map[string]contract.TurnRequest
 	sessionStates map[string]sessionState
+
+	cycleStore      *cycleStore
+	adapterRegistry *adapter.Registry
+	cyclePipeline   cycle.Pipeline
+	cycleSleeper    cycle.Sleeper
 }
 
 type sessionState struct {
@@ -58,12 +65,28 @@ func NewServer(store *session.Store, budgeter *budget.Budgeter) *Server {
 	s.mux.HandleFunc("POST /sessions/{id}/turn", s.handlePostTurn)
 	s.registerA2ARoutes()
 	s.registerRallyRoutes()
+	s.registerCycleRoutes()
 	return s
+}
+
+// SetCyclePipeline injects a custom pipeline for cycle stepping (useful in tests).
+func (s *Server) SetCyclePipeline(p cycle.Pipeline) {
+	s.cyclePipeline = p
 }
 
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
+}
+
+// SetAdapterRegistry injects the adapter registry for orchestration support.
+func (s *Server) SetAdapterRegistry(reg *adapter.Registry) {
+	s.adapterRegistry = reg
+}
+
+// SetCycleSleeper injects a custom sleeper for orchestration (useful in tests).
+func (s *Server) SetCycleSleeper(slp cycle.Sleeper) {
+	s.cycleSleeper = slp
 }
 
 func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {

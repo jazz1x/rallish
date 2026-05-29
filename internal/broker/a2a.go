@@ -5,6 +5,7 @@
 package broker
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -19,12 +20,16 @@ import (
 )
 
 func (s *Server) registerA2ARoutes() {
+	// A2A v1.0 discovery path (the conformance target).
+	s.mux.HandleFunc("GET /.well-known/agent-card.json", s.handleAgentCard)
+	// Legacy draft path retained as a back-compat alias.
 	s.mux.HandleFunc("GET /.well-known/agent.json", s.handleAgentCard)
 	s.mux.HandleFunc("POST /a2a", s.handleA2A)
 }
 
 func (s *Server) handleAgentCard(w http.ResponseWriter, r *http.Request) {
 	card := contract.AgentCard{
+		ProtocolVersion:  contract.ProtocolVersion,
 		Name:             "rallish",
 		Description:      "A local broker for multi-agent turn-taking",
 		Version:          buildinfo.Version(),
@@ -57,24 +62,41 @@ func (s *Server) handleAgentCard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleA2A(w http.ResponseWriter, r *http.Request) {
+	// Strict envelope decode: an unknown top-level field is a parse error
+	// (parse-don't-validate; RFC 9413 / Postel critique).
 	var req contract.JSONRPCRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
 		writeJSONRPCError(w, req.ID, -32700, "Parse error", err.Error())
 		return
 	}
 
 	switch req.Method {
-	case "tasks/send":
+	case contract.MethodSendMessage, contract.LegacyMethodTasksSend:
 		s.handleA2ASend(w, r, req)
-	case "tasks/sendSubscribe":
+	case contract.MethodSubscribeToTask, contract.LegacyMethodTasksSendSubscribe:
 		s.handleA2ASendSubscribe(w, r, req)
-	case "tasks/get":
+	case contract.MethodGetTask, contract.LegacyMethodTasksGet:
 		s.handleA2AGet(w, r, req)
-	case "tasks/cancel":
+	case contract.MethodCancelTask, contract.LegacyMethodTasksCancel:
 		s.handleA2ACancel(w, r, req)
 	default:
 		writeJSONRPCError(w, req.ID, -32601, "Method not found", nil)
 	}
+}
+
+// decodeParams strictly decodes the raw JSON-RPC params into a typed struct.
+// An unknown/extra field is an error (parse-don't-validate). Empty params are
+// allowed (the typed struct's zero value), so missing-required-field validation
+// stays in the per-method handler, which can emit the precise -32602 message.
+func decodeParams(raw json.RawMessage, dst any) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	return dec.Decode(dst)
 }
 
 func writeJSONRPCError(w http.ResponseWriter, id any, code int, message string, data any) {
@@ -104,7 +126,12 @@ func writeJSONRPCResult(w http.ResponseWriter, id any, result map[string]any) {
 
 func (s *Server) handleA2ASend(w http.ResponseWriter, r *http.Request, req contract.JSONRPCRequest) {
 	ctx := r.Context()
-	message, ok := extractTextFromParts(req.Params, "message")
+	var params contract.SendMessageParams
+	if err := decodeParams(req.Params, &params); err != nil {
+		writeJSONRPCError(w, req.ID, -32602, "Invalid params", err.Error())
+		return
+	}
+	message, ok := textFromParts(params.Message.Parts)
 	if !ok {
 		writeJSONRPCError(w, req.ID, -32602, "Invalid params: missing message", nil)
 		return
@@ -149,9 +176,8 @@ func (s *Server) handleA2ASend(w http.ResponseWriter, r *http.Request, req contr
 
 func (s *Server) handleA2AGet(w http.ResponseWriter, r *http.Request, req contract.JSONRPCRequest) {
 	ctx := r.Context()
-	taskID, ok := req.Params["id"].(string)
-	if !ok || taskID == "" {
-		writeJSONRPCError(w, req.ID, -32602, "Invalid params: missing id", nil)
+	taskID, ok := taskIDFromParams(w, req)
+	if !ok {
 		return
 	}
 
@@ -178,9 +204,8 @@ func (s *Server) handleA2AGet(w http.ResponseWriter, r *http.Request, req contra
 
 func (s *Server) handleA2ACancel(w http.ResponseWriter, r *http.Request, req contract.JSONRPCRequest) {
 	ctx := r.Context()
-	taskID, ok := req.Params["id"].(string)
-	if !ok || taskID == "" {
-		writeJSONRPCError(w, req.ID, -32602, "Invalid params: missing id", nil)
+	taskID, ok := taskIDFromParams(w, req)
+	if !ok {
 		return
 	}
 
@@ -240,9 +265,8 @@ func (s *Server) handleA2ACancel(w http.ResponseWriter, r *http.Request, req con
 
 func (s *Server) handleA2ASendSubscribe(w http.ResponseWriter, r *http.Request, req contract.JSONRPCRequest) {
 	ctx := r.Context()
-	taskID, ok := req.Params["id"].(string)
-	if !ok || taskID == "" {
-		writeJSONRPCError(w, req.ID, -32602, "Invalid params: missing id", nil)
+	taskID, ok := taskIDFromParams(w, req)
+	if !ok {
 		return
 	}
 
@@ -339,26 +363,29 @@ func (s *Server) handleA2ASendSubscribe(w http.ResponseWriter, r *http.Request, 
 	}
 }
 
-func extractTextFromParts(params map[string]any, key string) (string, bool) {
-	msg, ok := params[key].(map[string]any)
-	if !ok {
+// taskIDFromParams strictly decodes the id-bearing params shared by GetTask,
+// CancelTask, and SubscribeToTask. On a decode error (e.g. unknown field) or a
+// missing id it writes the JSON-RPC error and returns ok=false.
+func taskIDFromParams(w http.ResponseWriter, req contract.JSONRPCRequest) (string, bool) {
+	var params contract.TaskIDParams
+	if err := decodeParams(req.Params, &params); err != nil {
+		writeJSONRPCError(w, req.ID, -32602, "Invalid params", err.Error())
 		return "", false
 	}
-	parts, ok := msg["parts"].([]any)
-	if !ok || len(parts) == 0 {
+	if params.ID == "" {
+		writeJSONRPCError(w, req.ID, -32602, "Invalid params: missing id", nil)
 		return "", false
 	}
+	return params.ID, true
+}
+
+// textFromParts concatenates the text of all text parts in a message.
+func textFromParts(parts []contract.A2APart) (string, bool) {
 	var texts []string
 	for _, p := range parts {
-		part, ok := p.(map[string]any)
-		if !ok {
-			continue
+		if p.Text != "" {
+			texts = append(texts, p.Text)
 		}
-		text, ok := part["text"].(string)
-		if !ok {
-			continue
-		}
-		texts = append(texts, text)
 	}
 	if len(texts) == 0 {
 		return "", false

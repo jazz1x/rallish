@@ -135,3 +135,62 @@ func TestInstallBundlesScripts(t *testing.T) {
 		t.Fatal("install-binary.sh is empty")
 	}
 }
+
+func TestInstallNamed_AutonomousCycle(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	results, err := skills.InstallNamed("autonomous-cycle", dir)
+	if err != nil {
+		t.Fatalf("InstallNamed: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least one result")
+	}
+
+	// Verify SKILL.md exists.
+	skillPath := filepath.Join(dir, "SKILL.md")
+	if _, statErr := os.Stat(skillPath); statErr != nil {
+		t.Fatalf("SKILL.md not found: %v", statErr)
+	}
+}
+
+func TestInstallCompanionFiles(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	results, err := skills.InstallCompanionFiles("autonomous-cycle", home)
+	if err != nil {
+		t.Fatalf("InstallCompanionFiles: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least one companion file")
+	}
+
+	// Verify scripts directory has executable files.
+	scriptsDir := filepath.Join(home, ".claude", "scripts")
+	entries, readErr := os.ReadDir(scriptsDir)
+	if readErr != nil {
+		t.Fatalf("read scripts dir: %v", readErr)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected at least one script")
+	}
+	for _, e := range entries {
+		info, statErr := e.Info()
+		if statErr != nil {
+			t.Fatalf("stat %q: %v", e.Name(), statErr)
+		}
+		if info.Mode().Perm()&0o111 == 0 {
+			t.Errorf("script %q is not executable", e.Name())
+		}
+	}
+
+	// Verify runbooks directory has files.
+	runbooksDir := filepath.Join(home, ".claude", "runbooks")
+	entries, readErr = os.ReadDir(runbooksDir)
+	if readErr != nil {
+		t.Fatalf("read runbooks dir: %v", readErr)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected at least one runbook")
+	}
+}

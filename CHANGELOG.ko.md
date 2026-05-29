@@ -7,6 +7,76 @@
 
 ## [미발표]
 
+### 추가됨
+
+- **`rallish cycle` — 자율 사이클 서브시스템.** 원샷 `cycle start`
+  (생성 → 오케스트레이션 → 감시) with `--max-cycles`, `--max-duration`,
+  `--auto-goal`, `--log-file`. `cycle status`는 3사이클 마다 에이전트
+  리셋 힌트를 표시. `cycle halt` / `cycle next` / `cycle watch`로
+  인터랙티브 제어.
+- **`rallish trigger` — 자연어 스킬 호출.** `rallish trigger "자율 사이클"`은
+  임베디드 스킬 트리거를 매칭하고 SKILL.md 기본값으로 `cycle start`를
+  자동 실행. `--dry-run`으로 실행 없이 명령 미리보기.
+- **autonomous-cycle 컴패니언 파일.** `skill install --name autonomous-cycle`로
+  스킬 + 드라이버 스크립트(`~/.claude/scripts/autonomous-cycle.sh`) +
+  핸드오프 런북(`~/.claude/runbooks/cycle-handoff.md`) 설치. Bootstrap
+  1단계에서 자동 설치.
+- **AutoGoal + 시간 기반 종료.** `go vet`, `golangci-lint --fast-only`,
+  TODO/FIXME 스캔으로 다음 목표 자동 발견. `MaxDurationMinutes`로 실행
+  시간 제한; 코드베이스가 깨끗하면 `HaltSuccess`로 graceful 종료.
+- **프로젝트별 사이클 게이트.** `cycle new` / `cycle start`에서 반복 가능한
+  `--local-gate "<command>"` 검증을 받아 내장 audit 게이트 뒤에 실행하고,
+  `CycleState.local_gates`에 저장하며 `cycle status` 및 멀티 에이전트
+  사이클 요약에 포함.
+- **자율 작업 하네스 계약.** `pkg/contract.WorkContract`가 특정 에이전트
+  런타임에 묶이지 않는 작업 목표, 범위, 게이트, 예산, 오케스트레이션 형태를
+  정의해 어댑터가 공통으로 사용할 수 있게 함.
+- **하네스 원장 이벤트 계약.** `pkg/contract.HarnessLedgerEntry`가 향후
+  사이클 원장을 위한 append-only 감사 이벤트 형태를 정의.
+- **사이클 원장 파일 동기화.** `internal/cycle.LedgerFileSync`가 하네스
+  원장 이벤트를 JSONL로 append/read하여 감사 로그 저장 지점을 마련.
+- **게이트-원장 projection.** `contract.NewGateLedgerEntry`가 게이트 리포트를
+  append-only 통과/실패 감사 이벤트로 변환.
+- **핸드오프-원장 projection.** `contract.NewHandoffLedgerEntry`가 에이전트
+  핸드오프 응답을 `handoff_to`가 보존된 append-only 감사 이벤트로 변환.
+- **오케스트레이터 핸드오프 원장 연결.** 멀티 에이전트 사이클은 어댑터가
+  `handoff_to`를 반환하면 `handoff_created` 이벤트를 append.
+- **에이전트 턴 원장 이벤트.** 멀티 에이전트 사이클은 완료된 어댑터 턴을
+  선택적 핸드오프 이벤트와 분리된 `agent_turn` 이벤트로 append.
+- **원장 실패 정책.** 하네스 PRD와 런북에 broker 원장 append는 best-effort,
+  orchestrator turn append는 fail-fast임을 문서화.
+- **사이클 원장 조회.** `GET /cycles/{id}/ledger`가 append-only 하네스
+  원장 이벤트를 반환하며, mutable state가 이미 제거된 halt 사이클도 조회 가능.
+- **사이클 원장 CLI.** `rallish cycle ledger --cycle-id <id>`가 하네스
+  원장을 사람과 후속 에이전트가 모두 읽기 쉬운 pretty JSON으로 출력.
+- **사이클 상태 원장 요약.** `rallish cycle status`가 원장 조회 가능 시
+  entry 수와 마지막 이벤트를 표시.
+
+- **anti-spin 활성성 (G5).** 무진행/spinning 런이 토큰을 태우기 전에 스스로 halt:
+  `cycle.Stuck`이 반복 턴·반복 게이트실패·핑퐁·정체된 frontier를 탐지하고,
+  sticky-halt reviver 가드가 halt된 사이클의 재개를 거부하며, 하드 누적 비용
+  천장이 revival을 가로지르는 productive runaway를 잡음.
+- **실행 전 action-gate (G6).** `contract.DecideToolUse`(파괴적 deny-list +
+  시크릿 격리)가 대기 명령을 분류하고 `rallish gate tooluse`가 의미있는 exit
+  code로 verdict를 반환 — rallish는 정책을 선언·기록하고 런타임 훅이 집행.
+- **변조탐지·재현가능 감사 (G4).** 원장 엔트리에 `schema_version` + 해시체인
+  (`prev_hash`/`hash`); `contract.VerifyChain`이 내용 변조를 탐지, `contract.Replay`가
+  제어 그래프를 재구성(verify-before-reconstruct), CT-스타일 Merkle 층(RFC 9162)이
+  inclusion + consistency 증명을 추가.
+- **게임 불가 검증 게이트 (G2).** 에이전트 핸드셰이크를 엄격히 파싱(파싱 불가 턴은
+  halt, 묵시적 prose 폴백 없음); gate self-eval이 philosophy 스캐너가 시드된 위반을
+  잡는지 증명; 게이트 정의를 해시-핀하여 in-cycle 편집을 탐지.
+- **A2A v1.0 정합 (G3).** 브로커가 `/.well-known/agent-card.json`에 실제
+  `protocolVersion`을 가진 서명된 Agent Card를 서빙, PascalCase RPC
+  (`SendMessage`/`GetTask`/`CancelTask`/`SubscribeToTask`), 미지 필드를 거부하는
+  엄격한 타입드 intake; legacy 경로는 back-compat로 유지.
+- **바운디드 resume 레퍼런스 드라이버 (G1).** `rallish cycle run --once`가 단일
+  non-watching 패스를 실행하고 halt 사유에서 파생된 코드로 종료 — cron/스케줄러가
+  구동하는 안전한 호출 지점; resume은 기존 atomic 상태 파일로 검증.
+- **불변식으로서의 가드레일.** CI import-guard 테스트가 코어의
+  loop/scheduler/graph-DB 패키지 import를 금지; `go mod verify`를 push 게이트에
+  연결; AGENTS.md/CLAUDE.md를 구조화된 convention 소스로 수용.
+
 ## [0.3.0] - 2026-05-20
 
 ### 추가됨

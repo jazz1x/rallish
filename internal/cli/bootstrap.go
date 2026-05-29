@@ -110,7 +110,16 @@ func RunBootstrap(ctx context.Context, opts BootstrapOptions) error {
 		for _, r := range results {
 			t.Detail("%s %s", r.Action, filepath.Base(r.Path))
 		}
-		t.StepOK(1, total, "skill installed (%d files)", len(results))
+		// Install autonomous-cycle companion files (scripts + runbooks).
+		companionResults, compErr := skills.InstallCompanionFiles("autonomous-cycle", home)
+		if compErr != nil {
+			t.Warn("companion files: %v", compErr)
+		} else {
+			for _, r := range companionResults {
+				t.Detail("%s %s", r.Action, filepath.Base(r.Path))
+			}
+		}
+		t.StepOK(1, total, "skill installed (%d files)", len(results)+len(companionResults))
 	}
 
 	// Step 2 — config wizard.

@@ -95,6 +95,8 @@ type TurnRequest struct {
 	LastTurn *LastTurn `json:"last_turn,omitempty"`
 	// Task is the work description for the session.
 	Task Task `json:"task"`
+	// WorkContract is the optional harness contract for agent-neutral autonomous work.
+	WorkContract *WorkContract `json:"work_contract,omitempty"`
 	// ExitWhen lists the conditions that can terminate the session.
 	ExitWhen []ExitCondition `json:"exit_when"`
 }

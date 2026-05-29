@@ -2,6 +2,7 @@ package contract
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -27,9 +28,10 @@ func TestTaskStateIsTerminal(t *testing.T) {
 
 func TestAgentCardJSONRoundTrip(t *testing.T) {
 	card := AgentCard{
-		Name:        "rallish",
-		Description: "test",
-		Version:     "0.1.0",
+		ProtocolVersion: ProtocolVersion,
+		Name:            "rallish",
+		Description:     "test",
+		Version:         "0.1.0",
 		Capabilities: AgentCapability{
 			Streaming: true,
 		},
@@ -41,9 +43,16 @@ func TestAgentCardJSONRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
+	// The versioned-surface field must serialize under its wire name.
+	if !strings.Contains(string(b), `"protocolVersion":"1.0"`) {
+		t.Errorf("card JSON missing protocolVersion: %s", b)
+	}
 	var decoded AgentCard
 	if err := json.Unmarshal(b, &decoded); err != nil {
 		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.ProtocolVersion != ProtocolVersion {
+		t.Errorf("protocolVersion = %q, want %q", decoded.ProtocolVersion, ProtocolVersion)
 	}
 	if decoded.Name != card.Name {
 		t.Errorf("name = %q, want %q", decoded.Name, card.Name)
@@ -60,10 +69,8 @@ func TestJSONRPCRequestRoundTrip(t *testing.T) {
 	req := JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      "abc",
-		Method:  "tasks/send",
-		Params: map[string]any{
-			"message": map[string]any{"parts": []any{map[string]any{"text": "hi"}}},
-		},
+		Method:  MethodSendMessage,
+		Params:  json.RawMessage(`{"message":{"parts":[{"text":"hi"}]}}`),
 	}
 	b, err := json.Marshal(req)
 	if err != nil {
@@ -75,6 +82,42 @@ func TestJSONRPCRequestRoundTrip(t *testing.T) {
 	}
 	if decoded.Method != req.Method {
 		t.Errorf("method = %q, want %q", decoded.Method, req.Method)
+	}
+	// Params round-trip as raw bytes; decode into the typed param struct.
+	var params SendMessageParams
+	if err := json.Unmarshal(decoded.Params, &params); err != nil {
+		t.Fatalf("decode params: %v", err)
+	}
+	if len(params.Message.Parts) != 1 || params.Message.Parts[0].Text != "hi" {
+		t.Errorf("params message mismatch: %+v", params.Message)
+	}
+}
+
+// TestA2APart_KindFieldWireShape is the v1.0 wire-shape false-positive guard:
+// an A2APart with "kind" round-trips correctly and the Go field name is Kind.
+// This confirms the A2A v1.0 rename (type→kind) on the Part discriminator.
+func TestA2APart_KindFieldWireShape(t *testing.T) {
+	raw := `{"kind":"text","text":"hello"}`
+	var part A2APart
+	if err := json.Unmarshal([]byte(raw), &part); err != nil {
+		t.Fatalf("unmarshal A2APart with 'kind': %v", err)
+	}
+	if part.Kind != "text" {
+		t.Errorf("Kind = %q, want %q", part.Kind, "text")
+	}
+	if part.Text != "hello" {
+		t.Errorf("Text = %q, want %q", part.Text, "hello")
+	}
+	// Round-trip: marshal must emit "kind", not "type".
+	b, err := json.Marshal(part)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"kind":"text"`) {
+		t.Errorf("marshaled A2APart missing \"kind\" field: %s", b)
+	}
+	if strings.Contains(string(b), `"type"`) {
+		t.Errorf("marshaled A2APart must NOT contain legacy \"type\" field: %s", b)
 	}
 }
 

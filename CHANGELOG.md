@@ -7,6 +7,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`rallish cycle` — autonomous-cycle subsystem.** One-shot `cycle start`
+  (create → orchestrate → watch) with `--max-cycles`, `--max-duration`,
+  `--auto-goal`, and `--log-file`. `cycle status` shows agent-rotation
+  hint every 3 cycles. `cycle halt` / `cycle next` / `cycle watch` for
+  interactive control.
+- **`rallish trigger` — natural-language skill invocation.**
+  `rallish trigger "자율 사이클"` matches embedded skill triggers and
+  auto-invokes `cycle start` with SKILL.md defaults (max-cycles=10,
+  max-duration=240, auto-goal, log-file). `--dry-run` prints the
+  equivalent command without executing it.
+- **Companion files for autonomous-cycle.** `skill install --name
+  autonomous-cycle` writes the skill to `~/.claude/skills/autonomous-cycle`
+  plus driver script (`~/.claude/scripts/autonomous-cycle.sh`) and handoff
+  runbook (`~/.claude/runbooks/cycle-handoff.md`). Bootstrap step 1
+  installs them automatically.
+- **AutoGoal + time-based termination.** `autogoal.go` discovers next
+  goals via `go vet`, `golangci-lint --fast-only`, and TODO/FIXME scan.
+  `MaxDurationMinutes` caps runtime; `HaltSuccess` exits cleanly when the
+  codebase is clean.
+- **Project-specific cycle gates.** `cycle new` / `cycle start` accept
+  repeatable `--local-gate "<command>"` checks that run after the built-in
+  audit gate, persist in `CycleState.local_gates`, appear in `cycle status`,
+  and are included in multi-agent cycle summaries.
+- **Autonomous work harness contract.** `pkg/contract.WorkContract` defines
+  the vendor-neutral work objective, scope, gates, budget, and orchestration
+  shape that adapters can use independently of any specific agent runtime.
+- **Harness ledger event contract.** `pkg/contract.HarnessLedgerEntry` defines
+  the append-only audit event shape for future cycle ledgers.
+- **Cycle ledger file sync.** `internal/cycle.LedgerFileSync` appends and reads
+  harness ledger events as JSONL, establishing the storage seam for audit logs.
+- **Gate-to-ledger projection.** `contract.NewGateLedgerEntry` maps gate reports
+  into append-only pass/fail audit events.
+- **Handoff-to-ledger projection.** `contract.NewHandoffLedgerEntry` maps agent
+  handoff responses into append-only audit events with `handoff_to` preserved.
+- **Orchestrator handoff ledger wiring.** Multi-agent cycles append
+  `handoff_created` events when adapters return `handoff_to`.
+- **Agent-turn ledger events.** Multi-agent cycles append `agent_turn` events
+  for completed adapter turns, separate from optional handoff events.
+- **Ledger failure policy.** The harness PRD and runbook now document
+  best-effort broker ledger appends versus fail-fast orchestrator turn appends.
+- **Cycle ledger readback.** `GET /cycles/{id}/ledger` returns append-only
+  harness ledger entries, including halted cycles whose mutable state was
+  already removed.
+- **Cycle ledger CLI.** `rallish cycle ledger --cycle-id <id>` prints the
+  harness ledger as pretty JSON for human review and downstream agents.
+- **Cycle status ledger summary.** `rallish cycle status` shows the ledger entry
+  count and last event when ledger readback is available.
+
+- **Anti-spin liveness (G5).** A no-progress / spinning run halts itself before
+  it bleeds tokens: `cycle.Stuck` detects repeated turns, repeated gate failures,
+  ping-pong, and a stalled frontier; a sticky-halt reviver guard refuses to
+  resume a halted cycle; and a hard lifetime cost ceiling catches a productive
+  runaway summed across revivals.
+- **Pre-execution action-gate (G6).** `contract.DecideToolUse` (destructive
+  deny-list + secret containment) classifies a pending command and `rallish gate
+  tooluse` returns the verdict with a meaningful exit code — rallish declares the
+  policy and records the decision, the runtime hook enforces.
+- **Tamper-evident, replayable audit (G4).** Ledger entries carry a
+  `schema_version` and are hash-chained (`prev_hash`/`hash`); `contract.VerifyChain`
+  detects content tampering, `contract.Replay` reconstructs the control graph
+  (verify-before-reconstruct), and a CT-style Merkle layer (RFC 9162) adds
+  inclusion + consistency proofs.
+- **Un-gameable verification gates (G2).** The agent handshake is parsed strictly
+  (an unparseable turn halts, never a silent prose fallback); a gate self-eval
+  proves the philosophy scanners catch seeded violations; gate definitions are
+  hash-pinned so an in-cycle edit is detectable.
+- **A2A v1.0 conformance (G3).** The broker serves a signed Agent Card at
+  `/.well-known/agent-card.json` with a real `protocolVersion`, PascalCase RPCs
+  (`SendMessage`/`GetTask`/`CancelTask`/`SubscribeToTask`), and strict typed
+  intake that rejects unknown fields; the legacy path stays for back-compat.
+- **Bounded resume reference driver (G1).** `rallish cycle run --once` runs one
+  non-watching pass and exits with a code derived from the halt reason — the safe
+  invocation a cron / scheduler drives; resume rides the existing atomic state file.
+- **Guardrails as invariants.** A CI import-guard test forbids the core from
+  importing a loop/scheduler/graph-DB package; `go mod verify` is wired into the
+  push gate; AGENTS.md / CLAUDE.md are ingested as a structured convention source.
+
 ## [0.3.0] - 2026-05-20
 
 ### Added

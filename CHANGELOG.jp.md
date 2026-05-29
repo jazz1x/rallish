@@ -7,6 +7,82 @@
 
 ## [未発表]
 
+### 追加
+
+- **`rallish cycle` — 自律サイクルサブシステム。** ワンショット `cycle start`
+  (作成 → オーケストレーション → 監視) with `--max-cycles`, `--max-duration`,
+  `--auto-goal`, `--log-file`. `cycle status` は3サイクルごとにエージェント
+  リセットヒントを表示. `cycle halt` / `cycle next` / `cycle watch` で
+  インタラクティブ制御.
+- **`rallish trigger` — 自然言語スキル呼び出し.** `rallish trigger "자율 사이클"`
+  は埋め込みスキルトリガーをマッチングし、SKILL.md のデフォルト値で
+  `cycle start` を自動実行. `--dry-run` で実行せずにコマンドをプレビュー.
+- **autonomous-cycle コンパニオンファイル.** `skill install --name autonomous-cycle`
+  でスキル + ドライバースクリプト (`~/.claude/scripts/autonomous-cycle.sh`) +
+  ハンドオフランブック (`~/.claude/runbooks/cycle-handoff.md`) をインストール.
+  Bootstrap ステップ1で自動インストール.
+- **AutoGoal + 時間ベース終了.** `go vet`, `golangci-lint --fast-only`,
+  TODO/FIXME スキャンで次の目標を自動発見. `MaxDurationMinutes` で実行時間を
+  制限; コードベースがクリーンなら `HaltSuccess` で graceful 終了.
+- **プロジェクト固有のサイクルゲート.** `cycle new` / `cycle start` は
+  繰り返し指定できる `--local-gate "<command>"` チェックを受け取り、内蔵
+  audit ゲート後に実行し、`CycleState.local_gates` に保存して `cycle status`
+  とマルチエージェントのサイクル要約に含めます.
+- **自律作業ハーネス契約.** `pkg/contract.WorkContract` が、特定の
+  エージェントランタイムに依存しない作業目標、スコープ、ゲート、予算、
+  オーケストレーション形状を定義し、アダプターが共通利用できるようにしました.
+- **ハーネス台帳イベント契約.** `pkg/contract.HarnessLedgerEntry` が、将来の
+  サイクル台帳向けの append-only 監査イベント形状を定義しました.
+- **サイクル台帳ファイル同期.** `internal/cycle.LedgerFileSync` がハーネス
+  台帳イベントを JSONL として append/read し、監査ログの保存点を確立しました.
+- **ゲートから台帳への projection.** `contract.NewGateLedgerEntry` がゲート
+  レポートを append-only の成功/失敗監査イベントへ変換します.
+- **ハンドオフから台帳への projection.** `contract.NewHandoffLedgerEntry` が
+  エージェントのハンドオフ応答を `handoff_to` を保持した append-only 監査
+  イベントへ変換します.
+- **オーケストレーターのハンドオフ台帳連携.** マルチエージェントサイクルは
+  アダプターが `handoff_to` を返したとき `handoff_created` イベントを append
+  します.
+- **エージェントターン台帳イベント.** マルチエージェントサイクルは完了した
+  アダプターターンを、任意のハンドオフイベントとは別の `agent_turn` イベント
+  として append します.
+- **台帳失敗ポリシー.** ハーネス PRD とランブックに、broker の台帳 append は
+  best-effort、orchestrator turn append は fail-fast であることを文書化しました.
+- **サイクル台帳の読み出し.** `GET /cycles/{id}/ledger` が append-only の
+  ハーネス台帳イベントを返し、mutable state が削除済みの halt サイクルも
+  参照できます.
+- **サイクル台帳 CLI.** `rallish cycle ledger --cycle-id <id>` がハーネス
+  台帳を、人と後続エージェントの両方が読みやすい pretty JSON で出力します.
+- **サイクル状態の台帳サマリー.** `rallish cycle status` が台帳を読める場合に
+  entry 数と最後のイベントを表示します.
+
+- **アンチスピン活性性 (G5).** 無進捗/スピンする実行はトークンを浪費する前に自ら
+  halt: `cycle.Stuck` が反復ターン・反復ゲート失敗・ピンポン・停滞した frontier を
+  検出し、sticky-halt reviver ガードが halt 済みサイクルの再開を拒否、ハードな累積
+  コスト上限が revival をまたぐ productive runaway を捕捉.
+- **実行前 action-gate (G6).** `contract.DecideToolUse`(破壊的 deny-list +
+  シークレット封じ込め)が保留中のコマンドを分類し、`rallish gate tooluse` が意味の
+  ある exit code で verdict を返す — rallish はポリシーを宣言・記録し、ランタイム
+  フックが強制.
+- **改ざん検知・再現可能な監査 (G4).** 台帳エントリに `schema_version` + ハッシュ
+  チェーン (`prev_hash`/`hash`); `contract.VerifyChain` が内容改ざんを検出、
+  `contract.Replay` が制御グラフを再構築 (verify-before-reconstruct)、CT スタイルの
+  Merkle 層 (RFC 9162) が inclusion + consistency 証明を追加.
+- **ゲーム不可能な検証ゲート (G2).** エージェントのハンドシェイクを厳格にパース
+  (パース不能なターンは halt、暗黙の prose フォールバックなし); gate self-eval が
+  philosophy スキャナがシードされた違反を捕まえることを証明; ゲート定義をハッシュ
+  ピン留めして in-cycle 編集を検出.
+- **A2A v1.0 準拠 (G3).** ブローカーが `/.well-known/agent-card.json` に実際の
+  `protocolVersion` を持つ署名付き Agent Card を提供、PascalCase RPC
+  (`SendMessage`/`GetTask`/`CancelTask`/`SubscribeToTask`)、未知フィールドを拒否
+  する厳格な型付き intake; レガシーパスは後方互換のため維持.
+- **バウンド付き resume リファレンスドライバー (G1).** `rallish cycle run --once`
+  が単一の非監視パスを実行し halt 理由から導出したコードで終了 — cron/スケジューラ
+  が駆動する安全な呼び出し点; resume は既存の atomic 状態ファイルで検証.
+- **不変条件としてのガードレール.** CI import-guard テストがコアの
+  loop/scheduler/graph-DB パッケージの import を禁止; `go mod verify` を push
+  ゲートに連結; AGENTS.md/CLAUDE.md を構造化された convention ソースとして取り込み.
+
 ## [0.3.0] - 2026-05-20
 
 ### 追加

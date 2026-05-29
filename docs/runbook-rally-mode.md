@@ -8,15 +8,22 @@
 
 Rally mode (`rallish rally`) provides live baton-passing between two or more human-launched CLI sessions. Unlike `rallish squash` — which spawns headless goroutine adapters inside the broker for automated presets (`solo-ralph`, `pair-review`) — rally mode streams a persistent SSE connection per named participant and enforces exclusive baton ownership. Only the current holder can call `done`; everyone else gets `409 Conflict`.
 
-Key differences from squash:
+Key differences from squash and autonomous-cycle:
 
-| Aspect | squash | rally |
-|--------|--------|-------|
-| Who drives turns | Broker-spawned adapters | Human terminals |
-| Session ID prefix | `ses_` | `rly_` |
-| Turn passing | Automatic (routing rules) | `rally done` command |
-| SSE stream | One per role, broker-managed | One per named participant |
-| Interruptible | Yes (SIGTERM cancels) | Yes — status shows `interrupted` |
+| Aspect | squash | rally | autonomous-cycle |
+|--------|--------|-------|------------------|
+| Who drives turns | Broker-spawned adapters | Human terminals | Single agent self-loop |
+| Session ID prefix | `ses_` | `rly_` | `cycle-` |
+| Turn passing | Automatic (routing rules) | `rally done` command | Gate pipeline (`audit` → `polish` → `commit`) |
+| SSE stream | One per role, broker-managed | One per named participant | `/cycles/:id/events` |
+| Interruptible | Yes (SIGTERM cancels) | Yes — status shows `interrupted` | `cycle halt` or signal |
+| Auto-goal | Preset-defined | User-defined per turn | `go vet` / `golangci-lint` / TODO scan |
+
+> **When to use which:**
+> - **squash** — quick headless preset runs (solo review, pair review).
+> - **rally** — two human terminals collaborating in real time.
+> - **autonomous-cycle** — overnight single-agent refactor with gate pipeline.
+> See `docs/runbook-autonomous-cycle.md` (planned) or `~/.claude/runbooks/cycle-handoff.md` for cycle details.
 
 Routes:
 

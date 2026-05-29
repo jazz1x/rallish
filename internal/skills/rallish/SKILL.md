@@ -401,6 +401,54 @@ of automation. `WAIT_MODE=block` (`rally join --once --timeout <dur>`) is
 available as an opt-in when both sides are known-ready and sub-30-second
 hand-offs are desired.
 
+## Autonomous cycle (overnight refactor loop)
+
+Separate from the rally subsystem, `rallish` also supports a single-agent
+overnight autonomous cycle. Use this when you want one coding-CLI session
+to self-loop through plan → execute → audit → commit without human
+prompts between turns.
+
+```bash
+# One-shot start with sensible defaults
+rallish trigger "자율 사이클"
+
+# Or start manually with full control
+rallish cycle start \
+  --goal "feat: migrate legacy handlers to chi router" \
+  --branch feat/chi-migration \
+  --max-cycles 10 \
+  --max-duration 240 \
+  --auto-goal \
+  --log-file tmp/autonomous-$(date +%Y%m%d-%H%M).log
+```
+
+Key differences from rally mode:
+- **Single agent**, not two. No baton hand-off.
+- **Gate pipeline** (`/audit`, `/self-audit`, `/polish`) runs every cycle.
+- **AutoGoal** discovers the next objective via `go vet`, `golangci-lint`,
+  and TODO/FIXME scan.
+- **Time bound** (`--max-duration`, default 4 h) is the real safety valve;
+  `--max-cycles` is optional.
+- **Agent rotation signal** every 3 cycles (`cycle status` prints a hint)
+  so you can start a fresh chat context on long runs.
+- **Graceful halt** on gate failure, self-audit violation, or clean codebase
+  (`HaltSuccess`).
+
+For background execution:
+```bash
+nohup ~/.claude/scripts/autonomous-cycle.sh > tmp/nightly.log 2>&1 &
+```
+
+Install the companion files once:
+```bash
+rallish skill install --name autonomous-cycle
+```
+
+Reference:
+- Skill: `~/.claude/skills/autonomous-cycle/SKILL.md`
+- Runbook: `~/.claude/runbooks/cycle-handoff.md`
+- Script: `~/.claude/scripts/autonomous-cycle.sh`
+
 ## Reference
 - PRD: docs/prd-rally-mode.md
 - Runbook: docs/runbook-rally-mode.md

@@ -233,3 +233,22 @@ Two semantic refinements from the original spec:
    orphaning the first daemon.
 
 All other §4–§6 spec sections shipped as documented.
+
+## §7 Relation to autonomous-cycle
+
+The rally autoflow (this PRD) and the autonomous-cycle subsystem
+(`internal/cycle/`) both automate turn-taking, but for different
+ topologies:
+
+- **Rally autoflow** — multi-agent, baton-passing, human-in-the-loop
+  (yield/block modes). Two terminals ping-pong via `rally done`.
+- **Autonomous-cycle** — single-agent, gate-pipeline, fully hands-off.
+  One terminal self-loops through `audit` → `philosophy` → `polish` →
+  `commit` → `handoff`. Agent rotation happens every 3 cycles via
+  `ShouldRotateAgent()` (not SSE join).
+
+Cross-over: a rally session could be *seeded* by an autonomous-cycle
+run — e.g., the cycle discovers a complex refactor that needs two
+perspectives, halts with `HaltSuccess`, and the user starts a rally
+with the cycle's final commit as the baseline. No shared code path
+today; the link is purely workflow-level.

@@ -29,7 +29,8 @@ func TestA2A_AgentCard(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/.well-known/agent.json")
+	// v1.0 conformance path.
+	resp, err := http.Get(ts.URL + "/.well-known/agent-card.json")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -37,8 +38,18 @@ func TestA2A_AgentCard(t *testing.T) {
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&card))
 	_ = resp.Body.Close()
 	require.Equal(t, "rallish", card.Name)
+	require.Equal(t, contract.ProtocolVersion, card.ProtocolVersion)
 	require.True(t, card.Capabilities.Streaming)
 	require.NotEmpty(t, card.Skills)
+
+	// Legacy draft path remains served as a back-compat alias.
+	legacy, err := http.Get(ts.URL + "/.well-known/agent.json")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, legacy.StatusCode)
+	var legacyCard contract.AgentCard
+	require.NoError(t, json.NewDecoder(legacy.Body).Decode(&legacyCard))
+	_ = legacy.Body.Close()
+	require.Equal(t, contract.ProtocolVersion, legacyCard.ProtocolVersion)
 }
 
 func TestA2A_TasksSend(t *testing.T) {
@@ -52,7 +63,7 @@ func TestA2A_TasksSend(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	body := `{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"hello"}]}}}`
+	body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"parts":[{"text":"hello"}]}}}`
 	resp, err := http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -78,7 +89,7 @@ func TestA2A_TasksSendMultipleParts(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	body := `{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"hello"},{"text":"world"}]}}}`
+	body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"parts":[{"text":"hello"},{"text":"world"}]}}}`
 	resp, err := http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -105,8 +116,8 @@ func TestA2A_TasksGet(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	// Create via tasks/send
-	body := `{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"hello"}]}}}`
+	// Create via SendMessage
+	body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"parts":[{"text":"hello"}]}}}`
 	resp, err := http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	var sendResult contract.JSONRPCResponse
@@ -115,8 +126,8 @@ func TestA2A_TasksGet(t *testing.T) {
 	task := sendResult.Result["task"].(map[string]any)
 	taskID := task["id"].(string)
 
-	// Get via tasks/get
-	getBody := `{"jsonrpc":"2.0","id":2,"method":"tasks/get","params":{"id":"` + taskID + `"}}`
+	// Get via GetTask
+	getBody := `{"jsonrpc":"2.0","id":2,"method":"GetTask","params":{"id":"` + taskID + `"}}`
 	resp, err = http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(getBody))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -140,7 +151,7 @@ func TestA2A_TasksCancel(t *testing.T) {
 	defer ts.Close()
 
 	// Create
-	body := `{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"hello"}]}}}`
+	body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"parts":[{"text":"hello"}]}}}`
 	resp, err := http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	var sendResult contract.JSONRPCResponse
@@ -149,7 +160,7 @@ func TestA2A_TasksCancel(t *testing.T) {
 	taskID := sendResult.Result["task"].(map[string]any)["id"].(string)
 
 	// Cancel
-	cancelBody := `{"jsonrpc":"2.0","id":3,"method":"tasks/cancel","params":{"id":"` + taskID + `"}}`
+	cancelBody := `{"jsonrpc":"2.0","id":3,"method":"CancelTask","params":{"id":"` + taskID + `"}}`
 	resp, err = http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(cancelBody))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -174,7 +185,7 @@ func TestA2A_TasksCancelAlreadyTerminated(t *testing.T) {
 	defer ts.Close()
 
 	// Create
-	body := `{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"hello"}]}}}`
+	body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"parts":[{"text":"hello"}]}}}`
 	resp, err := http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	var sendResult contract.JSONRPCResponse
@@ -183,7 +194,7 @@ func TestA2A_TasksCancelAlreadyTerminated(t *testing.T) {
 	taskID := sendResult.Result["task"].(map[string]any)["id"].(string)
 
 	// Cancel first time
-	cancelBody := `{"jsonrpc":"2.0","id":2,"method":"tasks/cancel","params":{"id":"` + taskID + `"}}`
+	cancelBody := `{"jsonrpc":"2.0","id":2,"method":"CancelTask","params":{"id":"` + taskID + `"}}`
 	resp, err = http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(cancelBody))
 	require.NoError(t, err)
 	var first contract.JSONRPCResponse
@@ -279,7 +290,7 @@ func TestA2A_TasksSendMissingParams(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	body := `{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{}}`
+	body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{}}`
 	resp, err := http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -302,7 +313,7 @@ func TestA2A_TasksGetMissingID(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	body := `{"jsonrpc":"2.0","id":1,"method":"tasks/get","params":{}}`
+	body := `{"jsonrpc":"2.0","id":1,"method":"GetTask","params":{}}`
 	resp, err := http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -325,7 +336,7 @@ func TestA2A_TasksCancelMissingID(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	body := `{"jsonrpc":"2.0","id":1,"method":"tasks/cancel","params":{}}`
+	body := `{"jsonrpc":"2.0","id":1,"method":"CancelTask","params":{}}`
 	resp, err := http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -349,7 +360,7 @@ func TestA2A_TasksSendSubscribeTerminal(t *testing.T) {
 	defer ts.Close()
 
 	// Create
-	body := `{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"hello"}]}}}`
+	body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"parts":[{"text":"hello"}]}}}`
 	resp, err := http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	var sendResult contract.JSONRPCResponse
@@ -358,13 +369,13 @@ func TestA2A_TasksSendSubscribeTerminal(t *testing.T) {
 	taskID := sendResult.Result["task"].(map[string]any)["id"].(string)
 
 	// Cancel to make terminal
-	cancelBody := `{"jsonrpc":"2.0","id":2,"method":"tasks/cancel","params":{"id":"` + taskID + `"}}`
+	cancelBody := `{"jsonrpc":"2.0","id":2,"method":"CancelTask","params":{"id":"` + taskID + `"}}`
 	resp, err = http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(cancelBody))
 	require.NoError(t, err)
 	_ = resp.Body.Close()
 
 	// Subscribe should immediately return the terminal event without leaking a channel
-	subBody := `{"jsonrpc":"2.0","id":3,"method":"tasks/sendSubscribe","params":{"id":"` + taskID + `"}}`
+	subBody := `{"jsonrpc":"2.0","id":3,"method":"SubscribeToTask","params":{"id":"` + taskID + `"}}`
 	resp, err = http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(subBody))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -400,7 +411,7 @@ func TestA2A_TasksSendSubscribeClientDisconnect(t *testing.T) {
 	defer ts.Close()
 
 	// Create
-	body := `{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"hello"}]}}}`
+	body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"parts":[{"text":"hello"}]}}}`
 	resp, err := http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	var sendResult contract.JSONRPCResponse
@@ -410,7 +421,7 @@ func TestA2A_TasksSendSubscribeClientDisconnect(t *testing.T) {
 
 	// Subscribe with cancelable context
 	ctx, cancel := context.WithCancel(context.Background())
-	subBody := `{"jsonrpc":"2.0","id":2,"method":"tasks/sendSubscribe","params":{"id":"` + taskID + `"}}`
+	subBody := `{"jsonrpc":"2.0","id":2,"method":"SubscribeToTask","params":{"id":"` + taskID + `"}}`
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL+"/a2a", strings.NewReader(subBody))
 	require.NoError(t, err)
 
@@ -451,7 +462,7 @@ func TestA2A_TasksSendSubscribeRaceNoLeak(t *testing.T) {
 	defer ts.Close()
 
 	// Create
-	body := `{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"hello"}]}}}`
+	body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"parts":[{"text":"hello"}]}}}`
 	resp, err := http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(body))
 	require.NoError(t, err)
 	var sendResult contract.JSONRPCResponse
@@ -464,7 +475,7 @@ func TestA2A_TasksSendSubscribeRaceNoLeak(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			subBody := `{"jsonrpc":"2.0","id":2,"method":"tasks/sendSubscribe","params":{"id":"` + taskID + `"}}`
+			subBody := `{"jsonrpc":"2.0","id":2,"method":"SubscribeToTask","params":{"id":"` + taskID + `"}}`
 			req, _ := http.NewRequest(http.MethodPost, ts.URL+"/a2a", strings.NewReader(subBody))
 			client := &http.Client{Timeout: 2 * time.Second}
 			resp, err := client.Do(req)
@@ -480,10 +491,87 @@ func TestA2A_TasksSendSubscribeRaceNoLeak(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Cancel should notify all subscribers without races or panics
-	cancelBody := `{"jsonrpc":"2.0","id":3,"method":"tasks/cancel","params":{"id":"` + taskID + `"}}`
+	cancelBody := `{"jsonrpc":"2.0","id":3,"method":"CancelTask","params":{"id":"` + taskID + `"}}`
 	resp2, err := http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(cancelBody))
 	require.NoError(t, err)
 	_ = resp2.Body.Close()
 
 	wg.Wait()
+}
+
+// TestA2A_StrictIntake_UnknownParamFieldRejected is the strict-intake negative
+// control: a v1.0 request whose params carry an unknown/extra field is an ERROR
+// (-32602), not silently dropped (parse-don't-validate; RFC 9413 / Postel).
+func TestA2A_StrictIntake_UnknownParamFieldRejected(t *testing.T) {
+	dir := t.TempDir()
+	clock := &fakeClock{t: time.Now()}
+	store, err := session.NewStore(dir, clock)
+	require.NoError(t, err)
+	budgeter := budget.NewBudgeter(clock)
+	srv := NewServer(store, budgeter)
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	// Well-formed message plus a bogus extra param field.
+	body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"parts":[{"text":"hello"}]},"bogus":true}}`
+	resp, err := http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result contract.JSONRPCResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	_ = resp.Body.Close()
+	require.NotNil(t, result.Error, "unknown param field must be rejected, not dropped")
+	require.Equal(t, -32602, result.Error.Code)
+}
+
+// TestA2A_StrictIntake_UnknownEnvelopeFieldRejected asserts an unknown top-level
+// JSON-RPC envelope field is a parse error (-32700) under DisallowUnknownFields.
+func TestA2A_StrictIntake_UnknownEnvelopeFieldRejected(t *testing.T) {
+	dir := t.TempDir()
+	clock := &fakeClock{t: time.Now()}
+	store, err := session.NewStore(dir, clock)
+	require.NoError(t, err)
+	budgeter := budget.NewBudgeter(clock)
+	srv := NewServer(store, budgeter)
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"parts":[{"text":"hi"}]}},"extra":1}`
+	resp, err := http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result contract.JSONRPCResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	_ = resp.Body.Close()
+	require.NotNil(t, result.Error, "unknown envelope field must be rejected")
+	require.Equal(t, -32700, result.Error.Code)
+}
+
+// TestA2A_LegacyMethodAlias is the back-compat false-positive guard: the legacy
+// lowercase tasks/* method names still dispatch (a legacy client is not broken).
+func TestA2A_LegacyMethodAlias(t *testing.T) {
+	dir := t.TempDir()
+	clock := &fakeClock{t: time.Now()}
+	store, err := session.NewStore(dir, clock)
+	require.NoError(t, err)
+	budgeter := budget.NewBudgeter(clock)
+	srv := NewServer(store, budgeter)
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"hello"}]}}}`
+	resp, err := http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result contract.JSONRPCResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	_ = resp.Body.Close()
+	require.Nil(t, result.Error, "legacy tasks/send alias must still dispatch")
+	require.NotNil(t, result.Result)
 }

@@ -18,13 +18,26 @@
 |------|------|
 | **Squash (헤드리스)** | `rallish squash`로 헤드리스 프리셋 세션 실행(`solo-ralph`, `pair-review`); 브로커가 어댑터를 자동으로 스폰 |
 | **Rally (인터랙티브)** | `rallish rally`로 두 코딩 CLI 세션 간 라이브 바톤 전달; 에이전트가 핑퐁을 자율 루프 (턴마다 사용자 트리거 불필요); SSE를 통한 독점 홀더 강제 |
-| **A2A 프로토콜** | `/.well-known/agent.json`, JSON-RPC 2.0 태스크, SSE 스트리밍 |
+| **A2A 프로토콜** | 부분 A2A v1.0: `/.well-known/agent-card.json` + `protocolVersion`, PascalCase JSON-RPC 태스크(엄격 타입 인테이크), SSE 스트리밍 |
 | **토큰 예산** | 세션당 토큰, 턴 수, 시간의 상한선을 강제 |
 | **스크래치패드** | 자동 압축(compaction)이 적용된 롤링 공유 스크래치 |
 | **프리셋** | 역할, 라우팅, 종료 조건을 정의한 YAML 템플릿 |
 | **Unix 소켓 IPC** | CLI↔Daemon이 `~/.rallish/rallish.sock`(`0600`) 경유. A2A 외부 클라이언트와 Windows 폴백용으로 TCP 루프백 유지 |
 | **자동 데몬** | `rallish squash`가 브로커 미실행 시 자동 스폰. `rallish doctor`가 소켓 도달성 보고 |
 | **보안** | 경로 탐색 방어, 비밀 정보 마스킹, 최소한의 환경 변수 허용 목록 |
+
+## 자율 작업 하네스 (Autonomous Work Harness)
+
+rallish는 벤더 중립, 리포 로컬 **작업 하네스**입니다. 에이전트 런타임이 장기 자율 리포지토리 작업을 안전하게, 재개 가능하게, 검증 가능하게, 감사 가능하게 실행할 수 있도록 합니다 — 루프 자체는 되지 않습니다. 여섯 가지 가드레일 기둥:
+
+- **Safety & resumability** — 원자적 `.bak` 복구 체크포인트 상태; `cycle run --once`는 cron/스케줄러가 호출하는 경계 기준 드라이버입니다 (종료 코드 = 중단 이유).
+- **Verification gates** — parse-don't-validate 에이전트 핸드셰이크, gate self-eval, 해시 고정 gate 정의.
+- **Interop** — A2A **v1.0** (`/.well-known/agent-card.json`의 서명된 Agent Card, 실제 `protocolVersion`, 엄격한 타입 인테이크).
+- **Audit** — `schema_version` 스탬프, 해시 체인, 재생 가능한 원장 + RFC 9162 Merkle 포함/일관성 증명.
+- **Anti-spin** — 스턱/예산 회로 차단기 + 고착 중단 부활 방지 가드 (cron이 재가동한 스피닝 실행은 스스로 중단되며 재부활하지 않음).
+- **Action-gate** — 실행 전 파괴적 명령 거부 목록 + 시크릿 격리; rallish가 결정을 선언·기록하고, 런타임 훅이 강제합니다.
+
+전체 방향 및 근거: `docs/north-star.md`.
 
 ## 아키텍처
 
@@ -34,7 +47,7 @@
 │  POST /sessions                          │
 │  GET  /sessions/:id/next?as=<role> (SSE) │
 │  POST /sessions/:id/turn                 │
-│  GET  /.well-known/agent.json            │
+│  GET  /.well-known/agent-card.json       │
 │  POST /a2a                               │
 └──┬───────────────┬───────────────────┬───┘
    │ unix socket   │ unix socket       │ tcp 루프백
@@ -151,13 +164,18 @@ SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-u
 ./dist/rallish rally status --session-id $SESSION
 ./dist/rallish rally done   --session-id $SESSION --as server --note "draft v1"
 
-# A2A discovery (외부 클라이언트는 TCP 루프백 사용)
-curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent.json
+# cron/스케줄러가 호출하는 경계 원샷 패스 (종료 코드 = 중단 이유)
+rallish cycle run --once --cycle-id <id>
+# 런타임 PreToolUse 훅이 호출하는 실행 전 정책 게이트 (선언 + 기록; 훅이 강제)
+rallish gate tooluse --command 'rm -rf /'    # -> {"verdict":"deny",...}  exit 13
 
-# A2A 태스크 전송
+# A2A discovery (외부 클라이언트는 TCP 루프백 사용)
+curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent-card.json
+
+# A2A 태스크 전송 (v1.0 메서드명; tasks/send는 레거시 별칭으로 계속 동작)
 curl -X POST http://127.0.0.1:$(cat ~/.rallish/port)/a2a \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"message":{"parts":[{"text":"Hello"}]}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"parts":[{"text":"Hello"}]}}}'
 ```
 
 턴별 요청/응답은 `~/.rallish/sessions/<id>/log.jsonl`에 기록됩니다.
@@ -207,8 +225,8 @@ A2A 호환 클라이언트는 태스크를 발견하고 전송할 수 있습니�
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| `GET` | `/.well-known/agent.json` | Agent Card |
-| `POST` | `/a2a` | JSON-RPC 2.0 (tasks/send, tasks/get, tasks/cancel, tasks/sendSubscribe) |
+| `GET` | `/.well-known/agent-card.json` | Agent Card (v1.0; `/.well-known/agent.json` 레거시 별칭) |
+| `POST` | `/a2a` | JSON-RPC 2.0 (SendMessage, GetTask, CancelTask, SubscribeToTask; 레거시 `tasks/*` 별칭) |
 
 전체 매핑은 [docs/a2a-compatibility.md](docs/a2a-compatibility.md)를 참조하세요.
 

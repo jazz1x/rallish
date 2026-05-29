@@ -26,3 +26,21 @@ var ErrDuplicateName = errors.New("rally: duplicate participant name")
 
 // ErrTooFewParticipants is returned when fewer than two participants are supplied.
 var ErrTooFewParticipants = errors.New("rally: at least two participants required")
+
+// Cycle errors.
+var (
+	// ErrInvalidCyclePhase is returned when a cycle phase string is not recognised.
+	ErrInvalidCyclePhase = errors.New("cycle: invalid phase")
+	// ErrInvalidHaltReason is returned when a halt reason string is not recognised.
+	ErrInvalidHaltReason = errors.New("cycle: invalid halt reason")
+	// ErrCycleNotFound is returned when a cycle id is not present in the store.
+	ErrCycleNotFound = errors.New("cycle: not found")
+	// ErrCycleHalted is returned when an operation is requested on a halted cycle.
+	ErrCycleHalted = errors.New("cycle: halted")
+	// ErrMainBranchForbidden is returned when a cycle targets the main branch.
+	ErrMainBranchForbidden = errors.New("cycle: main branch is forbidden")
+	// ErrGoalRequired is returned when next_cycle_goal is empty.
+	ErrGoalRequired = errors.New("cycle: next_cycle_goal is required")
+	// ErrInvalidActionVerdict is returned when an action-gate verdict string is not recognised.
+	ErrInvalidActionVerdict = errors.New("cycle: invalid action verdict")
+)

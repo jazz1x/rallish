@@ -12,7 +12,7 @@ pre-commit:
       run: go test ./... -race -count=1
       fail_text: "Tests failed. Please fix failing tests before committing."
     go-lint:
-      run: golangci-lint run --timeout=5m
+      run: PATH="$PWD/.toolchain/go/bin:$PWD/.toolchain/bin:$PATH" golangci-lint run --timeout=5m
       fail_text: "Linting failed. Please fix linting issues before committing."
     no-raw-ansi:
       glob: "*.go"
@@ -34,17 +34,26 @@ commit-msg:
         exit 1
       fail_text: "use a conventional-commits prefix on the subject line"
 
-# Belt-and-braces before push: build + vet + race tests one more time so a
-# failing branch can't sneak past pre-commit (e.g. via --no-verify or rebase).
+# Belt-and-braces before push: build + vet + race tests + supply-chain
+# integrity check. Catches tampering in the module cache (go.sum already
+# hashes deps; this asserts the verify step runs at push time).
+#
+# Each command prepends the repo-pinned .toolchain to PATH (same as the
+# pre-commit go-lint hook and scripts/check-all.sh) so the vendored Go
+# matching go.mod is used — not whatever `go` happens to be on the system
+# PATH — and so the hooks run even on machines with no system Go.
 pre-push:
   parallel: true
   commands:
     build:
-      run: go build ./...
+      run: PATH="$PWD/.toolchain/go/bin:$PWD/.toolchain/bin:$PATH" go build ./...
       fail_text: "go build failed — push aborted"
     vet:
-      run: go vet ./...
+      run: PATH="$PWD/.toolchain/go/bin:$PWD/.toolchain/bin:$PATH" go vet ./...
       fail_text: "go vet failed — push aborted"
     test:
-      run: go test ./... -race -count=1
+      run: PATH="$PWD/.toolchain/go/bin:$PWD/.toolchain/bin:$PATH" go test ./... -race -count=1
       fail_text: "race tests failed — push aborted"
+    mod-verify:
+      run: PATH="$PWD/.toolchain/go/bin:$PWD/.toolchain/bin:$PATH" go mod verify
+      fail_text: "go mod verify failed — module cache tampered or go.sum mismatch; run 'go clean -modcache && go mod download' to restore"
