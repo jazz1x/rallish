@@ -12,7 +12,7 @@ pre-commit:
       run: go test ./... -race -count=1
       fail_text: "Tests failed. Please fix failing tests before committing."
     go-lint:
-      run: golangci-lint run --timeout=5m
+      run: PATH="$PWD/.toolchain/go/bin:$PWD/.toolchain/bin:$PATH" golangci-lint run --timeout=5m
       fail_text: "Linting failed. Please fix linting issues before committing."
     no-raw-ansi:
       glob: "*.go"

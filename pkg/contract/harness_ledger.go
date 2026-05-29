@@ -34,6 +34,21 @@ const (
 	// enforces. The entry never implies rallish read, redacted, or blocked the
 	// secret itself.
 	LedgerEventSecretFlagged LedgerEventType = "secret_flagged"
+	// LedgerEventGatesPinned records the SHA-256 digest of the ordered LocalGates
+	// command set at cycle-start (G2 tamper-resistant gates). It is a DECLARE +
+	// RECORD event only — it does NOT halt. A downstream verifier compares the
+	// pinned digest against the live gate set to detect in-cycle edits.
+	//
+	// Boundary: this detects edits to the *declared gate command set*. It does NOT
+	// defend against a malicious runtime that lies about gate results — that
+	// guarantee belongs to the verifier ≠ executor separation (G2 structural rule).
+	LedgerEventGatesPinned LedgerEventType = "gates_pinned"
+	// LedgerEventGateTampered records that, at gate-run time, the live LocalGates
+	// command set no longer matches the digest pinned at cycle-start. It is a
+	// DECLARE + RECORD event — the runtime or operator acts on it. rallish does not
+	// silently mutate control flow beyond recording; the entry itself is the
+	// tamper-evidence signal for the audit / governance layer.
+	LedgerEventGateTampered LedgerEventType = "gate_tampered"
 )
 
 // LedgerSchemaVersion is stamped on every ledger entry so the append-only JSONL
@@ -174,5 +189,78 @@ func NewHandoffLedgerEntry(at int64, cycleID, agent string, resp TurnResponse) H
 	entry := NewHarnessLedgerEntry(at, cycleID, LedgerEventHandoffCreated, resp.Summary, resp.Artifacts)
 	entry.Agent = agent
 	entry.HandoffTo = resp.HandoffTo
+	return entry
+}
+
+// GatePin is the pin record for a single gate definition: its stable name and
+// the SHA-256 hex digest of its command string. Used in the gates_pinned ledger
+// entry summary so the record is human-readable and machine-verifiable.
+type GatePin struct {
+	// Name is the gate's canonical name (e.g. "cmd:go test ./...").
+	Name string
+	// CommandHash is the hex SHA-256 of the gate's raw command string.
+	CommandHash string
+}
+
+// PinGates computes an ordered digest over a LocalGates command slice (G2
+// tamper-resistant gates). It returns the hex SHA-256 of the joined commands
+// (newline-separated, preserving order) and per-gate GatePin records.
+//
+// An empty gate set yields a well-defined digest (SHA-256 of an empty string)
+// so absence-of-gates is itself auditable — absence is NOT treated as a
+// special case.
+//
+// Reuses the crypto/sha256 family already imported for ChainHash; no new
+// external dependencies.
+func PinGates(commands []string) (digest string, pins []GatePin) {
+	pins = make([]GatePin, len(commands))
+	for i, cmd := range commands {
+		sum := sha256.Sum256([]byte(cmd))
+		pins[i] = GatePin{
+			Name:        "cmd:" + cmd,
+			CommandHash: hex.EncodeToString(sum[:]),
+		}
+	}
+	// The ordered digest binds the full set (including ordering and count) into a
+	// single opaque fingerprint: SHA-256 of all commands joined by newlines. Two
+	// gate sets that differ in any element or order produce different digests.
+	joined := strings.Join(commands, "\n")
+	sum := sha256.Sum256([]byte(joined))
+	return hex.EncodeToString(sum[:]), pins
+}
+
+// GatesTampered is a pure predicate: it re-computes the PinGates digest over
+// the current gate command set and reports whether it differs from the digest
+// that was pinned at cycle-start.
+//
+// Returns false (not tampered) for identical sets across a round-trip —
+// including an empty set pinned and then checked as empty.
+func GatesTampered(pinnedDigest string, current []string) bool {
+	digest, _ := PinGates(current)
+	return digest != pinnedDigest
+}
+
+// NewGatesPinnedEntry builds a ledger entry recording the gate-set digest at
+// cycle-start (LedgerEventGatesPinned). The digest and gate count are embedded
+// in the Summary for human readability; the per-gate CommandHash pairs are
+// stored in Files (reusing the existing slot as name=hash pairs) so no new
+// HarnessLedgerEntry field is needed — additive, schema-stable.
+//
+// If tampered is true, the event type is LedgerEventGateTampered instead of
+// LedgerEventGatesPinned, recording a divergence at gate-run time.
+func NewGatesPinnedEntry(at int64, cycleID string, digest string, pins []GatePin, tampered bool) HarnessLedgerEntry {
+	typ := LedgerEventGatesPinned
+	summaryPrefix := "gates pinned"
+	if tampered {
+		typ = LedgerEventGateTampered
+		summaryPrefix = "gate set tampered: live digest differs from pinned"
+	}
+	summary := fmt.Sprintf("%s: digest=%s count=%d", summaryPrefix, digest, len(pins))
+	nameHashPairs := make([]string, len(pins))
+	for i, p := range pins {
+		nameHashPairs[i] = p.Name + "=" + p.CommandHash
+	}
+	entry := NewHarnessLedgerEntry(at, cycleID, typ, summary, nil)
+	entry.Files = nameHashPairs
 	return entry
 }

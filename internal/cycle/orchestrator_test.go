@@ -207,8 +207,10 @@ func TestOrchestratorAppendsTurnAndHandoffLedger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read ledger: %v", err)
 	}
-	if len(entries) != 2 {
-		t.Fatalf("entries = %#v, want 2", entries)
+	// Expected order: agent_turn, handoff_created, gates_pinned (G2 tamper-resistant
+	// gate pin recorded by driver.Step before pipeline execution).
+	if len(entries) != 3 {
+		t.Fatalf("entries = %#v, want 3 (agent_turn + handoff_created + gates_pinned)", entries)
 	}
 	if entries[0].Type != contract.LedgerEventAgentTurn {
 		t.Fatalf("first type = %q, want %q", entries[0].Type, contract.LedgerEventAgentTurn)
@@ -227,6 +229,13 @@ func TestOrchestratorAppendsTurnAndHandoffLedger(t *testing.T) {
 	}
 	if len(entries[1].Files) != 1 || entries[1].Files[0] != "handoff.md" {
 		t.Fatalf("second files = %v", entries[1].Files)
+	}
+	// gates_pinned: the G2 gate-set pin recorded before pipeline execution.
+	if entries[2].Type != contract.LedgerEventGatesPinned {
+		t.Fatalf("third type = %q, want %q", entries[2].Type, contract.LedgerEventGatesPinned)
+	}
+	if entries[2].CycleID != "cyc_handoff" {
+		t.Fatalf("third cycle_id = %q, want cyc_handoff", entries[2].CycleID)
 	}
 }
 

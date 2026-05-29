@@ -49,8 +49,11 @@ func (o *MultiAgentOrchestrator) SetDriverSleeper(s Sleeper) {
 }
 
 // SetLedger injects an append-only harness ledger for orchestration events.
+// It also forwards the ledger to the driver so Step can record gate-pin events
+// (G2 tamper-resistant gates) without duplicating ledger state.
 func (o *MultiAgentOrchestrator) SetLedger(ledger *LedgerFileSync) {
 	o.ledger = ledger
+	o.driver.SetLedger(ledger)
 }
 
 // Run executes the orchestration loop until halted or max cycles reached.

@@ -44,6 +44,7 @@ func (defaultSleeper) Sleep(ctx context.Context, d time.Duration) error {
 type Driver struct {
 	pipeline       Pipeline
 	sync           *StateFileSync
+	ledger         *LedgerFileSync
 	sleeper        Sleeper
 	StepTimeout    time.Duration
 	ReadRetries    int
@@ -79,6 +80,14 @@ func (d *Driver) SetPipeline(p Pipeline) {
 // SetSleeper assigns a custom sleeper (useful in tests).
 func (d *Driver) SetSleeper(s Sleeper) {
 	d.sleeper = s
+}
+
+// SetLedger injects an append-only harness ledger so Step can record gate-pin
+// events (G2 tamper-resistant gates). The ledger is optional; if nil, no pin
+// events are recorded (silent absence, not a failure — the harness halts only
+// on real gate failures).
+func (d *Driver) SetLedger(l *LedgerFileSync) {
+	d.ledger = l
 }
 
 // Run loops until the cycle halts or max cycles are reached.
@@ -171,6 +180,32 @@ func (d *Driver) Step(ctx context.Context, state State) Result[State] {
 		var cancel context.CancelFunc
 		stepCtx, cancel = context.WithTimeout(ctx, d.StepTimeout)
 		defer cancel()
+	}
+
+	// G2 tamper-resistant gates: pin the LocalGates command set before the
+	// pipeline runs and record it in the ledger. A subsequent tamper check (same
+	// cycle, before gate execution) detects in-cycle edits to the gate commands.
+	//
+	// DECLARE + RECORD only — no halt is issued here. The verifier/operator reads
+	// the ledger and decides remediation.  Boundary: defends against edits to the
+	// *declared command set*; does NOT defend against a malicious runtime that
+	// falsifies gate *results* — that requires verifier ≠ executor separation.
+	pinnedDigest, pins := contract.PinGates(state.LocalGates)
+	if d.ledger != nil {
+		_ = d.ledger.Append(contract.NewGatesPinnedEntry(
+			time.Now().UnixMilli(), state.ID, pinnedDigest, pins, false))
+	}
+
+	// Pre-execution tamper check: re-hash the state's LocalGates immediately
+	// before handing off to the pipeline. If an in-cycle edit to the gate
+	// command set occurred between pin-time and here, the digest will differ.
+	// Record a gate_tampered event — DECLARE + RECORD, the runtime/operator acts.
+	if contract.GatesTampered(pinnedDigest, state.LocalGates) {
+		currentDigest, currentPins := contract.PinGates(state.LocalGates)
+		if d.ledger != nil {
+			_ = d.ledger.Append(contract.NewGatesPinnedEntry(
+				time.Now().UnixMilli(), state.ID, currentDigest, currentPins, true))
+		}
 	}
 
 	// Run the gate pipeline.
