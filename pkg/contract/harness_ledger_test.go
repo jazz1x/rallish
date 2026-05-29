@@ -2,6 +2,71 @@ package contract
 
 import "testing"
 
+func TestChainHashIsDeterministic(t *testing.T) {
+	entry := NewHarnessLedgerEntry(123, "cyc_1", LedgerEventCycleCreated, "created", []string{"a.go", "b.go"})
+	prev := LedgerGenesisHash
+
+	first, err := ChainHash(entry, prev)
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	second, err := ChainHash(entry, prev)
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if first != second {
+		t.Fatalf("non-deterministic: %q != %q", first, second)
+	}
+	if len(first) != 64 {
+		t.Fatalf("hash len = %d, want 64 hex chars", len(first))
+	}
+}
+
+func TestChainHashExcludesOwnHash(t *testing.T) {
+	// The entry's own Hash field must not feed its hash, else the chain is
+	// circular. Setting Hash to anything must not change the computed value.
+	entry := NewHarnessLedgerEntry(1, "cyc_1", LedgerEventAgentTurn, "turn", nil)
+
+	clean, err := ChainHash(entry, LedgerGenesisHash)
+	if err != nil {
+		t.Fatalf("clean: %v", err)
+	}
+	entry.Hash = "deadbeef"
+	withHash, err := ChainHash(entry, LedgerGenesisHash)
+	if err != nil {
+		t.Fatalf("withHash: %v", err)
+	}
+	if clean != withHash {
+		t.Fatalf("hash field leaked into its own digest: %q != %q", clean, withHash)
+	}
+}
+
+func TestChainHashBindsPrevAndSchema(t *testing.T) {
+	entry := NewHarnessLedgerEntry(1, "cyc_1", LedgerEventGatePassed, "ok", nil)
+
+	base, err := ChainHash(entry, LedgerGenesisHash)
+	if err != nil {
+		t.Fatalf("base: %v", err)
+	}
+	// A different predecessor link yields a different hash (chain binding).
+	diffPrev, err := ChainHash(entry, "1111111111111111111111111111111111111111111111111111111111111111")
+	if err != nil {
+		t.Fatalf("diffPrev: %v", err)
+	}
+	if base == diffPrev {
+		t.Fatal("hash ignored prev_hash; chain not bound")
+	}
+	// A schema-version change is detectable (it is part of the canonical content).
+	entry.SchemaVersion = "999"
+	diffSchema, err := ChainHash(entry, LedgerGenesisHash)
+	if err != nil {
+		t.Fatalf("diffSchema: %v", err)
+	}
+	if base == diffSchema {
+		t.Fatal("hash ignored schema_version; shape change undetectable")
+	}
+}
+
 func TestNewHarnessLedgerEntryCopiesFiles(t *testing.T) {
 	files := []string{"a.go", "b.go"}
 	entry := NewHarnessLedgerEntry(123, "cyc_1", LedgerEventGatePassed, "tests passed", files)

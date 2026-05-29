@@ -1,5 +1,13 @@
 package contract
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
 // LedgerEventType categorises append-only harness events.
 type LedgerEventType string
 
@@ -56,6 +64,48 @@ type HarnessLedgerEntry struct {
 	Files []string `json:"files,omitempty"`
 	// WorkContract carries the optional harness contract snapshot.
 	WorkContract *WorkContract `json:"work_contract,omitempty"`
+	// PrevHash links this entry to the previous one in the append-only ledger:
+	// it is the previous entry's Hash, or LedgerGenesisHash for the first entry.
+	// Part of the G4 tamper-evidence layer (linear hash chain, IETF AAT fields,
+	// step 1 toward a CT-style Merkle log). Additive: omitted on un-chained entries.
+	PrevHash string `json:"prev_hash,omitempty"`
+	// Hash is the SHA-256 over the canonical form of this entry (with Hash zeroed)
+	// concatenated with PrevHash; see ChainHash. It is EXCLUDED from its own
+	// canonical input to avoid circularity. Additive: omitted on un-chained entries.
+	Hash string `json:"hash,omitempty"`
+}
+
+// LedgerGenesisHash is the PrevHash of the first entry in a chain: 64 hex zeros
+// (the all-zero SHA-256), a fixed genesis constant so the first link is well
+// defined and the chain has no special-case in the hashed content.
+const LedgerGenesisHash = "0000000000000000000000000000000000000000000000000000000000000000"
+
+// ChainHash is the SSOT hash function for the ledger tamper-evidence chain,
+// shared by the single writer and any pure verifier so they cannot drift.
+//
+// It returns SHA-256( canonical(entry, Hash zeroed) || prevHash ), hex-encoded.
+// The entry's own Hash is excluded from the hashed input (else it is circular);
+// PrevHash IS part of the canonical content AND is appended once more per the
+// chain formula, binding each entry to its predecessor. SchemaVersion is part of
+// the canonical content, so a shape change is detectable.
+//
+// Canonical form (determinism, no JCS dependency): HarnessLedgerEntry is a fixed
+// Go struct containing no maps, so encoding/json marshals its fields in a fixed
+// declaration order with no insignificant whitespace — already deterministic and
+// field-order independent. RFC 8785 JCS is only required once entries are
+// re-serialized from untyped maps, which is out of scope for step 1.
+func ChainHash(entry HarnessLedgerEntry, prevHash string) (string, error) {
+	entry.Hash = ""
+	canonical, err := json.Marshal(entry)
+	if err != nil {
+		return "", fmt.Errorf("canonicalize ledger entry: %w", err)
+	}
+	var b strings.Builder
+	b.Grow(len(canonical) + len(prevHash))
+	b.Write(canonical)
+	b.WriteString(prevHash)
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // NewHarnessLedgerEntry builds an audit entry with copied file metadata.

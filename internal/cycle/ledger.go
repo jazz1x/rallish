@@ -20,12 +20,28 @@ func NewLedgerFileSync(path string) *LedgerFileSync {
 	return &LedgerFileSync{path: path}
 }
 
-// Append writes one ledger event to the end of the file.
+// Append writes one ledger event to the end of the file, linking it into the
+// tamper-evidence hash chain (G4): it reads the previous entry's Hash from the
+// last line on disk (LedgerGenesisHash when the ledger is empty), records it as
+// the new entry's PrevHash, and computes the new entry's Hash over its canonical
+// form. Single-writer append-only ordering already holds, so the on-disk tail is
+// the authoritative predecessor.
 func (s *LedgerFileSync) Append(entry contract.HarnessLedgerEntry) error {
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("mkdir ledger: %w", err)
 	}
+
+	prevHash, err := s.lastHash()
+	if err != nil {
+		return err
+	}
+	entry.PrevHash = prevHash
+	hash, err := contract.ChainHash(entry, prevHash)
+	if err != nil {
+		return err
+	}
+	entry.Hash = hash
 
 	data, err := json.Marshal(entry)
 	if err != nil {
@@ -40,6 +56,38 @@ func (s *LedgerFileSync) Append(entry contract.HarnessLedgerEntry) error {
 		return fmt.Errorf("write ledger entry: %w", err)
 	}
 	return nil
+}
+
+// lastHash returns the Hash of the final entry on disk, or LedgerGenesisHash
+// when the ledger does not exist or is empty. It is the predecessor link for the
+// next appended entry.
+func (s *LedgerFileSync) lastHash() (string, error) {
+	f, err := os.Open(s.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return contract.LedgerGenesisHash, nil
+		}
+		return "", fmt.Errorf("open ledger: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	last := contract.LedgerGenesisHash
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var entry contract.HarnessLedgerEntry
+		if err := json.Unmarshal(line, &entry); err != nil {
+			return "", fmt.Errorf("unmarshal ledger entry: %w", err)
+		}
+		last = entry.Hash
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("scan ledger: %w", err)
+	}
+	return last, nil
 }
 
 // ReadAll returns every ledger event in append order.
