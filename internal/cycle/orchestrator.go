@@ -48,6 +48,15 @@ func (o *MultiAgentOrchestrator) SetDriverSleeper(s Sleeper) {
 	o.driver.SetSleeper(s)
 }
 
+// SetDriverStepTimeout sets the per-step timeout on the underlying driver so a
+// bounded one-shot driver can honour its own --step-timeout. A non-positive
+// value leaves the driver default (10m) in place.
+func (o *MultiAgentOrchestrator) SetDriverStepTimeout(d time.Duration) {
+	if d > 0 {
+		o.driver.StepTimeout = d
+	}
+}
+
 // SetLedger injects an append-only harness ledger for orchestration events.
 // It also forwards the ledger to the driver so Step can record gate-pin events
 // (G2 tamper-resistant gates) without duplicating ledger state.
@@ -56,14 +65,14 @@ func (o *MultiAgentOrchestrator) SetLedger(ledger *LedgerFileSync) {
 	o.driver.SetLedger(ledger)
 }
 
-// Run executes the orchestration loop until halted or max cycles reached.
+// Run executes the orchestration loop until halted or max cycles reached. It is
+// a thin driver over RunOnce: the per-iteration guard sequence and agent turn are
+// the SSOT loop body in RunOnce (also called by the bounded one-shot CLI driver).
+// Run owns only the once-per-invocation reviver guard, the per-iteration state
+// read, and the inter-cycle sleep.
 func (o *MultiAgentOrchestrator) Run(ctx context.Context, cfg contract.OrchestratorConfig) error {
 	if len(cfg.Agents) == 0 {
 		return fmt.Errorf("orchestrator: no agents configured")
-	}
-	resetEvery := cfg.ResetEvery
-	if resetEvery <= 0 {
-		resetEvery = 3
 	}
 
 	// Reviver guard (G5): a cycle that already halted is sealed. A cron/driver
@@ -85,101 +94,140 @@ func (o *MultiAgentOrchestrator) Run(ctx context.Context, cfg contract.Orchestra
 		if err != nil {
 			return fmt.Errorf("orchestrator read state: %w", err)
 		}
-		if !state.CanAdvance() {
-			return nil
-		}
-
-		// Anti-spin (G5): halt before the run bleeds resources. Two distinct
-		// breakers share one ledger read:
-		//   - Stuck() — a cheap diagnostic for a spinning / no-progress run.
-		//   - the hard cost ceiling — a lifetime turn bound (summed across
-		//     revivals) that catches a *productive* runaway Stuck() cannot see.
-		// Both halt via the canonical HaltedError flow and record a cycle_halted
-		// entry so the reviver guard then sees a sticky halt.
-		if o.ledger != nil {
-			entries, lerr := o.ledger.ReadAll()
-			if lerr != nil {
-				return fmt.Errorf("orchestrator read ledger: %w", lerr)
-			}
-			reason, halt := Stuck(entries)
-			if !halt && budget.ExceedsLifetimeCeiling(entries, cfg.MaxLifetimeTurns) {
-				reason, halt = contract.HaltBudgetExceeded, true
-			}
-			if halt {
-				halted := state.Halt(reason)
-				st := halted.Value()
-				_ = o.ledger.Append(contract.NewHarnessLedgerEntry(
-					time.Now().UnixMilli(), st.ID, contract.LedgerEventCycleHalted, string(reason), nil))
-				if werr := o.sync.Write(st); werr != nil {
-					return fmt.Errorf("orchestrator write halted state: %w", werr)
-				}
-				return halted.Err()
-			}
-		}
-
-		// Determine current agent.
-		agentIdx := state.CompletedCycles / resetEvery
-		agentIdx %= len(cfg.Agents)
-		agentName := cfg.Agents[agentIdx]
-
-		adapt, ok := o.registry.Get(agentName)
-		if !ok {
-			return fmt.Errorf("orchestrator: adapter %q not found in registry", agentName)
-		}
-
-		// Build TurnRequest embedding the cycle state.
-		req, err := o.buildRequest(state, agentName, cfg)
+		outcome, err := o.RunOnce(ctx, cfg, state)
 		if err != nil {
-			return fmt.Errorf("orchestrator build request: %w", err)
-		}
-
-		// Execute one turn.
-		resp, err := adapt.Run(ctx, req)
-		if err != nil {
-			return fmt.Errorf("orchestrator adapter %q run: %w", agentName, err)
-		}
-		if err := o.appendTurnLedger(state.ID, agentName, resp); err != nil {
 			return err
 		}
-
-		// Parse response into cycle state mutations. An unparseable handshake (or
-		// an explicit halt request) returns a *HaltedError: seal the cycle, record
-		// the halt, and stop — never advance on a turn we could not parse.
-		if err := o.applyResponse(&state, resp); err != nil {
-			var he *HaltedError
-			if errors.As(err, &he) {
-				return o.handleHandshakeHalt(state, he)
-			}
-			return fmt.Errorf("orchestrator apply response: %w", err)
-		}
-		if o.pipeline != nil {
-			o.driver.SetPipeline(o.pipeline(state))
-		}
-
-		// Run the driver step (pipeline + commit).
-		result := o.driver.Step(ctx, state)
-		if result.IsFailure() {
-			he, ok := result.Err().(*HaltedError)
-			if ok {
-				_ = o.sync.Write(result.Value())
-				return he
-			}
-			return result.Err()
-		}
-
-		state = result.Value()
-		if err := o.sync.Write(state); err != nil {
-			return fmt.Errorf("orchestrator write state: %w", err)
-		}
-
-		if !state.CanAdvance() {
+		if outcome.Terminal {
 			return nil
 		}
-
 		if err := o.driver.sleeper.Sleep(ctx, 30*time.Second); err != nil {
 			return err
 		}
 	}
+}
+
+// IterationOutcome reports what a single orchestration iteration accomplished so
+// callers (Run's loop, or the bounded one-shot CLI driver) can decide whether to
+// continue. A nil error with Terminal=true means the cycle can no longer advance
+// (success / max cycles reached); a *HaltedError means a guard or gate sealed it.
+type IterationOutcome struct {
+	State    State
+	Advanced bool // a gated step completed and the advanced state was persisted
+	Terminal bool // the cycle can no longer advance — do not loop / re-trigger
+}
+
+// RunOnce executes exactly ONE orchestration iteration against the supplied
+// state: anti-spin guards (Stuck / lifetime budget) → one agent turn → handshake
+// apply → one gated Driver.Step → persist. It is the single source of truth for
+// the loop body, shared by Run and the bounded `cycle run --once --agents` driver.
+//
+// It deliberately does NOT perform the reviver guard (LedgerSealsResume): that is
+// a once-per-invocation preamble owned by the caller (Run runs it before the
+// loop; the CLI one-shot runs it before delegating here), so it is not repeated
+// per iteration. The caller reads fresh state and passes it in.
+//
+// On a halt — anti-spin, an unparseable/explicit-halt handshake, or a gate
+// failure — it returns a *HaltedError after persisting the sealed state (and, for
+// the anti-spin and handshake paths, recording the cycle_halted ledger entry):
+// the same canonical halt flow Run has always used.
+func (o *MultiAgentOrchestrator) RunOnce(ctx context.Context, cfg contract.OrchestratorConfig, state State) (IterationOutcome, error) {
+	if len(cfg.Agents) == 0 {
+		return IterationOutcome{State: state}, fmt.Errorf("orchestrator: no agents configured")
+	}
+	resetEvery := cfg.ResetEvery
+	if resetEvery <= 0 {
+		resetEvery = 3
+	}
+
+	if !state.CanAdvance() {
+		return IterationOutcome{State: state, Terminal: true}, nil
+	}
+
+	// Anti-spin (G5): halt before the run bleeds resources. Two distinct
+	// breakers share one ledger read:
+	//   - Stuck() — a cheap diagnostic for a spinning / no-progress run.
+	//   - the hard cost ceiling — a lifetime turn bound (summed across
+	//     revivals) that catches a *productive* runaway Stuck() cannot see.
+	// Both halt via the canonical HaltedError flow and record a cycle_halted
+	// entry so the reviver guard then sees a sticky halt.
+	if o.ledger != nil {
+		entries, lerr := o.ledger.ReadAll()
+		if lerr != nil {
+			return IterationOutcome{State: state}, fmt.Errorf("orchestrator read ledger: %w", lerr)
+		}
+		reason, halt := Stuck(entries)
+		if !halt && budget.ExceedsLifetimeCeiling(entries, cfg.MaxLifetimeTurns) {
+			reason, halt = contract.HaltBudgetExceeded, true
+		}
+		if halt {
+			halted := state.Halt(reason)
+			st := halted.Value()
+			_ = o.ledger.Append(contract.NewHarnessLedgerEntry(
+				time.Now().UnixMilli(), st.ID, contract.LedgerEventCycleHalted, string(reason), nil))
+			if werr := o.sync.Write(st); werr != nil {
+				return IterationOutcome{State: st}, fmt.Errorf("orchestrator write halted state: %w", werr)
+			}
+			return IterationOutcome{State: st}, halted.Err()
+		}
+	}
+
+	// Determine current agent.
+	agentIdx := state.CompletedCycles / resetEvery
+	agentIdx %= len(cfg.Agents)
+	agentName := cfg.Agents[agentIdx]
+
+	adapt, ok := o.registry.Get(agentName)
+	if !ok {
+		return IterationOutcome{State: state}, fmt.Errorf("orchestrator: adapter %q not found in registry", agentName)
+	}
+
+	// Build TurnRequest embedding the cycle state.
+	req, err := o.buildRequest(state, agentName, cfg)
+	if err != nil {
+		return IterationOutcome{State: state}, fmt.Errorf("orchestrator build request: %w", err)
+	}
+
+	// Execute one turn.
+	resp, err := adapt.Run(ctx, req)
+	if err != nil {
+		return IterationOutcome{State: state}, fmt.Errorf("orchestrator adapter %q run: %w", agentName, err)
+	}
+	if err := o.appendTurnLedger(state.ID, agentName, resp); err != nil {
+		return IterationOutcome{State: state}, err
+	}
+
+	// Parse response into cycle state mutations. An unparseable handshake (or
+	// an explicit halt request) returns a *HaltedError: seal the cycle, record
+	// the halt, and stop — never advance on a turn we could not parse.
+	if err := o.applyResponse(&state, resp); err != nil {
+		var he *HaltedError
+		if errors.As(err, &he) {
+			return IterationOutcome{State: state}, o.handleHandshakeHalt(state, he)
+		}
+		return IterationOutcome{State: state}, fmt.Errorf("orchestrator apply response: %w", err)
+	}
+	if o.pipeline != nil {
+		o.driver.SetPipeline(o.pipeline(state))
+	}
+
+	// Run the driver step (pipeline + commit).
+	result := o.driver.Step(ctx, state)
+	if result.IsFailure() {
+		he, ok := result.Err().(*HaltedError)
+		if ok {
+			_ = o.sync.Write(result.Value())
+			return IterationOutcome{State: result.Value()}, he
+		}
+		return IterationOutcome{State: result.Value()}, result.Err()
+	}
+
+	state = result.Value()
+	if err := o.sync.Write(state); err != nil {
+		return IterationOutcome{State: state}, fmt.Errorf("orchestrator write state: %w", err)
+	}
+
+	return IterationOutcome{State: state, Advanced: true, Terminal: !state.CanAdvance()}, nil
 }
 
 func (o *MultiAgentOrchestrator) appendTurnLedger(cycleID, agentName string, resp contract.TurnResponse) error {

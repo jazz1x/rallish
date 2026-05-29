@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/jazz1x/rallish/internal/adapter"
 	"github.com/jazz1x/rallish/internal/budget"
 	"github.com/jazz1x/rallish/internal/cycle"
 	"github.com/jazz1x/rallish/internal/cycle/gates"
@@ -34,6 +36,14 @@ import (
 //
 // It does NOT watch SSE and does NOT loop. The agent's own work happens
 // out-of-band; this driver advances the guarded graph one bounded step.
+//
+// OPTIONAL agent mode (--agents): when adapter names are supplied, the pass ALSO
+// drives one agent turn before the gated step, by delegating to the orchestrator's
+// single-iteration entry point (MultiAgentOrchestrator.RunOnce — the same loop
+// body MultiAgentOrchestrator.Run uses, so the guard sequence stays SSOT). This
+// makes the command a fully-autonomous one-shot (one agent turn + one gated step)
+// that needs no running broker daemon. The reference-driver framing and the
+// exit-code mapping above are unchanged; agent mode is purely additive.
 
 // Exit codes for `cycle run --once`. SINGLE SOURCE OF TRUTH — every halt class
 // maps here and nowhere else. Base offset 10 keeps these distinct from the
@@ -114,6 +124,7 @@ func CycleRunCmd() *cobra.Command {
 		once             bool
 		maxLifetimeTurns int
 		stepTimeout      time.Duration
+		agents           []string
 	)
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -129,6 +140,12 @@ runs the same G5 anti-spin guards the orchestrator runs (sticky-halt reviver,
 stuck-breaker, hard lifetime cost ceiling), runs one gated cycle step, then
 exits. It never watches the event stream and never loops; an external driver
 decides whether to re-trigger based on the exit code.
+
+By default it advances only the gate pipeline; the agent's work is assumed to
+happen out-of-band. Pass --agents <name>[,<name>...] to ALSO drive exactly one
+agent turn this pass via the orchestrator's single-iteration entry point — a
+fully-autonomous one-shot (one agent turn + one gated step) that runs locally
+without a broker daemon. Agent names must resolve to registered adapters.
 
 Exit codes:
   0   clean pass (advanced) or nothing to do (not halted) or success
@@ -153,7 +170,9 @@ Exit codes:
 				stateDir:         stateDir,
 				maxLifetimeTurns: maxLifetimeTurns,
 				stepTimeout:      stepTimeout,
+				agents:           agents,
 				pipeline:         buildCLIPipeline,
+				buildRegistry:    BuildRegistry,
 			}
 			return runCycleOnce(cmd.Context(), opts, cmd.OutOrStdout())
 		},
@@ -164,6 +183,7 @@ Exit codes:
 	cmd.Flags().BoolVar(&once, "once", false, "Run a single bounded pass then exit (required)")
 	cmd.Flags().IntVar(&maxLifetimeTurns, "max-lifetime-turns", 0, "Hard ceiling on agent turns summed across revivals (0 = unlimited)")
 	cmd.Flags().DurationVar(&stepTimeout, "step-timeout", 10*time.Minute, "Maximum duration for the single gated step")
+	cmd.Flags().StringSliceVar(&agents, "agents", nil, "Drive one agent turn this pass using these registered adapters (comma-separated, e.g. claude,kimi); omit for the pure gate-pipeline reference driver")
 	_ = cmd.MarkFlagRequired("cycle-id")
 	return cmd
 }
@@ -194,16 +214,25 @@ func buildCLIPipeline(state cycle.State) cycle.Pipeline {
 	return pipeline
 }
 
-// runOnceOptions bundles the inputs to a single bounded pass. pipeline is
-// injectable so tests can supply a deterministic gate (the real default builds
-// the git-backed standard pipeline).
+// runOnceOptions bundles the inputs to a single bounded pass. pipeline and
+// buildRegistry are injectable so tests can supply a deterministic gate / a
+// deterministic adapter (the real defaults build the git-backed standard
+// pipeline and the all-adapters registry respectively).
 type runOnceOptions struct {
 	cycleID          string
 	goal             string
 	stateDir         string
 	maxLifetimeTurns int
 	stepTimeout      time.Duration
-	pipeline         func(cycle.State) cycle.Pipeline
+	// agents, when non-empty, makes this pass drive ONE agent turn (via the
+	// orchestrator's single-iteration entry point) before the gated step,
+	// instead of the pure gate-pipeline reference driver.
+	agents []string
+	// pipeline builds the gate pipeline for the resumed state.
+	pipeline func(cycle.State) cycle.Pipeline
+	// buildRegistry constructs the adapter registry for the agent-driven pass.
+	// Only consulted when agents is non-empty.
+	buildRegistry func() (*adapter.Registry, error)
 }
 
 // runCycleOnce executes one bounded, non-watching cycle pass. It is the body of
@@ -253,17 +282,33 @@ func runCycleOnce(ctx context.Context, opts runOnceOptions, out io.Writer) error
 		// Already sealed by a prior halt with no later progress — refuse to revive.
 		return reportHalt(reason, statePath, out)
 	}
+
+	// Optional per-pass goal override, applied before either path runs: in the
+	// reference path it seeds the gated step; in the agent path it seeds the turn
+	// request the agent sees (the agent may then set its own next goal). Either
+	// way the agent's goal may be supplied out-of-band or by the scheduler.
+	if strings.TrimSpace(opts.goal) != "" {
+		state.NextCycleGoal = opts.goal
+	}
+
+	// Agent-driven one-shot: drive exactly one orchestrated iteration (the
+	// remaining Stuck / budget anti-spin → one agent turn → one gated step) via
+	// the orchestrator's single-iteration entry point — the SAME loop body the
+	// broker's Run uses, so the guard sequence stays SSOT. The reviver guard above
+	// already ran; it is the once-per-invocation preamble RunOnce omits. Omitting
+	// --agents keeps the pure gate-pipeline reference driver below.
+	if len(opts.agents) > 0 {
+		return runCycleOnceAgents(ctx, opts, stateSync, ledger, state, statePath, out)
+	}
+
+	// Reference (non-agent) path: the remaining G5 anti-spin breakers, then ONE
+	// bare gated step. A halt seals a cycle_halted entry so the next invocation's
+	// reviver guard stays sticky.
 	if reason, stuck := cycle.Stuck(entries); stuck {
 		return haltOnce(stateSync, ledger, state, reason, statePath, out)
 	}
 	if budget.ExceedsLifetimeCeiling(entries, opts.maxLifetimeTurns) {
 		return haltOnce(stateSync, ledger, state, contract.HaltBudgetExceeded, statePath, out)
-	}
-
-	// One bounded gated step. Optional per-pass goal override (the agent set the
-	// goal out-of-band, or the scheduler supplies it).
-	if strings.TrimSpace(opts.goal) != "" {
-		state.NextCycleGoal = opts.goal
 	}
 
 	driver := cycle.NewCycleDriver(stateSync)
@@ -290,6 +335,70 @@ func runCycleOnce(ctx context.Context, opts runOnceOptions, out io.Writer) error
 	_, _ = fmt.Fprintf(out, "cycle %s: advanced (completed %d/%d, phase %s)\n",
 		advanced.ID, advanced.CompletedCycles, advanced.MaxCycles, advanced.Phase)
 	return nil // exit 0 — clean single pass
+}
+
+// runCycleOnceAgents drives a single AGENT-orchestrated pass: it constructs a
+// local adapter registry (the same construction the broker is handed via
+// SetAdapterRegistry) and runs exactly ONE orchestrator iteration — the remaining
+// Stuck / budget anti-spin, one agent turn, the handshake apply, and one gated
+// step — via the shared single-iteration entry point MultiAgentOrchestrator.RunOnce.
+// The reviver guard already ran in the caller. This lets a cron/CI job run a
+// fully-autonomous one-shot locally without a running broker daemon while reusing
+// the orchestrator's guard sequence verbatim. Terminal halts map to the documented
+// exit code through the same reportHalt SSOT as the reference path.
+func runCycleOnceAgents(
+	ctx context.Context,
+	opts runOnceOptions,
+	stateSync *cycle.StateFileSync,
+	ledger *cycle.LedgerFileSync,
+	state cycle.State,
+	statePath string,
+	out io.Writer,
+) error {
+	reg, err := opts.buildRegistry()
+	if err != nil {
+		return fmt.Errorf("build adapter registry: %w", err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve working dir: %w", err)
+	}
+
+	orch := cycle.NewMultiAgentOrchestrator(reg, stateSync)
+	orch.SetLedger(ledger)
+	orch.SetPipelineFactory(opts.pipeline)
+	orch.SetDriverStepTimeout(opts.stepTimeout)
+
+	cfg := contract.OrchestratorConfig{
+		Agents:           opts.agents,
+		WorkingDir:       cwd,
+		MaxLifetimeTurns: opts.maxLifetimeTurns,
+	}
+
+	outcome, err := orch.RunOnce(ctx, cfg, state)
+	if err != nil {
+		var he *cycle.HaltedError
+		if errors.As(err, &he) {
+			// RunOnce already persisted the sealed state (and, for anti-spin /
+			// handshake halts, the cycle_halted ledger entry). Surface the reason
+			// and map it to the documented exit code.
+			return reportHalt(he.Reason, statePath, out)
+		}
+		// A non-halt operational failure (unknown adapter, adapter run error):
+		// propagate as a plain error → the root command's generic exit 1.
+		return fmt.Errorf("orchestrated single pass: %w", err)
+	}
+
+	if outcome.Advanced {
+		s := outcome.State
+		_, _ = fmt.Fprintf(out, "cycle %s: advanced via agent %v (completed %d/%d, phase %s)\n",
+			s.ID, opts.agents, s.CompletedCycles, s.MaxCycles, s.Phase)
+		return nil
+	}
+	// CanAdvance was true on entry (the caller checked), so a non-advance with no
+	// error is only reachable defensively; report it as nothing-to-do.
+	_, _ = fmt.Fprintf(out, "cycle %s: not advanceable; nothing to do\n", state.ID)
+	return nil
 }
 
 // haltOnce seals the cycle: persists the halted state and records a single

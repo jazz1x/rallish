@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 
+	"github.com/jazz1x/rallish/internal/adapter"
+	"github.com/jazz1x/rallish/internal/adapter/fake"
 	"github.com/jazz1x/rallish/internal/cycle"
 	"github.com/jazz1x/rallish/pkg/contract"
 )
@@ -307,5 +310,136 @@ func assertExitCode(t *testing.T, err error, want int) {
 	}
 	if coded.ExitCode() != want {
 		t.Fatalf("exit code = %d, want %d (err: %v)", coded.ExitCode(), want, err)
+	}
+}
+
+// fakeRegistry returns a buildRegistry func that registers a single fake adapter
+// under name, so the agent-driven one-shot tests stay offline and deterministic
+// (mirroring how pipeline is injected — the real default is cli.BuildRegistry).
+func fakeRegistry(name string, fn func(turn int) contract.TurnResponse) func() (*adapter.Registry, error) {
+	return func() (*adapter.Registry, error) {
+		reg := adapter.NewRegistry()
+		if err := reg.Register(name, fake.New(fn)); err != nil {
+			return nil, err
+		}
+		return reg, nil
+	}
+}
+
+// TestRunCycleOnceAgentCleanPass is the agent-mode false-positive guard: with a
+// well-behaved adapter (valid-JSON handshake) the pass drives one turn, advances
+// one cycle via the shared orchestrator iteration, and exits 0.
+func TestRunCycleOnceAgentCleanPass(t *testing.T) {
+	dir := t.TempDir()
+	const id = "cyc_agent_clean"
+	sync := writeCycle(t, dir, id, contract.NewCycleRequest{Goal: "feat: work", MaxCycles: 5})
+
+	var out bytes.Buffer
+	err := runCycleOnce(context.Background(), runOnceOptions{
+		cycleID:  id,
+		stateDir: dir,
+		agents:   []string{"builder"},
+		pipeline: passPipeline,
+		buildRegistry: fakeRegistry("builder", func(turn int) contract.TurnResponse {
+			return contract.TurnResponse{Summary: fmt.Sprintf(`{"next_goal":"turn-%d"}`, turn)}
+		}),
+	}, &out)
+	if err != nil {
+		t.Fatalf("expected clean agent pass (nil error), got %v", err)
+	}
+
+	final, _ := sync.Read()
+	if final.CompletedCycles != 1 {
+		t.Fatalf("completed_cycles = %d, want 1", final.CompletedCycles)
+	}
+	if final.Halted {
+		t.Fatal("a clean agent pass must not halt")
+	}
+}
+
+// TestRunCycleOnceAgentUnparseableHalts: the strict handshake holds in the local
+// one-shot too — a non-JSON turn halts with the unparseable code and seals a
+// cycle_halted entry (via the orchestrator's handleHandshakeHalt) so the next
+// invocation's reviver guard stays sticky.
+func TestRunCycleOnceAgentUnparseableHalts(t *testing.T) {
+	dir := t.TempDir()
+	const id = "cyc_agent_unparseable"
+	writeCycle(t, dir, id, contract.NewCycleRequest{Goal: "feat: work", MaxCycles: 5})
+
+	var out bytes.Buffer
+	err := runCycleOnce(context.Background(), runOnceOptions{
+		cycleID:  id,
+		stateDir: dir,
+		agents:   []string{"builder"},
+		pipeline: passPipeline,
+		buildRegistry: fakeRegistry("builder", func(_ int) contract.TurnResponse {
+			return contract.TurnResponse{Summary: "prose, not the typed handshake"}
+		}),
+	}, &out)
+
+	assertExitCode(t, err, exitHaltUnparseable)
+
+	ledger := cycle.NewLedgerFileSync(filepath.Join(dir, "cycle-"+id+"-ledger.jsonl"))
+	entries, _ := ledger.ReadAll()
+	if reason, sealed := cycle.LedgerSealsResume(entries); !sealed || reason != contract.HaltUnparseableTurn {
+		t.Fatalf("ledger not sealed with unparseable: reason=%q sealed=%v", reason, sealed)
+	}
+}
+
+// TestRunCycleOnceAgentStuckHaltsBeforeTurn: in agent mode the G5 anti-spin guard
+// (inside the shared RunOnce) still fires BEFORE the agent turn — a pre-seeded
+// stuck ledger halts with the stuck code and the adapter is never invoked.
+func TestRunCycleOnceAgentStuckHaltsBeforeTurn(t *testing.T) {
+	dir := t.TempDir()
+	const id = "cyc_agent_stuck"
+	writeCycle(t, dir, id, contract.NewCycleRequest{Goal: "feat: work", MaxCycles: 10})
+
+	ledger := cycle.NewLedgerFileSync(filepath.Join(dir, "cycle-"+id+"-ledger.jsonl"))
+	stuck := contract.TurnResponse{Summary: "same"}
+	for i := 0; i < cycle.StuckRepeatTurnThreshold; i++ {
+		if err := ledger.Append(contract.NewAgentTurnLedgerEntry(int64(1000+i), id, "builder", stuck)); err != nil {
+			t.Fatalf("seed ledger: %v", err)
+		}
+	}
+
+	var out bytes.Buffer
+	err := runCycleOnce(context.Background(), runOnceOptions{
+		cycleID:  id,
+		stateDir: dir,
+		agents:   []string{"builder"},
+		pipeline: passPipeline,
+		buildRegistry: fakeRegistry("builder", func(_ int) contract.TurnResponse {
+			t.Error("adapter must NOT run when the anti-spin guard halts first")
+			return contract.TurnResponse{}
+		}),
+	}, &out)
+
+	assertExitCode(t, err, exitHaltStuck)
+}
+
+// TestRunCycleOnceAgentUnknownAdapterIsOperationalError: an --agents name that
+// does not resolve in the registry is an operational error (generic exit 1), not
+// an exit-coded halt — the orchestrator's "adapter not found" surfaces plainly.
+func TestRunCycleOnceAgentUnknownAdapterIsOperationalError(t *testing.T) {
+	dir := t.TempDir()
+	const id = "cyc_agent_unknown"
+	writeCycle(t, dir, id, contract.NewCycleRequest{Goal: "feat: work", MaxCycles: 5})
+
+	var out bytes.Buffer
+	err := runCycleOnce(context.Background(), runOnceOptions{
+		cycleID:  id,
+		stateDir: dir,
+		agents:   []string{"nonesuch"},
+		pipeline: passPipeline,
+		buildRegistry: fakeRegistry("builder", func(_ int) contract.TurnResponse {
+			return contract.TurnResponse{Summary: `{"next_goal":"x"}`}
+		}),
+	}, &out)
+	if err == nil {
+		t.Fatal("expected an error for an unknown adapter")
+	}
+	var coded interface{ ExitCode() int }
+	if errors.As(err, &coded) {
+		t.Fatalf("unknown adapter must be a plain operational error, not an exit-coded halt (got code %d)", coded.ExitCode())
 	}
 }

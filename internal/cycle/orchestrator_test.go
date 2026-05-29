@@ -717,3 +717,171 @@ func TestOrchestratorHaltsOnUnparseableTurn(t *testing.T) {
 		t.Fatalf("recorded %d cycle_halted entries, want 1", halts)
 	}
 }
+
+// TestRunOnceAdvancesOneIteration proves the extracted single-iteration entry
+// point: one call drives exactly ONE agent turn + one gated step, persists the
+// advanced state, and reports Advanced=true / Terminal=false while cycles remain.
+// RunOnce is the SSOT loop body Run iterates and the bounded one-shot CLI driver
+// calls once.
+func TestRunOnceAdvancesOneIteration(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateSync := NewStateFileSync(filepath.Join(tmpDir, "cycle.json"))
+	ledger := NewLedgerFileSync(filepath.Join(tmpDir, "cycle-ledger.jsonl"))
+
+	state, err := NewState(contract.NewCycleRequest{Goal: "feat: once", MaxCycles: 3}, "cyc_once_1")
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+	if err := stateSync.Write(state); err != nil {
+		t.Fatalf("write initial state: %v", err)
+	}
+
+	reg := adapter.NewRegistry()
+	if err := reg.Register("builder", fake.New(func(turn int) contract.TurnResponse {
+		return contract.TurnResponse{Summary: fmt.Sprintf(`{"next_goal":"turn-%d"}`, turn)}
+	})); err != nil {
+		t.Fatalf("register builder: %v", err)
+	}
+
+	orch := NewMultiAgentOrchestrator(reg, stateSync)
+	orch.SetLedger(ledger)
+	orch.SetDriverPipeline(Pipeline{passGate{name: "ok"}})
+	orch.SetDriverSleeper(instantSleeper{})
+
+	cfg := contract.OrchestratorConfig{Agents: []string{"builder"}, WorkingDir: tmpDir}
+
+	outcome, err := orch.RunOnce(context.Background(), cfg, state)
+	if err != nil {
+		t.Fatalf("run once: %v", err)
+	}
+	if !outcome.Advanced {
+		t.Fatal("expected Advanced=true after a clean iteration")
+	}
+	if outcome.Terminal {
+		t.Fatal("expected Terminal=false with cycles remaining")
+	}
+	if outcome.State.CompletedCycles != 1 {
+		t.Fatalf("outcome completed_cycles = %d, want 1", outcome.State.CompletedCycles)
+	}
+
+	// The advanced state must be persisted (the caller re-reads it next iteration).
+	persisted, err := stateSync.Read()
+	if err != nil {
+		t.Fatalf("read persisted state: %v", err)
+	}
+	if persisted.CompletedCycles != 1 {
+		t.Fatalf("persisted completed_cycles = %d, want 1", persisted.CompletedCycles)
+	}
+
+	// Exactly one agent turn was driven this single iteration.
+	entries, err := ledger.ReadAll()
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	turns := 0
+	for _, e := range entries {
+		if e.Type == contract.LedgerEventAgentTurn {
+			turns++
+		}
+	}
+	if turns != 1 {
+		t.Fatalf("agent turns = %d, want exactly 1", turns)
+	}
+}
+
+// TestRunOnceTerminalWhenMaxedOut: a cycle that cannot advance returns
+// Terminal=true without driving an agent turn (the adapter must never run).
+func TestRunOnceTerminalWhenMaxedOut(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateSync := NewStateFileSync(filepath.Join(tmpDir, "cycle.json"))
+
+	state, err := NewState(contract.NewCycleRequest{Goal: "feat: maxed", MaxCycles: 2}, "cyc_maxed_1")
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+	state.CompletedCycles = 2 // at the cap → CanAdvance() == false
+
+	reg := adapter.NewRegistry()
+	if err := reg.Register("builder", fake.New(func(_ int) contract.TurnResponse {
+		t.Error("adapter must NOT run for a terminal cycle")
+		return contract.TurnResponse{}
+	})); err != nil {
+		t.Fatalf("register builder: %v", err)
+	}
+
+	orch := NewMultiAgentOrchestrator(reg, stateSync)
+	orch.SetDriverPipeline(Pipeline{passGate{name: "ok"}})
+
+	outcome, err := orch.RunOnce(context.Background(),
+		contract.OrchestratorConfig{Agents: []string{"builder"}, WorkingDir: tmpDir}, state)
+	if err != nil {
+		t.Fatalf("run once: %v", err)
+	}
+	if !outcome.Terminal {
+		t.Fatal("expected Terminal=true for a maxed-out cycle")
+	}
+	if outcome.Advanced {
+		t.Fatal("expected Advanced=false for a maxed-out cycle")
+	}
+}
+
+// TestRunOnceHandshakeHaltSeals proves RunOnce's halt path is the SSOT halt flow:
+// an unparseable handshake returns a *HaltedError, seals the state, and records a
+// cycle_halted entry — identical to what Run produced before the extraction.
+func TestRunOnceHandshakeHaltSeals(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateSync := NewStateFileSync(filepath.Join(tmpDir, "cycle.json"))
+	ledger := NewLedgerFileSync(filepath.Join(tmpDir, "cycle-ledger.jsonl"))
+
+	state, err := NewState(contract.NewCycleRequest{Goal: "feat: halt", MaxCycles: 5}, "cyc_halt_1")
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+	if err := stateSync.Write(state); err != nil {
+		t.Fatalf("write initial state: %v", err)
+	}
+
+	reg := adapter.NewRegistry()
+	if err := reg.Register("builder", fake.New(func(_ int) contract.TurnResponse {
+		return contract.TurnResponse{Summary: "prose, not the typed handshake"}
+	})); err != nil {
+		t.Fatalf("register builder: %v", err)
+	}
+
+	orch := NewMultiAgentOrchestrator(reg, stateSync)
+	orch.SetLedger(ledger)
+	orch.SetDriverPipeline(Pipeline{passGate{name: "ok"}})
+
+	outcome, err := orch.RunOnce(context.Background(),
+		contract.OrchestratorConfig{Agents: []string{"builder"}, WorkingDir: tmpDir}, state)
+	if err == nil {
+		t.Fatal("expected an unparseable-turn halt from RunOnce, got nil")
+	}
+	var he *HaltedError
+	if !errors.As(err, &he) {
+		t.Fatalf("expected *HaltedError, got %T: %v", err, err)
+	}
+	if he.Reason != contract.HaltUnparseableTurn {
+		t.Fatalf("reason = %q, want %q", he.Reason, contract.HaltUnparseableTurn)
+	}
+	if !outcome.State.Halted {
+		t.Fatal("outcome state must be sealed (Halted)")
+	}
+
+	// The sealed state and a cycle_halted entry must persist so the caller's
+	// reviver guard stays sticky on the next invocation.
+	persisted, err := stateSync.Read()
+	if err != nil {
+		t.Fatalf("read persisted state: %v", err)
+	}
+	if !persisted.Halted || persisted.HaltReason != contract.HaltUnparseableTurn {
+		t.Fatalf("persisted state not sealed: halted=%v reason=%q", persisted.Halted, persisted.HaltReason)
+	}
+	entries, err := ledger.ReadAll()
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	if reason, sealed := LedgerSealsResume(entries); !sealed || reason != contract.HaltUnparseableTurn {
+		t.Fatalf("ledger not sealed: reason=%q sealed=%v", reason, sealed)
+	}
+}
