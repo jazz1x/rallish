@@ -9,6 +9,9 @@ func TestNewHarnessLedgerEntryCopiesFiles(t *testing.T) {
 	if entry.At != 123 {
 		t.Fatalf("at = %d, want 123", entry.At)
 	}
+	if entry.SchemaVersion != LedgerSchemaVersion {
+		t.Fatalf("schema_version = %q, want %q", entry.SchemaVersion, LedgerSchemaVersion)
+	}
 	if entry.CycleID != "cyc_1" {
 		t.Fatalf("cycle_id = %q, want cyc_1", entry.CycleID)
 	}

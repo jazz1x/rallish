@@ -15,8 +15,16 @@ const (
 	LedgerEventValidationGreen LedgerEventType = "validation_green"
 )
 
+// LedgerSchemaVersion is stamped on every ledger entry so the append-only JSONL
+// shape is an explicit, versioned contract (Hyrum's law): readers can detect and
+// migrate a shape change instead of breaking silently.
+const LedgerSchemaVersion = "1"
+
 // HarnessLedgerEntry is an append-only audit record for autonomous work.
 type HarnessLedgerEntry struct {
+	// SchemaVersion is the ledger entry schema version, always set, so the
+	// append-only JSONL shape is an explicit contract for downstream readers.
+	SchemaVersion string `json:"schema_version"`
 	// At is the Unix millisecond timestamp for this event.
 	At int64 `json:"at"`
 	// CycleID identifies the cycle this event belongs to.
@@ -40,11 +48,12 @@ type HarnessLedgerEntry struct {
 // NewHarnessLedgerEntry builds an audit entry with copied file metadata.
 func NewHarnessLedgerEntry(at int64, cycleID string, typ LedgerEventType, summary string, files []string) HarnessLedgerEntry {
 	return HarnessLedgerEntry{
-		At:      at,
-		CycleID: cycleID,
-		Type:    typ,
-		Summary: summary,
-		Files:   append([]string(nil), files...),
+		SchemaVersion: LedgerSchemaVersion,
+		At:            at,
+		CycleID:       cycleID,
+		Type:          typ,
+		Summary:       summary,
+		Files:         append([]string(nil), files...),
 	}
 }
 
