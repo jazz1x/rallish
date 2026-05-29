@@ -41,6 +41,87 @@ func TestChainHashExcludesOwnHash(t *testing.T) {
 	}
 }
 
+// buildChain constructs an n-entry valid hash chain exactly as LedgerFileSync
+// .Append would (PrevHash = predecessor Hash, genesis for the first), so the
+// verifier tests stay pure and in-package (no internal/cycle import).
+func buildChain(t *testing.T, n int) []HarnessLedgerEntry {
+	t.Helper()
+	entries := make([]HarnessLedgerEntry, 0, n)
+	prev := LedgerGenesisHash
+	for i := 0; i < n; i++ {
+		entry := NewHarnessLedgerEntry(int64(i+1), "cyc_1", LedgerEventAgentTurn, "turn", []string{"x.go"})
+		entry.PrevHash = prev
+		hash, err := ChainHash(entry, prev)
+		if err != nil {
+			t.Fatalf("chain hash %d: %v", i, err)
+		}
+		entry.Hash = hash
+		entries = append(entries, entry)
+		prev = hash
+	}
+	return entries
+}
+
+func TestVerifyChainIntact(t *testing.T) {
+	idx, ok := VerifyChain(buildChain(t, 4))
+	if !ok || idx != NoBrokenLink {
+		t.Fatalf("intact chain: got (idx=%d, ok=%v), want (%d, true)", idx, ok, NoBrokenLink)
+	}
+}
+
+func TestVerifyChainEmpty(t *testing.T) {
+	idx, ok := VerifyChain(nil)
+	if !ok || idx != NoBrokenLink {
+		t.Fatalf("empty chain: got (idx=%d, ok=%v), want (%d, true)", idx, ok, NoBrokenLink)
+	}
+}
+
+func TestVerifyChainTamperedMiddleEntry(t *testing.T) {
+	entries := buildChain(t, 5)
+	// Tamper with a MIDDLE entry's Summary after the fact, leaving its stored
+	// Hash untouched. The recomputation no longer matches -> detected at index 2.
+	entries[2].Summary = "tampered after the fact"
+
+	idx, ok := VerifyChain(entries)
+	if ok {
+		t.Fatal("tampered chain reported intact")
+	}
+	if idx != 2 {
+		t.Fatalf("broken index = %d, want 2 (the tampered entry)", idx)
+	}
+}
+
+func TestVerifyChainBrokenLinkage(t *testing.T) {
+	entries := buildChain(t, 4)
+	// Re-point a middle entry's PrevHash so it no longer links to its
+	// predecessor, while its own Hash stays self-consistent only for the old
+	// link. The linkage check must flag the first divergence at index 3.
+	entries[3].PrevHash = LedgerGenesisHash
+
+	idx, ok := VerifyChain(entries)
+	if ok {
+		t.Fatal("relinked chain reported intact")
+	}
+	if idx != 3 {
+		t.Fatalf("broken index = %d, want 3 (the relinked entry)", idx)
+	}
+}
+
+func TestVerifyChainFirstEntryNonGenesis(t *testing.T) {
+	entries := buildChain(t, 2)
+	// A first entry whose PrevHash is not the genesis constant is an invalid
+	// chain head, detected at index 0.
+	entries[0].PrevHash = "1111111111111111111111111111111111111111111111111111111111111111"
+
+	idx, ok := VerifyChain(entries)
+	if ok {
+		t.Fatal("bad genesis reported intact")
+	}
+	if idx != 0 {
+		t.Fatalf("broken index = %d, want 0 (bad genesis head)", idx)
+	}
+}
+
 func TestChainHashBindsPrevAndSchema(t *testing.T) {
 	entry := NewHarnessLedgerEntry(1, "cyc_1", LedgerEventGatePassed, "ok", nil)
 

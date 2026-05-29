@@ -108,6 +108,34 @@ func ChainHash(entry HarnessLedgerEntry, prevHash string) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+// NoBrokenLink is the brokenIndex VerifyChain returns when the chain is intact.
+const NoBrokenLink = -1
+
+// VerifyChain is the pure reader for the ledger tamper-evidence chain (G4): the
+// query/audit layer over an already-loaded slice, no I/O. It walks the entries in
+// order and, using the same ChainHash SSOT as the writer, checks two invariants
+// per entry: (1) the recorded Hash equals a recomputation over the entry's
+// canonical content (content tamper, e.g. a mutated Summary, breaks this), and
+// (2) PrevHash links to the predecessor's Hash (LedgerGenesisHash for the first
+// entry).
+//
+// It returns the index of the FIRST entry that violates either invariant and
+// ok=false; an intact (or empty) chain returns (NoBrokenLink, true).
+func VerifyChain(entries []HarnessLedgerEntry) (brokenIndex int, ok bool) {
+	prev := LedgerGenesisHash
+	for i, entry := range entries {
+		if entry.PrevHash != prev {
+			return i, false
+		}
+		want, err := ChainHash(entry, entry.PrevHash)
+		if err != nil || entry.Hash != want {
+			return i, false
+		}
+		prev = entry.Hash
+	}
+	return NoBrokenLink, true
+}
+
 // NewHarnessLedgerEntry builds an audit entry with copied file metadata.
 func NewHarnessLedgerEntry(at int64, cycleID string, typ LedgerEventType, summary string, files []string) HarnessLedgerEntry {
 	return HarnessLedgerEntry{
