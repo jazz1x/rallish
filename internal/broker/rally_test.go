@@ -703,3 +703,116 @@ func TestCloseAllRallies(t *testing.T) {
 	rallies.mu.Unlock()
 	require.Equal(t, contract.RallyStateInterrupted, status)
 }
+
+// TestRallySelfHandoffRejected verifies that a participant cannot hand the baton
+// to themselves via handoff_to — the broker must return 400 (ErrSelfHandoff).
+func TestRallySelfHandoffRejected(t *testing.T) {
+	resetRallies()
+	ts, _ := newRallyServer(t)
+
+	sess := createSession(t, ts, []string{"alice", "bob"})
+	sessionID := sess.ID
+
+	// Join as alice so she receives the baton (first participant).
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ready := make(chan struct{})
+	go func() {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			ts.URL+"/rally/sessions/"+sessionID+"/baton?as=alice", nil)
+		if err != nil {
+			return
+		}
+		resp, err := (&http.Client{}).Do(req)
+		if err != nil {
+			return
+		}
+		defer func() { _ = resp.Body.Close() }()
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			if strings.HasPrefix(scanner.Text(), "data: ") {
+				select {
+				case ready <- struct{}{}:
+				default:
+				}
+				break
+			}
+		}
+		for scanner.Scan() {
+		}
+	}()
+
+	select {
+	case <-ready:
+	case <-time.After(3 * time.Second):
+		t.Fatal("alice did not receive baton in time")
+	}
+
+	// Alice tries to pass the baton to herself — must be 400.
+	doneBody := `{"handoff_to":"alice"}`
+	resp := postJSON(t, ts.URL+"/rally/sessions/"+sessionID+"/done?as=alice", doneBody)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	raw, _ := io.ReadAll(resp.Body)
+	require.Contains(t, string(raw), "cannot hand off the baton to yourself")
+}
+
+// TestRallyExplicitHandoffToDifferentParticipant verifies that a valid explicit
+// handoff_to a DIFFERENT participant succeeds (false-positive guard for F4).
+func TestRallyExplicitHandoffToDifferentParticipant(t *testing.T) {
+	resetRallies()
+	ts, _ := newRallyServer(t)
+
+	// 3-participant session: alice, bob, charlie.
+	sess := createSession(t, ts, []string{"alice", "bob", "charlie"})
+	sessionID := sess.ID
+
+	// Join as alice so she receives the baton.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ready := make(chan struct{})
+	go func() {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			ts.URL+"/rally/sessions/"+sessionID+"/baton?as=alice", nil)
+		if err != nil {
+			return
+		}
+		resp, err := (&http.Client{}).Do(req)
+		if err != nil {
+			return
+		}
+		defer func() { _ = resp.Body.Close() }()
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			if strings.HasPrefix(scanner.Text(), "data: ") {
+				select {
+				case ready <- struct{}{}:
+				default:
+				}
+				break
+			}
+		}
+		for scanner.Scan() {
+		}
+	}()
+
+	select {
+	case <-ready:
+	case <-time.After(3 * time.Second):
+		t.Fatal("alice did not receive baton in time")
+	}
+
+	// Alice explicitly passes to charlie (skipping bob) — must succeed with 200.
+	doneBody := `{"handoff_to":"charlie"}`
+	doneResp := postJSON(t, ts.URL+"/rally/sessions/"+sessionID+"/done?as=alice", doneBody)
+	defer func() { _ = doneResp.Body.Close() }()
+	require.Equal(t, http.StatusOK, doneResp.StatusCode)
+
+	var updated contract.RallySession
+	require.NoError(t, json.NewDecoder(doneResp.Body).Decode(&updated))
+	require.Equal(t, "charlie", updated.Holder)
+	require.Equal(t, contract.RallyTurnState("charlie"), updated.Status)
+}

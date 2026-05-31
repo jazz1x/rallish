@@ -27,6 +27,9 @@ var ErrDuplicateName = errors.New("rally: duplicate participant name")
 // ErrTooFewParticipants is returned when fewer than two participants are supplied.
 var ErrTooFewParticipants = errors.New("rally: at least two participants required")
 
+// ErrSelfHandoff is returned when a participant passes the baton to themselves via handoff_to.
+var ErrSelfHandoff = errors.New("rally: cannot hand off the baton to yourself")
+
 // Cycle errors.
 var (
 	// ErrInvalidCyclePhase is returned when a cycle phase string is not recognised.
