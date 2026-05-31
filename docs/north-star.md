@@ -112,13 +112,13 @@ Survive session/rate/usage/context-limit death; resume from saved state.
 - *Success:* a stock A2A v1.0 client drives a task end-to-end (today it would 404); new runtime via one 2-method adapter (✅ adapter port already minimal).
 
 ### G4 — Audit & Compliance *(durable core)*
-- ✅ append-only JSONL ledger. **Today it is NOT hash-chained** — so it is not yet "tamper-evident audit"; do not call it that until built.
-- ○ hash-chain (`prev_hash`/`hash`, SHA-256/RFC 8785, genesis/close); ○ replay/determinism (reconstruct the control graph; a reader, not a runtime); ○ record sandbox posture + identity per event.
+- ✅ append-only JSONL ledger, now **hash-chained** (`prev_hash`/`hash`/`chain_hash`, SHA-256) + `schema_version`-stamped — it **is** tamper-evident audit (the cycle path); A2A/rally session logs remain plain JSONL.
+- ✅ hash-chain on write + `VerifyChain` (content-tamper detection); ✅ replay/determinism (`Replay` → control graph, verify-before-reconstruct; a reader, not a runtime); ✅ CT-style Merkle (RFC 9162) inclusion + consistency proofs. ○ record sandbox posture + identity per event (deferred).
 - *Two orthogonal layers:* **query** → conform to **W3C PROV-AGENT** vocabulary (+ OpenLineage framing); **verifiability** → linear `prev_hash` chain (step 1, IETF AAT fields) evolving to a **CT-style Merkle log (RFC 9162)** for consistency proofs. PROV gives the queryable graph; CT gives tamper-evidence — neither does the other's job. Aligns to EU AI Act Art. 12 (track the *shape*, not the expiring draft).
 
 ### G5 — Liveness & Anti-Spin *(table-stakes — the active fire)* ⚑
 Make real progress or stop. **Pairs with G1.**
-- ✅ 3-cycle fresh-agent reset; ✅ halt + zombie-prevention (state removed on halt).
+- ✅ 3-cycle fresh-agent reset; ✅ halt + zombie-prevention (broker path removes the mutable state file on halt; the one-shot path relies on the sticky ledger seal — see G1).
 - ○ **stuck-breaker** `Stuck()→Halt` — cheap O(window) predicates over the ledger (repeated-turn ≥4 · same gate_failed ≥3 · ping-pong ≥6 · no `validation_green`/no new diff in K), **not** subgraph isomorphism. **Detect "stuck", don't define "progress."** This is *the diagnostic breaker LangGraph's blind `recursion_limit` lacks*; the truly un-gameable signal remains G2's verifier gate (frontier-growth only resists self-report gaming, not churn).
 - ○ **hard cost/resource ceiling distinct from stuck** (a *productive* runaway won't trip a stuck detector); bound tokens + tool-calls + wall-clock. *Cross-revival ceiling needs the cooperating driver (see Essence note).*
 - ○ reviver guard: sticky halt; revive only on recent measurable progress; fresh objective on resume.
@@ -161,7 +161,7 @@ Make real progress or stop. **Pairs with G1.**
 | 1 | `schema_version` + honest naming | cheap; stops a Hyrum trap + false claims |
 | 2 | **G5 stuck-breaker + reviver guard + hard cost ceiling** | active token-bleed fire ⚑; cheap ledger-reader; makes G1 safe |
 | 3 | **G6 destructive-action deny-list + secret containment** | catastrophic-prevention; the #1 missing layer |
-| 4 | G4-min hash-chain | makes "audit" *true*; ~2 fields |
+| 4 | G4-min hash-chain ✅ | makes "audit" *true*; ~2 fields |
 | 5 | **G2 tamper-resistant gates + parse-don't-validate + self-eval + dep pin** | the differentiator + the bottleneck |
 | 6 | G4+ replay/determinism | biggest convention gap; a ledger reader |
 | 7 | G3 A2A v1.0 (strict, signed, mutual-auth) | polish — already shaped |
