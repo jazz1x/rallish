@@ -242,7 +242,32 @@ the skill invocation.
 
 ### Autonomous harness commands
 
-rallish also ships a repo-local work harness for long autonomous runs (G1–G6 guardrails: safety, verification gates, A2A interop, audit ledger, anti-spin, action-gate). Two harness-specific commands:
+rallish also ships a repo-local work harness for long autonomous runs (G1–G6 guardrails: safety, verification gates, A2A interop, audit ledger, anti-spin, action-gate).
+
+**Daemon requirement:** `cycle new`, `cycle status`, `cycle halt`, and the SSE-watch commands route through the broker. **The daemon must be running** before invoking these:
+
+```bash
+rallish daemon &                              # start the daemon first
+rallish cycle new --goal "fix tests" \
+  --branch feat/fix \
+  --audit-cmd "npm test"                      # optional: override the default 'make check-all'
+rallish cycle status --cycle-id <id>
+rallish cycle halt   --cycle-id <id>
+```
+
+`cycle run --once` is the exception — it resumes state directly from `tmp/cycle-<id>.json` and does **not** require the daemon.
+
+**Audit gate:** the built-in audit gate runs `make check-all` by default. Every repo that uses the cycle harness must expose a `make check-all` target, or override it at cycle creation time with `--audit-cmd`:
+
+| Ecosystem | Example `--audit-cmd` |
+|---|---|
+| Node / npm | `npm test` |
+| Node / bun | `bun run test` |
+| Rust | `cargo test` |
+| Python | `pytest` |
+| Make (custom target) | `make my-check` |
+
+An empty or whitespace-only `--audit-cmd` is a misconfiguration: the gate fails loudly and does not silently revert to the default.
 
 ```bash
 # Bounded one-shot pass a cron/scheduler drives (exit code = halt reason)

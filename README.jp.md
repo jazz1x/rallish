@@ -268,7 +268,21 @@ scratch:
   summarize_with: claude-haiku
 ```
 
-### 6. デーモンのライフサイクル
+### 6. 自律サイクル（ハーネス）
+
+`cycle new`・`cycle status`・`cycle halt` などの `cycle` サブコマンドはブローカーを経由するため、**先にデーモンを起動**しておく必要があります:
+
+```bash
+rallish daemon &                               # 先にデーモンを起動
+rallish cycle new --goal "feat: 認証追加" --branch feat/auth
+rallish cycle new --goal "テスト修正" --branch feat/fix \
+  --audit-cmd "npm test"                       # デフォルト 'make check-all' の代わりに使用
+rallish cycle run --once --cycle-id <id>       # デーモン不要 — ファイルから直接再開
+```
+
+オーディットゲートはデフォルトで `make check-all` を実行します。`--audit-cmd` に空白のみを指定するとエラーになり、デフォルトへのサイレントフォールバックは行われません。
+
+### 7. デーモンのライフサイクル
 
 ```bash
 rallish daemon &                            # 明示起動 (任意 — squash が自動スポーン)
