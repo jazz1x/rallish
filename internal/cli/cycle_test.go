@@ -170,6 +170,7 @@ func TestRunCycleNewSendsLocalGates(t *testing.T) {
 		"",
 		"",
 		[]string{"bun test", "cargo clippy"},
+		"",
 		&out,
 	)
 	if err != nil {

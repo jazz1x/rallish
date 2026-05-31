@@ -209,6 +209,9 @@ type CycleState struct {
 	PendingFiles []string `json:"pending_files,omitempty"`
 	// LocalGates lists repository-specific validation commands to run after the built-in audit gate.
 	LocalGates []string `json:"local_gates,omitempty"`
+	// AuditCmd overrides the audit gate command (default: "make check-all").
+	// Must be a non-empty, non-whitespace-only string when set; leave empty for the default.
+	AuditCmd string `json:"audit_cmd,omitempty"`
 	// ViolationsFound accumulates issues discovered but not yet fixed.
 	ViolationsFound []Violation `json:"violations_found,omitempty"`
 	// NextCycleGoal is the mandatory one-sentence goal for the next cycle.
@@ -323,6 +326,9 @@ type NewCycleRequest struct {
 	PendingFiles []string `json:"pending_files,omitempty"`
 	// LocalGates lists repository-specific validation commands to run after the built-in audit gate.
 	LocalGates []string `json:"local_gates,omitempty"`
+	// AuditCmd overrides the audit gate command (default: "make check-all").
+	// Must be a non-empty, non-whitespace-only string when set; leave empty for the default.
+	AuditCmd string `json:"audit_cmd,omitempty"`
 	// Orchestrator, when set, enables multi-agent ping-pong.
 	Orchestrator *OrchestratorConfig `json:"orchestrator,omitempty"`
 }

@@ -42,6 +42,7 @@ func NewState(req contract.NewCycleRequest, id string) (State, error) {
 			Branch:             branch,
 			PendingFiles:       req.PendingFiles,
 			LocalGates:         normaliseLocalGates(req.LocalGates),
+			AuditCmd:           req.AuditCmd,
 			NextCycleGoal:      req.Goal,
 			Halted:             false,
 			CreatedAt:          now,

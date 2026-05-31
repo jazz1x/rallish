@@ -43,7 +43,7 @@ func resolveBrokerClient(homeDir string, connectTimeout time.Duration) (brokerCl
 	portFile := filepath.Join(sockDir, "port")
 	port, err := readPortFile(portFile)
 	if err != nil {
-		return brokerClient{}, fmt.Errorf("broker not running (no socket or port file): %w", err)
+		return brokerClient{}, fmt.Errorf("broker not running — start it first with: rallish daemon (no socket or port file): %w", err)
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%s", strings.TrimSpace(port))
 	return brokerClient{URL: url, Client: &http.Client{Timeout: connectTimeout}}, nil

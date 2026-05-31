@@ -47,6 +47,7 @@ func CycleNewCmd() *cobra.Command {
 		agents             string
 		workingDir         string
 		localGates         []string
+		auditCmd           string
 	)
 	cmd := &cobra.Command{
 		Use:   "new",
@@ -56,7 +57,7 @@ func CycleNewCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("get home dir: %w", err)
 			}
-			return runCycleNew(cmd.Context(), home, goal, branch, maxCycles, maxDurationMinutes, autoGoal, agents, workingDir, localGates, cmd.OutOrStdout())
+			return runCycleNew(cmd.Context(), home, goal, branch, maxCycles, maxDurationMinutes, autoGoal, agents, workingDir, localGates, auditCmd, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().StringVar(&goal, "goal", "", "One-sentence objective for the first cycle (required)")
@@ -67,6 +68,7 @@ func CycleNewCmd() *cobra.Command {
 	cmd.Flags().StringVar(&agents, "agents", "", "Comma-separated adapter names for multi-agent orchestration")
 	cmd.Flags().StringVar(&workingDir, "working-dir", "", "Working directory for the cycle")
 	cmd.Flags().StringArrayVar(&localGates, "local-gate", nil, "Repository-specific validation command to run after audit (repeatable)")
+	cmd.Flags().StringVar(&auditCmd, "audit-cmd", "", "Override the audit gate command (default: make check-all); e.g. 'npm test', 'cargo test'")
 	_ = cmd.MarkFlagRequired("goal")
 	return cmd
 }
@@ -303,7 +305,7 @@ func runCycleStart(ctx context.Context, home string, req contract.NewCycleReques
 	return runCycleWatch(ctx, home, state.ID, logFile, out)
 }
 
-func runCycleNew(ctx context.Context, home, goal, branch string, maxCycles, maxDurationMinutes int, autoGoal bool, agents, workingDir string, localGates []string, out io.Writer) error {
+func runCycleNew(ctx context.Context, home, goal, branch string, maxCycles, maxDurationMinutes int, autoGoal bool, agents, workingDir string, localGates []string, auditCmd string, out io.Writer) error {
 	bc, err := resolveBrokerClient(home, 0)
 	if err != nil {
 		return err
@@ -316,6 +318,7 @@ func runCycleNew(ctx context.Context, home, goal, branch string, maxCycles, maxD
 		MaxDurationMinutes: maxDurationMinutes,
 		AutoGoal:           autoGoal,
 		LocalGates:         localGates,
+		AuditCmd:           auditCmd,
 	}
 	if agents != "" || workingDir != "" {
 		req.Orchestrator = &contract.OrchestratorConfig{
