@@ -257,6 +257,18 @@ func (s *Server) handleStepCycle(w http.ResponseWriter, r *http.Request) {
 		completed := st.CompleteCycle()
 		state = completed.Value()
 		state.NextCycleGoal = ""
+		// VERIFIER-produced progress signal (B1): the gate pipeline passed, so
+		// record validation_green — the un-gameable signal the reviver keys on to
+		// lift a sticky cycle_halted seal (LedgerSealsResume) — alongside the
+		// cycle_completed terminal marker. The per-gate gate_passed events are
+		// appended from result.Reports() below.
+		s.appendLedger(ctx, id, contract.NewHarnessLedgerEntry(
+			time.Now().UnixMilli(),
+			id,
+			contract.LedgerEventValidationGreen,
+			"gate pipeline passed",
+			nil,
+		))
 		s.appendLedger(ctx, id, contract.NewHarnessLedgerEntry(
 			time.Now().UnixMilli(),
 			id,

@@ -313,6 +313,12 @@ func runCycleOnce(ctx context.Context, opts runOnceOptions, out io.Writer) error
 
 	driver := cycle.NewCycleDriver(stateSync)
 	driver.SetPipeline(opts.pipeline(state))
+	// Inject the ledger so a successful gated Step records the verifier-produced
+	// completion (gate_passed + validation_green + cycle_completed). Without this
+	// the reference one-shot would advance silently and a later halt could never
+	// be revived (B1: the reviver keys on validation_green). The --agents path
+	// already injects the ledger via orch.SetLedger.
+	driver.SetLedger(ledger)
 	if opts.stepTimeout > 0 {
 		driver.StepTimeout = opts.stepTimeout
 	}

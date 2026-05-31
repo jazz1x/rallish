@@ -287,14 +287,21 @@ func TestHandleStepCycleRequiresGoal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read ledger: %v", err)
 	}
-	if len(entries) < 3 {
-		t.Fatalf("ledger entries = %#v, want at least create/complete/gate", entries)
+	// On a passing step the broker now records, after cycle_created:
+	// validation_green (B1 — the verifier-produced progress signal the reviver
+	// keys on) → cycle_completed → one gate_passed per report. Before the B1 fix
+	// validation_green had no emit site here.
+	if len(entries) < 4 {
+		t.Fatalf("ledger entries = %#v, want at least create/green/complete/gate", entries)
 	}
-	if entries[1].Type != contract.LedgerEventCycleCompleted {
-		t.Fatalf("second ledger entry = %q, want cycle_completed", entries[1].Type)
+	if entries[1].Type != contract.LedgerEventValidationGreen {
+		t.Fatalf("second ledger entry = %q, want validation_green", entries[1].Type)
 	}
-	if entries[2].Type != contract.LedgerEventGatePassed || entries[2].Gate != "mock" {
-		t.Fatalf("third ledger entry = %#v, want mock gate passed", entries[2])
+	if entries[2].Type != contract.LedgerEventCycleCompleted {
+		t.Fatalf("third ledger entry = %q, want cycle_completed", entries[2].Type)
+	}
+	if entries[3].Type != contract.LedgerEventGatePassed || entries[3].Gate != "mock" {
+		t.Fatalf("fourth ledger entry = %#v, want mock gate passed", entries[3])
 	}
 
 	// Step again without a new goal should fail because CompleteCycle cleared it.

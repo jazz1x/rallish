@@ -21,6 +21,17 @@ func (g passGate) Run(_ context.Context, state State) (contract.GateResult, Stat
 	return contract.GateSuccess{R: contract.GateReport{Gate: g.name, Passed: true}}, state
 }
 
+// failGate always fails, halting the cycle with HaltGateFailure. It mirrors
+// passGate as a shared test double for the package's gate-failure paths.
+type failGate struct{ name string }
+
+func (g failGate) Name() string { return g.name }
+func (g failGate) Run(_ context.Context, state State) (contract.GateResult, State) {
+	halted := state.Halt(contract.HaltGateFailure).Value()
+	halted.LastFailedGate = g.name
+	return contract.GateFailure{R: contract.GateReport{Gate: g.name, Passed: false}, Reason: contract.HaltGateFailure}, halted
+}
+
 func TestOrchestratorMultiAgentRotation(t *testing.T) {
 	tmpDir := t.TempDir()
 	sync := NewStateFileSync(filepath.Join(tmpDir, "cycle.json"))
@@ -208,9 +219,12 @@ func TestOrchestratorAppendsTurnAndHandoffLedger(t *testing.T) {
 		t.Fatalf("read ledger: %v", err)
 	}
 	// Expected order: agent_turn, handoff_created, gates_pinned (G2 tamper-resistant
-	// gate pin recorded by driver.Step before pipeline execution).
-	if len(entries) != 3 {
-		t.Fatalf("entries = %#v, want 3 (agent_turn + handoff_created + gates_pinned)", entries)
+	// gate pin recorded by driver.Step before pipeline execution), then — after the
+	// gated step passes — the verifier-produced completion tail gate_passed,
+	// validation_green, cycle_completed (B1: validation_green now has a production
+	// emit site so the reviver's revive edge is reachable).
+	if len(entries) != 6 {
+		t.Fatalf("entries = %#v, want 6 (agent_turn + handoff_created + gates_pinned + gate_passed + validation_green + cycle_completed)", entries)
 	}
 	if entries[0].Type != contract.LedgerEventAgentTurn {
 		t.Fatalf("first type = %q, want %q", entries[0].Type, contract.LedgerEventAgentTurn)
@@ -236,6 +250,18 @@ func TestOrchestratorAppendsTurnAndHandoffLedger(t *testing.T) {
 	}
 	if entries[2].CycleID != "cyc_handoff" {
 		t.Fatalf("third cycle_id = %q, want cyc_handoff", entries[2].CycleID)
+	}
+	// Verifier-produced completion tail (B1): the gates went green, so the cycle
+	// records gate_passed, then validation_green (the un-gameable signal the
+	// reviver keys on), then cycle_completed.
+	if entries[3].Type != contract.LedgerEventGatePassed || entries[3].Gate != "ok" {
+		t.Fatalf("fourth entry = %#v, want gate_passed for gate ok", entries[3])
+	}
+	if entries[4].Type != contract.LedgerEventValidationGreen {
+		t.Fatalf("fifth type = %q, want %q", entries[4].Type, contract.LedgerEventValidationGreen)
+	}
+	if entries[5].Type != contract.LedgerEventCycleCompleted {
+		t.Fatalf("sixth type = %q, want %q", entries[5].Type, contract.LedgerEventCycleCompleted)
 	}
 }
 
