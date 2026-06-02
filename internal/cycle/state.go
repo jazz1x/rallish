@@ -43,6 +43,7 @@ func NewState(req contract.NewCycleRequest, id string) (State, error) {
 			PendingFiles:       req.PendingFiles,
 			LocalGates:         normaliseLocalGates(req.LocalGates),
 			AuditCmd:           req.AuditCmd,
+			PolishTestCmd:      req.PolishTestCmd,
 			NextCycleGoal:      req.Goal,
 			Halted:             false,
 			CreatedAt:          now,

@@ -212,6 +212,10 @@ type CycleState struct {
 	// AuditCmd overrides the audit gate command (default: "make check-all").
 	// Must be a non-empty, non-whitespace-only string when set; leave empty for the default.
 	AuditCmd string `json:"audit_cmd,omitempty"`
+	// PolishTestCmd overrides the polish gate test command (default: "go test -race ./...").
+	// Must be a non-empty, non-whitespace-only string when set; leave empty for the default.
+	// A whitespace-only value when set is a misconfiguration and causes the gate to fail loudly.
+	PolishTestCmd string `json:"polish_test_cmd,omitempty"`
 	// ViolationsFound accumulates issues discovered but not yet fixed.
 	ViolationsFound []Violation `json:"violations_found,omitempty"`
 	// NextCycleGoal is the mandatory one-sentence goal for the next cycle.
@@ -329,6 +333,10 @@ type NewCycleRequest struct {
 	// AuditCmd overrides the audit gate command (default: "make check-all").
 	// Must be a non-empty, non-whitespace-only string when set; leave empty for the default.
 	AuditCmd string `json:"audit_cmd,omitempty"`
+	// PolishTestCmd overrides the polish gate test command (default: "go test -race ./...").
+	// Must be a non-empty, non-whitespace-only string when set; leave empty for the default.
+	// A whitespace-only value when set is a misconfiguration and causes the gate to fail loudly.
+	PolishTestCmd string `json:"polish_test_cmd,omitempty"`
 	// Orchestrator, when set, enables multi-agent ping-pong.
 	Orchestrator *OrchestratorConfig `json:"orchestrator,omitempty"`
 }

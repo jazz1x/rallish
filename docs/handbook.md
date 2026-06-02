@@ -269,6 +269,17 @@ rallish cycle halt   --cycle-id <id>
 
 An empty or whitespace-only `--audit-cmd` is a misconfiguration: the gate fails loudly and does not silently revert to the default.
 
+**Polish gate:** the built-in polish gate runs `go test -race ./...` by default. Override with `--polish-test-cmd` at cycle creation:
+
+| Ecosystem | Example `--polish-test-cmd` |
+|---|---|
+| Node / npm | `npm test` |
+| Rust | `cargo test` |
+| Python | `pytest` |
+| Make | `make test` |
+
+An empty or whitespace-only `--polish-test-cmd` is a misconfiguration (fails loudly). The `scripts/check-no-raw-ansi.sh` check is rallish-repo-specific and is silently skipped when the script is absent in the target repo (not applicable, not an error).
+
 ```bash
 # Bounded one-shot pass a cron/scheduler drives (exit code = halt reason)
 rallish cycle run --once --cycle-id <id>

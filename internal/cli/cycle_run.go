@@ -190,13 +190,14 @@ Exit codes:
 
 // buildCLIPipeline is the default gate pipeline for the local one-shot, mirroring
 // the broker's standard pipeline plus any repo-local gates appended after audit.
-// It honours state.AuditCmd to override the default `make check-all` command.
+// It honours state.AuditCmd to override the default `make check-all` command and
+// state.PolishTestCmd to override the default `go test -race ./...` test command.
 func buildCLIPipeline(state cycle.State) cycle.Pipeline {
 	base := cycle.Pipeline{
 		gates.PreflightGate{},
 		gates.AuditGate{CmdOverride: state.AuditCmd},
 		gates.PhilosophyGate{},
-		gates.PolishGate{},
+		gates.PolishGate{TestCmdOverride: state.PolishTestCmd},
 		gates.CommitGate{},
 	}
 	if len(state.LocalGates) == 0 {

@@ -277,6 +277,8 @@ rallish cycle run --once --cycle-id <id>       # 데몬 불필요 — 파일에�
 
 오디트 게이트는 기본적으로 `make check-all`을 실행합니다. `--audit-cmd`가 공백만 포함하면 오류로 처리되며 기본값으로 자동 되돌아가지 않습니다.
 
+폴리시 게이트는 기본적으로 `go test -race ./...`를 실행합니다. `--polish-test-cmd`로 프로젝트별 명령을 지정할 수 있습니다. 공백만 포함하면 오류로 처리됩니다. `scripts/check-no-raw-ansi.sh` 검사는 rallish 저장소 전용이며, 해당 스크립트가 없는 저장소에서는 자동으로 건너뜁니다 (오류 아님).
+
 ### 7. 데몬 라이프사이클
 
 ```bash

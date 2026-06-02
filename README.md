@@ -301,7 +301,16 @@ rallish cycle new --goal "fix tests" --branch feat/fix \
   --audit-cmd "npm test"   # or "cargo test", "bun run test", etc.
 ```
 
-An empty or whitespace-only `--audit-cmd` is a misconfiguration and fails loudly (no silent fallback to the default). `cycle run --once` is the daemon-free path: it resumes persisted state directly from `tmp/cycle-<id>.json` without the broker.
+An empty or whitespace-only `--audit-cmd` is a misconfiguration and fails loudly (no silent fallback to the default).
+
+The polish gate runs `go test -race ./...` by default. To use a project-specific test command, pass `--polish-test-cmd` at cycle creation:
+
+```bash
+rallish cycle new --goal "fix tests" --branch feat/fix \
+  --polish-test-cmd "npm test"   # or "cargo test", "pytest", etc.
+```
+
+An empty or whitespace-only `--polish-test-cmd` is a misconfiguration and fails loudly. The `scripts/check-no-raw-ansi.sh` check inside the polish gate is rallish-repo-specific and is silently skipped when the script is not present in the target repository (not applicable, not an error). `cycle run --once` is the daemon-free path: it resumes persisted state directly from `tmp/cycle-<id>.json` without the broker.
 
 ### 7. Daemon lifecycle
 
