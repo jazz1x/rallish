@@ -6,7 +6,7 @@ package cycle
 // orchestration for the same cycle. The broker path removes the mutable state
 // file on halt ("zombie prevention"); the one-shot CLI path leaves it and relies
 // on this seal instead. Either way the append-only ledger persists at
-// tmp/cycle-<id>-ledger.jsonl, so this guard reads that ledger so a re-trigger
+// ~/.rallish/cycles/cycle-<id>-ledger.jsonl, so this guard reads that ledger so a re-trigger
 // cannot silently revive a run that has already halted.
 //
 // Rule: a cycle_halted entry is STICKY. Resume is only permitted if measurable

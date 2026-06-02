@@ -164,10 +164,14 @@ Exit codes:
 			if !once {
 				return fmt.Errorf("cycle run requires --once (the only supported, bounded mode; this is not a watch loop)")
 			}
+			resolvedStateDir, err := resolveStateDir(stateDir)
+			if err != nil {
+				return err
+			}
 			opts := runOnceOptions{
 				cycleID:          cycleID,
 				goal:             goal,
-				stateDir:         stateDir,
+				stateDir:         resolvedStateDir,
 				maxLifetimeTurns: maxLifetimeTurns,
 				stepTimeout:      stepTimeout,
 				agents:           agents,
@@ -179,13 +183,36 @@ Exit codes:
 	}
 	cmd.Flags().StringVar(&cycleID, "cycle-id", "", "Cycle ID to advance (required)")
 	cmd.Flags().StringVar(&goal, "goal", "", "Override next_cycle_goal for this single pass")
-	cmd.Flags().StringVar(&stateDir, "state-dir", "tmp", "Directory holding cycle-<id>.json and cycle-<id>-ledger.jsonl")
+	cmd.Flags().StringVar(&stateDir, "state-dir", "", "Directory holding cycle-<id>.json and cycle-<id>-ledger.jsonl (default: ~/.rallish/cycles, where the daemon writes them)")
 	cmd.Flags().BoolVar(&once, "once", false, "Run a single bounded pass then exit (required)")
 	cmd.Flags().IntVar(&maxLifetimeTurns, "max-lifetime-turns", 0, "Hard ceiling on agent turns summed across revivals (0 = unlimited)")
 	cmd.Flags().DurationVar(&stepTimeout, "step-timeout", 10*time.Minute, "Maximum duration for the single gated step")
 	cmd.Flags().StringSliceVar(&agents, "agents", nil, "Drive one agent turn this pass using these registered adapters (comma-separated, e.g. claude,kimi); omit for the pure gate-pipeline reference driver")
 	_ = cmd.MarkFlagRequired("cycle-id")
 	return cmd
+}
+
+// CyclesDir returns the SSOT directory where cycle state + ledger files live:
+// ~/.rallish/cycles. This is the SAME location the daemon writes to (see
+// RunDaemon), so a broker-created cycle and a broker-free `cycle run --once`
+// resolve the same files — and it sits OUTSIDE any worked-on repo, so the
+// broker never dirties the working tree PreflightGate requires clean.
+func CyclesDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir for cycles state: %w", err)
+	}
+	return filepath.Join(home, ".rallish", "cycles"), nil
+}
+
+// resolveStateDir returns the explicit --state-dir when provided, else the
+// default ~/.rallish/cycles. ROP: an unresolvable home is a hard error, never a
+// silent fallback to a relative path the daemon would not share.
+func resolveStateDir(flag string) (string, error) {
+	if strings.TrimSpace(flag) != "" {
+		return flag, nil
+	}
+	return CyclesDir()
 }
 
 // buildCLIPipeline is the default gate pipeline for the local one-shot, mirroring

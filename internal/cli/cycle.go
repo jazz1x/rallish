@@ -276,7 +276,7 @@ func runCycleStart(ctx context.Context, home string, req contract.NewCycleReques
 			_, _ = fmt.Fprintf(out, "    - %s\n", gate)
 		}
 	}
-	_, _ = fmt.Fprintf(out, "  state_file:  tmp/cycle-%s.json\n", state.ID)
+	_, _ = fmt.Fprintf(out, "  state_file:  %s\n", cycleStateFileDisplay(state.ID))
 
 	// 2. Start orchestration if agents are configured.
 	if len(agents) > 0 {
@@ -363,8 +363,19 @@ func runCycleNew(ctx context.Context, home, goal, branch string, maxCycles, maxD
 			_, _ = fmt.Fprintf(out, "    - %s\n", gate)
 		}
 	}
-	_, _ = fmt.Fprintf(out, "  state_file:   tmp/cycle-%s.json\n", state.ID)
+	_, _ = fmt.Fprintf(out, "  state_file:   %s\n", cycleStateFileDisplay(state.ID))
 	return nil
+}
+
+// cycleStateFileDisplay returns the human-facing path of a cycle's state file
+// (the SSOT ~/.rallish/cycles location the daemon writes to). Falls back to the
+// tilde form only if the home dir is unresolvable — display-only, never used for I/O.
+func cycleStateFileDisplay(id string) string {
+	dir, err := CyclesDir()
+	if err != nil {
+		return filepath.Join("~", ".rallish", "cycles", fmt.Sprintf("cycle-%s.json", id))
+	}
+	return filepath.Join(dir, fmt.Sprintf("cycle-%s.json", id))
 }
 
 func runCycleStatus(ctx context.Context, home, cycleID string, out io.Writer) error {
@@ -394,8 +405,15 @@ func runCycleStatusWithClient(ctx context.Context, bc brokerClient, cycleID stri
 			return fmt.Errorf("decode response: %w", err)
 		}
 	} else {
-		// Fallback: read local state file.
-		data, err := os.ReadFile(filepath.Join("tmp", fmt.Sprintf("cycle-%s.json", cycleID)))
+		// Fallback: read the local state file from the SSOT cycles dir.
+		cyclesDir, derr := CyclesDir()
+		if derr != nil {
+			return derr
+		}
+		// filepath.Base neutralises any separators in the id so the read stays
+		// confined to cyclesDir (no path traversal via a crafted --cycle-id).
+		stateFile := filepath.Join(cyclesDir, fmt.Sprintf("cycle-%s.json", filepath.Base(cycleID)))
+		data, err := os.ReadFile(stateFile) //nolint:gosec // path confined to ~/.rallish/cycles via filepath.Base
 		if err != nil {
 			return fmt.Errorf("cycle not found: %w", err)
 		}

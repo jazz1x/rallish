@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -20,9 +21,18 @@ import (
 	"github.com/jazz1x/rallish/pkg/contract"
 )
 
+// defaultCyclesDir is the relative fallback used when no cycles directory is
+// injected (tests, and any caller that never calls SetCyclesDir). The daemon
+// injects an absolute ~/.rallish/cycles path so that cycle state lives OUTSIDE
+// the worked-on repo — otherwise the broker would dirty the very working tree
+// PreflightGate requires clean, and the path would be coupled to the daemon's
+// CWD (a cron `cycle run --once` started elsewhere could not find it).
+const defaultCyclesDir = "tmp"
+
 // cycleStore holds active cycle sessions in memory, backed by file sync.
 type cycleStore struct {
 	mu            sync.Mutex
+	baseDir       string // directory holding cycle-<id>.json / -ledger.jsonl (SSOT for cycle paths)
 	states        map[string]cycle.State
 	syncs         map[string]*cycle.StateFileSync
 	events        map[string][]chan contract.CycleEvent
@@ -31,11 +41,33 @@ type cycleStore struct {
 
 func newCycleStore() *cycleStore {
 	return &cycleStore{
+		baseDir:       defaultCyclesDir,
 		states:        make(map[string]cycle.State),
 		syncs:         make(map[string]*cycle.StateFileSync),
 		events:        make(map[string][]chan contract.CycleEvent),
 		orchestrating: make(map[string]bool),
 	}
+}
+
+// statePath returns the on-disk path of a cycle's state file. SSOT — every
+// reader/writer of cycle state goes through this so the directory is configured
+// in exactly one place.
+func (cs *cycleStore) statePath(id string) string {
+	return filepath.Join(cs.dir(), fmt.Sprintf("cycle-%s.json", id))
+}
+
+// ledgerPath returns the on-disk path of a cycle's append-only ledger.
+func (cs *cycleStore) ledgerPath(id string) string {
+	return filepath.Join(cs.dir(), fmt.Sprintf("cycle-%s-ledger.jsonl", id))
+}
+
+// dir returns the configured cycles directory, falling back to the relative
+// default when unset (zero-value store in tests).
+func (cs *cycleStore) dir() string {
+	if cs.baseDir == "" {
+		return defaultCyclesDir
+	}
+	return cs.baseDir
 }
 
 // get returns the cycle state from memory, falling back to the file system.
@@ -48,13 +80,13 @@ func (cs *cycleStore) get(id string) (cycle.State, bool) {
 		return s, true
 	}
 	// Memory miss — try filesystem.
-	fs, err := loadCycleFromFile(id)
+	fs, err := loadCycleFromFile(cs.statePath(id))
 	if err != nil || fs.ID == "" {
 		return cycle.State{}, false
 	}
 	cs.states[id] = fs
 	if cs.syncs[id] == nil {
-		cs.syncs[id] = cycle.NewStateFileSync(fmt.Sprintf("tmp/cycle-%s.json", id))
+		cs.syncs[id] = cycle.NewStateFileSync(cs.statePath(id))
 	}
 	return fs, true
 }
@@ -69,13 +101,13 @@ func (cs *cycleStore) put(id string, state cycle.State) {
 func (cs *cycleStore) refreshFromFile(id string) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
-	fs, err := loadCycleFromFile(id)
+	fs, err := loadCycleFromFile(cs.statePath(id))
 	if err != nil || fs.ID == "" {
 		return
 	}
 	cs.states[id] = fs
 	if cs.syncs[id] == nil {
-		cs.syncs[id] = cycle.NewStateFileSync(fmt.Sprintf("tmp/cycle-%s.json", id))
+		cs.syncs[id] = cycle.NewStateFileSync(cs.statePath(id))
 	}
 }
 
@@ -155,7 +187,7 @@ func (s *Server) handleCreateCycle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sync := cycle.NewStateFileSync(fmt.Sprintf("tmp/cycle-%s.json", id))
+	sync := cycle.NewStateFileSync(s.cycleStore.statePath(id))
 	if err := sync.Write(state); err != nil {
 		logger.ErrorContext(ctx, "write initial state", "error", err)
 		http.Error(w, fmt.Sprintf("write state: %v", err), http.StatusInternalServerError)
@@ -210,7 +242,7 @@ func (s *Server) handleCycleLedger(w http.ResponseWriter, r *http.Request) {
 	logger := slog.With("handler", "cycle_ledger")
 
 	id := r.PathValue("id")
-	entries, err := cycle.NewLedgerFileSync(fmt.Sprintf("tmp/cycle-%s-ledger.jsonl", id)).ReadAll()
+	entries, err := cycle.NewLedgerFileSync(s.cycleStore.ledgerPath(id)).ReadAll()
 	if err != nil {
 		logger.ErrorContext(ctx, "read ledger", "cycle_id", id, "error", err)
 		http.Error(w, fmt.Sprintf("read ledger: %v", err), http.StatusInternalServerError)
@@ -423,7 +455,7 @@ func (s *Server) handleOrchestrate(w http.ResponseWriter, r *http.Request) {
 
 	sync, ok := s.cycleStore.syncs[id]
 	if !ok {
-		sync = cycle.NewStateFileSync(fmt.Sprintf("tmp/cycle-%s.json", id))
+		sync = cycle.NewStateFileSync(s.cycleStore.statePath(id))
 		s.cycleStore.syncs[id] = sync
 	}
 
@@ -436,7 +468,7 @@ func (s *Server) handleOrchestrate(w http.ResponseWriter, r *http.Request) {
 	// Reviver guard (G5): refuse to (re)start a cycle the ledger has already
 	// sealed with a sticky halt. The orchestrator enforces the same rule, but
 	// returning 409 here avoids spawning a goroutine that would only halt.
-	ledgerEntries, lerr := cycle.NewLedgerFileSync(fmt.Sprintf("tmp/cycle-%s-ledger.jsonl", id)).ReadAll()
+	ledgerEntries, lerr := cycle.NewLedgerFileSync(s.cycleStore.ledgerPath(id)).ReadAll()
 	if lerr != nil {
 		logger.ErrorContext(ctx, "orchestrate read ledger", "cycle_id", id, "error", lerr)
 		http.Error(w, fmt.Sprintf("read ledger: %v", lerr), http.StatusInternalServerError)
@@ -458,7 +490,7 @@ func (s *Server) handleOrchestrate(w http.ResponseWriter, r *http.Request) {
 	s.cycleStore.mu.Unlock()
 
 	orch := cycle.NewMultiAgentOrchestrator(s.adapterRegistry, sync)
-	orch.SetLedger(cycle.NewLedgerFileSync(fmt.Sprintf("tmp/cycle-%s-ledger.jsonl", id)))
+	orch.SetLedger(cycle.NewLedgerFileSync(s.cycleStore.ledgerPath(id)))
 	orch.SetPipelineFactory(s.pipelineForState)
 	if s.cycleSleeper != nil {
 		orch.SetDriverSleeper(s.cycleSleeper)
@@ -485,13 +517,15 @@ func (s *Server) handleOrchestrate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func loadCycleFromFile(id string) (cycle.State, error) {
-	sync := cycle.NewStateFileSync(fmt.Sprintf("tmp/cycle-%s.json", id))
+// loadCycleFromFile reads a cycle state from an explicit path (the cycleStore
+// owns path construction so the directory is configured in one place).
+func loadCycleFromFile(statePath string) (cycle.State, error) {
+	sync := cycle.NewStateFileSync(statePath)
 	return sync.Read()
 }
 
 func (s *Server) appendLedger(ctx context.Context, id string, entry contract.HarnessLedgerEntry) {
-	ledger := cycle.NewLedgerFileSync(fmt.Sprintf("tmp/cycle-%s-ledger.jsonl", id))
+	ledger := cycle.NewLedgerFileSync(s.cycleStore.ledgerPath(id))
 	if err := ledger.Append(entry); err != nil {
 		slog.With("component", "cycle_ledger").WarnContext(ctx, "append ledger", "cycle_id", id, "error", err)
 	}

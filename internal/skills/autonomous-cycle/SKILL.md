@@ -25,7 +25,7 @@ ssl:
     scenes: [Preflight, CycleLoop, GateCheck, GuardrailHarden, PhilosophySweep, HandoffOrCommit, Reset, WatchRound]
     resumable: true
     branches:
-      - "state file missing → Preflight initializes it"
+      - "state file created by the broker on `cycle new`/`cycle start` (POST /cycles), NOT by Preflight — a daemon must be running to create one"
       - "completed_cycles % 3 == 0 (and > 0) → fresh-agent reset signal"
       - "self-audit violations > 0 → halt=true, surface to user"
       - "SSH auth fails preflight → warning, retry next cycle"
@@ -34,9 +34,9 @@ ssl:
   logical:
     tools: [Bash, Read, Write]
     side_effects:
-      reads: ["tmp/cycle-*.json", "git HEAD", "ssh git@github.com"]
+      reads: ["~/.rallish/cycles/cycle-*.json", "git HEAD", "ssh git@github.com"]
       writes:
-        - "tmp/cycle-*.json (updated each cycle)"
+        - "~/.rallish/cycles/cycle-*.json (updated each cycle)"
         - "git commits (one per cycle, conventional message)"
       deletes: []
 ---
@@ -47,7 +47,7 @@ Overnight autonomous refactor loop that runs inside rallish instead of a single-
 Multi-agent ping-pong is supported: rallish rotates adapters every 3 cycles.
 
 ## Companion files
-- State schema: `tmp/cycle-<id>.json`
+- State schema: `~/.rallish/cycles/cycle-<id>.json`
 - Broker events: `rallish cycle watch --cycle-id <id>`
 - Log stream: `rallish daemon` logs (SSE via `cycle watch`)
 
@@ -55,14 +55,14 @@ Multi-agent ping-pong is supported: rallish rotates adapters every 3 cycles.
 
 ```
 ┌─ Cycle Start ──────────────────────────────────────┐
-│  1. Read tmp/cycle-<id>.json (resume point)        │
+│  1. Read cycle state (resume point)                │
 │  2. Preflight gate (branch, clean, goal, SSH)      │
 │  3. Audit gate (make check-all)                    │
 │  4. Local gates (--local-gate, if configured)      │
 │  5. Philosophy gate (ROP / SSOT / SRP sweep)       │
 │  6. Polish gate (tests, lint, no-raw-ansi)         │
 │  7. Commit gate (conventional message, never amend)│
-│  8. Update tmp/cycle-<id>.json                     │
+│  8. Update cycle state                             │
 │  9. Fresh-agent reset every 3 cycles               │
 └────────────────────────────────────────────────────┘
        ↓ rate-limit / token exhaust
@@ -208,7 +208,7 @@ All agents invoke the same broker endpoints, so state is vendor-neutral.
 - Any gate exits non-zero
 - User requests halt
 
-Halt always writes `halted=true` + `halt_reason` to `tmp/cycle-<id>.json`.
+Halt always writes `halted=true` + `halt_reason` to `~/.rallish/cycles/cycle-<id>.json`.
 
 ## Anti-patterns
 

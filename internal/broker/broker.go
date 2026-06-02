@@ -74,6 +74,15 @@ func (s *Server) SetCyclePipeline(p cycle.Pipeline) {
 	s.cyclePipeline = p
 }
 
+// SetCyclesDir sets the directory where cycle state + ledger files are persisted.
+// The daemon points this at ~/.rallish/cycles so cycle state lives OUTSIDE the
+// repo being worked on (otherwise the broker dirties the working tree that
+// PreflightGate requires clean) and is independent of the daemon's CWD. When
+// unset the store falls back to the relative "tmp" default (tests).
+func (s *Server) SetCyclesDir(dir string) {
+	s.cycleStore.baseDir = dir
+}
+
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)

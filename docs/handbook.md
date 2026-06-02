@@ -255,7 +255,7 @@ rallish cycle status --cycle-id <id>
 rallish cycle halt   --cycle-id <id>
 ```
 
-`cycle run --once` is the exception — it resumes state directly from `tmp/cycle-<id>.json` and does **not** require the daemon.
+`cycle run --once` is the exception — it resumes state directly from `~/.rallish/cycles/cycle-<id>.json` (the SAME location the daemon writes to; override via `--state-dir`, default `~/.rallish/cycles`) and does **not** require the daemon. That path is outside any worked-on repo, so the broker never dirties the working tree PreflightGate requires clean.
 
 **Audit gate:** the built-in audit gate runs `make check-all` by default. Every repo that uses the cycle harness must expose a `make check-all` target, or override it at cycle creation time with `--audit-cmd`:
 

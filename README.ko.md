@@ -275,6 +275,8 @@ rallish cycle new --goal "테스트 수정" --branch feat/fix \
 rallish cycle run --once --cycle-id <id>       # 데몬 불필요 — 파일에서 직접 재개
 ```
 
+`cycle run --once`는 상태를 `~/.rallish/cycles/cycle-<id>.json`(데몬이 기록하는 바로 그 위치, `--state-dir`로 변경 가능, 기본 `~/.rallish/cycles`)에서 직접 재개하므로 브로커가 필요 없습니다. 이 경로는 작업 중인 리포 **밖**에 있어, 브로커가 Preflight가 요구하는 클린 워킹 트리를 더럽히지 않습니다.
+
 오디트 게이트는 기본적으로 `make check-all`을 실행합니다. `--audit-cmd`가 공백만 포함하면 오류로 처리되며 기본값으로 자동 되돌아가지 않습니다.
 
 폴리시 게이트는 기본적으로 `go test -race ./...`를 실행합니다. `--polish-test-cmd`로 프로젝트별 명령을 지정할 수 있습니다. 공백만 포함하면 오류로 처리됩니다. `scripts/check-no-raw-ansi.sh` 검사는 rallish 저장소 전용이며, 해당 스크립트가 없는 저장소에서는 자동으로 건너뜁니다 (오류 아님).

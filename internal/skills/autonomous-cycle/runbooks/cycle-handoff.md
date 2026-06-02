@@ -21,7 +21,7 @@ rallish cycle watch --cycle-id <id> --log-file tmp/watch.log
 
 1. **Check halt reason**
    ```bash
-   cat tmp/cycle-*.json | jq '.halted, .halt_reason, .completed_cycles'
+   cat ~/.rallish/cycles/cycle-*.json | jq '.halted, .halt_reason, .completed_cycles'
    ```
 
 2. **Review commits**
@@ -31,7 +31,7 @@ rallish cycle watch --cycle-id <id> --log-file tmp/watch.log
 
 3. **Check violations**
    ```bash
-   cat tmp/cycle-*.json | jq '.violations_found'
+   cat ~/.rallish/cycles/cycle-*.json | jq '.violations_found'
    ```
 
 4. **Resume or restart**
@@ -40,7 +40,7 @@ rallish cycle watch --cycle-id <id> --log-file tmp/watch.log
 
 ## State Schema
 
-`tmp/cycle-<id>.json` fields:
+`~/.rallish/cycles/cycle-<id>.json` fields:
 - `id`: unique cycle identifier
 - `phase`: current phase (`preflight`, `audit`, `philosophy`, `polish`, `commit`, `handoff`, `halted`)
 - `completed_cycles`: finished cycle count
@@ -81,6 +81,6 @@ Handoff data (keep under 2 KB):
 
 ## Recovery
 
-- **Corrupt JSON**: Delete `tmp/cycle-<id>.json`, restart with `rallish trigger "자율 사이클"`
+- **Corrupt JSON**: Delete `~/.rallish/cycles/cycle-<id>.json`, restart with `rallish trigger "자율 사이클"`
 - **Daemon not running**: `rallish daemon` (or script auto-starts it)
-- **Lost cycle ID**: `ls tmp/cycle-*.json` or `git log --grep="autonomous-cycle"`
+- **Lost cycle ID**: `ls ~/.rallish/cycles/cycle-*.json` or `git log --grep="autonomous-cycle"`

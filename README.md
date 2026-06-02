@@ -310,7 +310,7 @@ rallish cycle new --goal "fix tests" --branch feat/fix \
   --polish-test-cmd "npm test"   # or "cargo test", "pytest", etc.
 ```
 
-An empty or whitespace-only `--polish-test-cmd` is a misconfiguration and fails loudly. The `scripts/check-no-raw-ansi.sh` check inside the polish gate is rallish-repo-specific and is silently skipped when the script is not present in the target repository (not applicable, not an error). `cycle run --once` is the daemon-free path: it resumes persisted state directly from `tmp/cycle-<id>.json` without the broker.
+An empty or whitespace-only `--polish-test-cmd` is a misconfiguration and fails loudly. The `scripts/check-no-raw-ansi.sh` check inside the polish gate is rallish-repo-specific and is silently skipped when the script is not present in the target repository (not applicable, not an error). `cycle run --once` is the daemon-free path: it resumes persisted state directly from `~/.rallish/cycles/cycle-<id>.json` — the SAME directory the daemon writes to, so a broker-created cycle and a broker-free re-trigger share state. Override with `--state-dir`. The state lives outside the worked-on repo, so the cycle never dirties the working tree its own preflight requires clean.
 
 ### 7. Daemon lifecycle
 

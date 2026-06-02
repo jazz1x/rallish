@@ -32,8 +32,18 @@ func RunDaemon(ctx context.Context, homeDir string, shutdown <-chan struct{}) er
 		return fmt.Errorf("create session store: %w", err)
 	}
 
+	// Cycle state + ledger live under ~/.rallish/cycles — OUTSIDE any worked-on
+	// repo (so the broker never dirties the tree PreflightGate requires clean) and
+	// independent of CWD (so a cron `cycle run --once --state-dir ~/.rallish/cycles`
+	// resolves the same files the daemon wrote).
+	cyclesDir := filepath.Join(sockDir, "cycles")
+	if err := os.MkdirAll(cyclesDir, 0o700); err != nil {
+		return fmt.Errorf("create cycles dir: %w", err)
+	}
+
 	budgeter := budget.NewBudgeter(clock)
 	srv := broker.NewServer(store, budgeter)
+	srv.SetCyclesDir(cyclesDir)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
