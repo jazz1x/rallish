@@ -58,6 +58,17 @@ func CycleNewCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("get home dir: %w", err)
 			}
+			// An explicitly passed but empty/whitespace-only override is a
+			// misconfiguration. omitempty would erase an empty string on the
+			// wire, making "passed empty" indistinguishable from "unset", so we
+			// reject it here at the CLI boundary where cobra can still tell them
+			// apart. Leaving the flag unset uses the documented default.
+			if err := rejectBlankOverride(cmd, "audit-cmd", auditCmd); err != nil {
+				return err
+			}
+			if err := rejectBlankOverride(cmd, "polish-test-cmd", polishTestCmd); err != nil {
+				return err
+			}
 			return runCycleNew(cmd.Context(), home, goal, branch, maxCycles, maxDurationMinutes, autoGoal, agents, workingDir, localGates, auditCmd, polishTestCmd, cmd.OutOrStdout())
 		},
 	}
@@ -73,6 +84,22 @@ func CycleNewCmd() *cobra.Command {
 	cmd.Flags().StringVar(&polishTestCmd, "polish-test-cmd", "", "Override the polish gate test command (default: go test -race ./...); e.g. 'npm test', 'cargo test'")
 	_ = cmd.MarkFlagRequired("goal")
 	return cmd
+}
+
+// rejectBlankOverride fails loudly when a gate-command override flag was
+// explicitly passed but trims to empty. cobra's Changed reports whether the
+// flag appeared on the command line, which distinguishes "passed empty"
+// (--audit-cmd ” or '   ') from "unset" — the latter is allowed and uses the
+// documented default. This honours the README promise that an empty or
+// whitespace-only override fails loudly with no silent fallback to the default.
+func rejectBlankOverride(cmd *cobra.Command, flagName, value string) error {
+	if !cmd.Flags().Changed(flagName) {
+		return nil
+	}
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("--%s was set but is empty or whitespace-only; provide a command (e.g. 'npm test') or omit the flag to use the default", flagName)
+	}
+	return nil
 }
 
 // CycleStatusCmd returns the `cycle status` subcommand.
