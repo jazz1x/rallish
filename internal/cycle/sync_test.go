@@ -3,6 +3,7 @@ package cycle
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/jazz1x/rallish/pkg/contract"
@@ -71,6 +72,65 @@ func TestStateFileSyncCorruptPrimaryNoBackupErrors(t *testing.T) {
 	if _, err := sync.Read(); err == nil {
 		t.Fatal("expected an error when both primary and backup are corrupt, got nil")
 	}
+}
+
+// TestStateFileSyncConcurrentWriteReadNeverBlanks is the regression for the
+// atomicity defect: with a fixed .tmp name and a rename-to-.bak-before-write
+// window, the primary file briefly vanished, so a concurrent Read() returned a
+// zero State with a nil error, and two writers' shared .tmp collided so one
+// rename failed. The fix uses a unique temp + a single atomic rename + a
+// per-syncer mutex. After the fix, every concurrent Write must succeed and
+// every concurrent Read must observe a fully-populated state — never a blanked
+// one. False-positive guard: the same syncer is exercised single-threaded first
+// to prove the valid round-trip is intact, so the test cannot pass merely by
+// the readers never running.
+func TestStateFileSyncConcurrentWriteReadNeverBlanks(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "cycle.json")
+	syncer := NewStateFileSync(tmp)
+
+	state, _ := NewState(contract.NewCycleRequest{Goal: "feat: concurrent", MaxCycles: 50}, "cyc_concurrent")
+
+	// Guard: prove the valid single-threaded round-trip is NOT broken before
+	// asserting the concurrent invariant — otherwise a no-op Read could pass.
+	if err := syncer.Write(state); err != nil {
+		t.Fatalf("seed write: %v", err)
+	}
+	if got, err := syncer.Read(); err != nil || got.ID != "cyc_concurrent" {
+		t.Fatalf("seed read = (%#v, %v), want id cyc_concurrent, nil", got.CycleState, err)
+	}
+
+	const writers, reads = 4, 200
+	var wg sync.WaitGroup
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			st := state
+			st.CompletedCycles = n
+			if err := syncer.Write(st); err != nil {
+				t.Errorf("concurrent write %d: %v", n, err)
+			}
+		}(w)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < reads; i++ {
+			got, err := syncer.Read()
+			if err != nil {
+				t.Errorf("concurrent read: %v", err)
+				return
+			}
+			// The primary must never be absent mid-write: a present cycle always
+			// has its ID. A blank ID with a nil error is exactly the swallowed
+			// zero-State bug.
+			if got.ID != "cyc_concurrent" {
+				t.Errorf("concurrent read observed blanked state: id=%q", got.ID)
+				return
+			}
+		}
+	}()
+	wg.Wait()
 }
 
 // TestStateFileSyncMissingFileIsZeroState confirms the resume entry point for a
