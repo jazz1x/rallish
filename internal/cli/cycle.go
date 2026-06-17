@@ -551,6 +551,11 @@ func runCycleNext(ctx context.Context, home, cycleID, goal string, out io.Writer
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("step cycle failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+
 	var state contract.CycleState
 	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
 		return fmt.Errorf("decode response: %w", err)
@@ -585,6 +590,11 @@ func runCycleHalt(ctx context.Context, home, cycleID, reason string, out io.Writ
 		return fmt.Errorf("post halt: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("halt cycle failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
 
 	var state contract.CycleState
 	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
