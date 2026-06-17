@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -516,6 +518,70 @@ func TestBrokerOrchestrateEndToEnd(t *testing.T) {
 	}
 	if final.Halted {
 		t.Fatal("expected not halted after max cycles")
+	}
+}
+
+// TestCycleSyncsMapConcurrentAccess drives the real cycle handlers concurrently
+// to assert the syncs map is never touched outside cs.mu. handleCreateCycle
+// writes syncs (putSync) while handleGetCycle on a memory-miss id makes cs.get()
+// mutate the same map under the lock. Run under -race this would report
+// `DATA RACE` (and risk `fatal error: concurrent map writes`) if any handler
+// reached s.cycleStore.syncs directly instead of via the locked accessors.
+func TestCycleSyncsMapConcurrentAccess(t *testing.T) {
+	srv := newTestBroker(t)
+	srv.SetCyclesDir(t.TempDir())
+
+	const workers = 16
+	var wg sync.WaitGroup
+	wg.Add(workers * 2)
+
+	for i := 0; i < workers; i++ {
+		// Writer: POST /cycles -> handleCreateCycle -> putSync(id, sync).
+		go func(n int) {
+			defer wg.Done()
+			body, _ := json.Marshal(contract.NewCycleRequest{
+				Goal:      "feat: race writer",
+				Branch:    fmt.Sprintf("feat/race-%d", n),
+				MaxCycles: 1,
+			})
+			req := httptest.NewRequest(http.MethodPost, "/cycles", bytes.NewReader(body))
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+		}(i)
+
+		// Reader: GET /cycles/{miss} -> handleGetCycle -> cs.get() mutates syncs.
+		// Unknown ids force the memory-miss filesystem path that writes the map
+		// under cs.mu, racing the writers above on the shared map header.
+		go func(n int) {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/cycles/miss_%d", n), nil)
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+		}(i)
+	}
+	wg.Wait()
+
+	// False-positive guard: the locked accessors must not have broken the happy
+	// path. A fresh create still returns 201, and the sync it registers must be
+	// retrievable via getSync (proving putSync actually stored it, not that the
+	// race merely disappeared because writes were dropped).
+	body, _ := json.Marshal(contract.NewCycleRequest{
+		Goal:      "feat: guard",
+		Branch:    "feat/guard",
+		MaxCycles: 1,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/cycles", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("guard create status = %d, want 201", rec.Code)
+	}
+	var created contract.CycleState
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("guard unmarshal: %v", err)
+	}
+	if _, ok := srv.cycleStore.getSync(created.ID); !ok {
+		t.Fatalf("getSync(%q) = false, want registered sync after create", created.ID)
 	}
 }
 

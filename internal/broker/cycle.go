@@ -97,6 +97,24 @@ func (cs *cycleStore) put(id string, state cycle.State) {
 	cs.states[id] = state
 }
 
+// getSync returns the registered StateFileSync for a cycle, if any. Locked
+// because the syncs map is also mutated under cs.mu by get/refreshFromFile/closeAll.
+func (cs *cycleStore) getSync(id string) (*cycle.StateFileSync, bool) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	sync, ok := cs.syncs[id]
+	return sync, ok
+}
+
+// putSync registers a StateFileSync for a cycle. Mirrors put(): every syncs
+// map access goes through cs.mu so the daemon's per-request goroutines never
+// write the map concurrently.
+func (cs *cycleStore) putSync(id string, sync *cycle.StateFileSync) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.syncs[id] = sync
+}
+
 // refreshFromFile re-reads the state from disk and updates the in-memory cache.
 func (cs *cycleStore) refreshFromFile(id string) {
 	cs.mu.Lock()
@@ -195,7 +213,7 @@ func (s *Server) handleCreateCycle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.cycleStore.put(id, state)
-	s.cycleStore.syncs[id] = sync
+	s.cycleStore.putSync(id, sync)
 	s.appendLedger(ctx, id, contract.NewHarnessLedgerEntry(
 		time.Now().UnixMilli(),
 		id,
@@ -315,7 +333,7 @@ func (s *Server) handleStepCycle(w http.ResponseWriter, r *http.Request) {
 		s.appendLedger(ctx, id, contract.NewGateLedgerEntry(time.Now().UnixMilli(), id, report))
 	}
 
-	if sync, ok := s.cycleStore.syncs[id]; ok {
+	if sync, ok := s.cycleStore.getSync(id); ok {
 		_ = sync.Write(state)
 	}
 	s.cycleStore.put(id, state)
@@ -355,7 +373,7 @@ func (s *Server) handleHaltCycle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	halted := state.Halt(reason).Value()
-	if sync, ok := s.cycleStore.syncs[id]; ok {
+	if sync, ok := s.cycleStore.getSync(id); ok {
 		_ = sync.Write(halted)
 		_ = sync.Remove() // prevent zombie resurrection after halt
 	}
@@ -453,10 +471,10 @@ func (s *Server) handleOrchestrate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sync, ok := s.cycleStore.syncs[id]
+	sync, ok := s.cycleStore.getSync(id)
 	if !ok {
 		sync = cycle.NewStateFileSync(s.cycleStore.statePath(id))
-		s.cycleStore.syncs[id] = sync
+		s.cycleStore.putSync(id, sync)
 	}
 
 	if s.adapterRegistry == nil {
