@@ -57,3 +57,27 @@ pre-push:
     mod-verify:
       run: PATH="$PWD/.toolchain/go/bin:$PWD/.toolchain/bin:$PATH" go mod verify
       fail_text: "go mod verify failed — module cache tampered or go.sum mismatch; run 'go clean -modcache && go mod download' to restore"
+    # Secret scan before push. Skip-if-absent (not a hard dependency): if gitleaks
+    # is not installed locally the hook prints how to get it and passes — the CI
+    # `gitleaks` job is the always-on gate. Only a real finding (gitleaks exit
+    # code 1) aborts the push; a usage/version error does NOT block (it warns and
+    # passes, so a CLI-flag drift can never permanently wedge pushes — CI remains
+    # authoritative). --no-banner --redact keeps output quiet and never echoes a
+    # secret. `gitleaks detect` is the invocation common to all 8.x releases.
+    gitleaks:
+      run: |
+        if ! command -v gitleaks >/dev/null 2>&1; then
+          echo "ℹ gitleaks not installed — skipping local secret scan (CI still enforces it). Install: brew install gitleaks"
+          exit 0
+        fi
+        gitleaks detect --source . --redact --no-banner
+        code=$?
+        if [ "$code" -eq 1 ]; then
+          echo "❌ gitleaks found a potential secret — push aborted (finding above, value redacted)"
+          exit 1
+        fi
+        if [ "$code" -ne 0 ]; then
+          echo "ℹ gitleaks exited $code (not a finding — likely a CLI/flag mismatch). CI gitleaks remains authoritative; not blocking push."
+        fi
+        exit 0
+      fail_text: "gitleaks found a potential secret — push aborted"

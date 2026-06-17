@@ -335,7 +335,21 @@ See [Installation](#installation) for the one-time setup.
 - Preset files are validated for path traversal before loading.
 - `forbidigo` lint rules ban `os.Environ()` and `exec.Command("sh"…)`
   in library code (see DESIGN.md §14).
-- `govulncheck` runs on every push/PR.
+- CI security pipeline (every push/PR) runs four complementary scanners,
+  each on a distinct axis so none is redundant:
+  - **govulncheck** — Go-call-graph-aware CVEs in the source + deps.
+  - **trivy** (`fs`) — CVEs in the dependency tree + misconfiguration +
+    secret detection; fails on HIGH/CRITICAL with an available fix
+    (`ignore-unfixed`); `.toolchain`/`dist` skipped, `.trivyignore` for
+    documented risk acceptances.
+  - **gitleaks** — secret scanning over the working tree AND full git
+    history; `.gitleaks.toml` allowlists synthetic test fixtures.
+  - **arch-guard** — `go test ./internal/arch/`: the external deny-list
+    (no scheduler/cron/graph-DB) and the clean-architecture layer
+    invariants (contract is the SSOT leaf; no inner→outer import).
+- Locally, `lefthook` pre-push runs gitleaks when installed
+  (skip-if-absent — CI is authoritative); install with `brew install
+  gitleaks` (and `trivy`) to scan before pushing.
 - Release artifacts carry SBOMs (SPDX-JSON, via syft) and cosign
   keyless signatures.
 
