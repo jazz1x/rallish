@@ -30,6 +30,18 @@ var ErrTooFewParticipants = errors.New("rally: at least two participants require
 // ErrSelfHandoff is returned when a participant passes the baton to themselves via handoff_to.
 var ErrSelfHandoff = errors.New("rally: cannot hand off the baton to yourself")
 
+// ErrSessionInterrupted is returned when an operation is requested on a rally
+// session that has already been interrupted (e.g. by daemon shutdown).
+var ErrSessionInterrupted = errors.New("rally: session interrupted")
+
+// ErrAlreadyConnected is returned when a participant tries to open a second
+// baton SSE stream while another is still registered.
+var ErrAlreadyConnected = errors.New("rally: participant already connected")
+
+// ErrHandoffToNotMember is returned when handoff_to names a participant that is
+// not part of the session.
+var ErrHandoffToNotMember = errors.New("rally: handoff_to is not a session participant")
+
 // Cycle errors.
 var (
 	// ErrInvalidCyclePhase is returned when a cycle phase string is not recognised.
