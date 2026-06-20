@@ -61,7 +61,7 @@ func RallyNewCmd() *cobra.Command {
 	cmd.Flags().StringVar(&participants, "participants", "", "Comma-separated participant names (required)")
 	cmd.Flags().StringVar(&repo, "repo", "", "Repository path (optional)")
 	cmd.Flags().StringVar(&task, "task", "", "Task description (optional)")
-	cmd.Flags().StringVar(&firstHolder, "first", "", "Pre-assign baton to this participant at create time")
+	cmd.Flags().StringVar(&firstHolder, "first", "", "Pre-assign baton to this participant at create time (if omitted, the first listed participant must join to start the session)")
 	_ = cmd.MarkFlagRequired("participants")
 	return cmd
 }
@@ -416,8 +416,11 @@ func runRallyDone(ctx context.Context, homeDir, sessionID, as, note, handoffTo s
 		return nil
 	case http.StatusConflict:
 		body, _ := io.ReadAll(resp.Body)
-		// Extract the holder from the error message if possible.
 		msg := strings.TrimSpace(string(body))
+		if strings.Contains(msg, contract.ErrSessionInterrupted.Error()) {
+			_, _ = fmt.Fprintf(out, "session interrupted — %s\n", msg)
+			return fmt.Errorf("session interrupted")
+		}
 		_, _ = fmt.Fprintf(out, "not your turn — %s\n", msg)
 		return fmt.Errorf("not your turn")
 	default:
