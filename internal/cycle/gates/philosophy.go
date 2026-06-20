@@ -100,18 +100,22 @@ func forEachAddedLine(diff string, onFileBoundary func(file string), fn func(add
 	for _, line := range strings.Split(diff, "\n") {
 		switch {
 		case strings.HasPrefix(line, "diff --git"):
-			// "diff --git a/<path> b/<path>": take the b/ side (the new file),
-			// which is parts[3]; fall back to parts[2] with a/ or b/ stripped.
-			parts := strings.Fields(line)
-			switch {
-			case len(parts) >= 4:
-				file = strings.TrimPrefix(parts[3], "b/")
-			case len(parts) >= 3:
-				file = strings.TrimPrefix(strings.TrimPrefix(parts[2], "a/"), "b/")
-			}
+			// Header marks a new file: reset the line counter and fire the
+			// boundary hook. The authoritative new-file path is read from the
+			// "+++ b/<path>" marker below (git emits it whole and unquoted, so
+			// paths with spaces survive); deriving it from this line via
+			// strings.Fields would split spaced paths into the wrong token.
+			file = newFileFromGitHeader(line)
 			lineNo = 0
 			if onFileBoundary != nil {
 				onFileBoundary(file)
+			}
+		case strings.HasPrefix(line, "+++ "):
+			// "+++ b/<path>" names the new file exactly (a trailing tab is
+			// appended when the path contains spaces); "+++ /dev/null" marks a
+			// deletion, which has no new file — leave the header-derived name.
+			if p := strings.TrimPrefix(line, "+++ b/"); p != line {
+				file = strings.TrimRight(p, "\t")
 			}
 		case strings.HasPrefix(line, "@@"):
 			// The hunk header names the first new-file line; the next added line
@@ -122,6 +126,20 @@ func forEachAddedLine(diff string, onFileBoundary func(file string), fn func(add
 			fn(addedLine{file: file, no: lineNo, text: line})
 		}
 	}
+}
+
+// newFileFromGitHeader extracts the new-file path from a "diff --git a/<old>
+// b/<new>" header. It splits on the " b/" separator rather than on whitespace so
+// that paths containing spaces (which git emits unquoted) stay intact. The
+// "+++ b/<path>" marker is the primary source of the path during the walk; this
+// is the provisional value used for the file-boundary hook before that marker is
+// seen, and the fallback for diffs that carry no "+++" line.
+func newFileFromGitHeader(line string) string {
+	rest := strings.TrimPrefix(line, "diff --git ")
+	if i := strings.Index(rest, " b/"); i >= 0 {
+		return rest[i+len(" b/"):]
+	}
+	return ""
 }
 
 // parseHunkStart extracts the new-file starting line from a hunk header

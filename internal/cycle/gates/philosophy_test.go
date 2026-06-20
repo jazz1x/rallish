@@ -121,6 +121,74 @@ func TestPhilosophyScannerSkipsTestFiles(t *testing.T) {
 	}
 }
 
+// TestForEachAddedLineSpacedPath guards path attribution for files whose names
+// contain spaces. Git emits such paths UNQUOTED in the "diff --git" header
+// (e.g. `diff --git a/dir/my file.go b/dir/my file.go`) and appends a trailing
+// tab to the "+++ b/<path>" marker. A whitespace split of the header would
+// mis-resolve the file to the path's second word ("file.go"); the walker must
+// instead recover the FULL path from the "+++ b/" marker. Impact is the
+// Violation.File display string only, but a wrong filename misdirects the
+// operator, so this pins exact attribution.
+func TestForEachAddedLineSpacedPath(t *testing.T) {
+	const path = "dir/my file.go"
+	// Mirror git's real output: header with the unquoted spaced path on both
+	// sides, a "+++ b/<path>" marker with the trailing tab git appends, and a hunk.
+	diff := strings.Join([]string{
+		"diff --git a/" + path + " b/" + path,
+		"--- a/" + path + "\t",
+		"+++ b/" + path + "\t",
+		"@@ -1 +1,2 @@",
+		" package x",
+		"+var A = 1",
+	}, "\n")
+
+	var got []string
+	forEachAddedLine(diff, nil, func(a addedLine) { got = append(got, a.file) })
+
+	if len(got) != 1 {
+		t.Fatalf("added lines = %d, want 1: %#v", len(got), got)
+	}
+	if got[0] != path {
+		t.Fatalf("file = %q, want %q (spaced path must survive intact, not be split on whitespace)", got[0], path)
+	}
+}
+
+// TestPhilosophyScannerSkipsSpacedTestFile is the false-positive guard for the
+// spaced-path fix: the _test.go carve-out in scanHardcodedVersions keys off the
+// resolved file name, so it must still hold when that name contains a space.
+// (A regression here would FLAG version literals in spaced test fixtures.)
+func TestPhilosophyScannerSkipsSpacedTestFile(t *testing.T) {
+	const path = "dir/my fixture_test.go"
+	diff := strings.Join([]string{
+		"diff --git a/" + path + " b/" + path,
+		"--- a/" + path + "\t",
+		"+++ b/" + path + "\t",
+		"@@ -1 +1,2 @@",
+		" package x",
+		`+want := "1.2.3"`,
+	}, "\n")
+	if vs := scanHardcodedVersions(diff); len(vs) != 0 {
+		t.Fatalf("scanHardcodedVersions must skip a spaced _test.go file, got: %#v", vs)
+	}
+}
+
+// TestNewFileFromGitHeader pins the header fallback used before the "+++ b/"
+// marker is seen (and for diffs lacking that marker): it must split on " b/",
+// not whitespace, so spaced new-file paths are recovered whole.
+func TestNewFileFromGitHeader(t *testing.T) {
+	cases := map[string]string{
+		"diff --git a/svc.go b/svc.go":                 "svc.go",
+		"diff --git a/dir/my file.go b/dir/my file.go": "dir/my file.go",
+		"diff --git a/pkg/x.go b/pkg/x.go":             "pkg/x.go",
+		"diff --git nonsense":                          "", // no " b/" separator
+	}
+	for header, want := range cases {
+		if got := newFileFromGitHeader(header); got != want {
+			t.Errorf("newFileFromGitHeader(%q) = %q, want %q", header, got, want)
+		}
+	}
+}
+
 // TestParseHunkStart pins the hunk-header parser shared by every scanner
 // (the +c value of "@@ -a,b +c,d @@"), including the comma-less single-line form.
 func TestParseHunkStart(t *testing.T) {
