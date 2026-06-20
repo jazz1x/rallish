@@ -1,0 +1,30 @@
+# gitleaks configuration for rallish.
+#
+# Extends the upstream default ruleset (do NOT redefine rules — `useDefault`
+# pulls in gitleaks' maintained signatures) and adds an allowlist for this
+# repo's deliberate, non-secret token-shaped strings: security-test fixtures,
+# ed25519 key material generated at test time, and the secret-DETECTION patterns
+# the harness itself ships (it must contain example patterns to match against).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "rallish non-secret fixtures and self-referential detection patterns"
+paths = [
+  # Security-feature tests construct token/secret-shaped values as test inputs;
+  # they are synthetic, never real credentials.
+  '''pkg/contract/secret_containment_test\.go''',
+  '''pkg/contract/agent_card_sign_test\.go''',
+  '''pkg/contract/action_gate_test\.go''',
+  '''internal/cli/gate_test\.go''',
+  # The secret-containment policy + action gate ship example detection patterns
+  # (e.g. the regexes they match against) — pattern strings, not live secrets.
+  '''pkg/contract/secret_containment\.go''',
+  '''pkg/contract/action_gate\.go''',
+]
+# Allow ed25519 public keys (non-secret by definition) and obviously-synthetic
+# test material. Real private keys are still caught by the default rules outside
+# the allowlisted paths.
+regexes = [
+  '''EdDSA''',
+]

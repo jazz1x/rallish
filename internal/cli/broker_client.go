@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -43,8 +44,20 @@ func resolveBrokerClient(homeDir string, connectTimeout time.Duration) (brokerCl
 	portFile := filepath.Join(sockDir, "port")
 	port, err := readPortFile(portFile)
 	if err != nil {
-		return brokerClient{}, fmt.Errorf("broker not running (no socket or port file): %w", err)
+		return brokerClient{}, fmt.Errorf("broker not running — start it first with: rallish daemon (no socket or port file): %w", err)
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%s", strings.TrimSpace(port))
+	addr := "127.0.0.1:" + port
+	// The port file survives a non-graceful daemon death (kill -9, OOM, reboot):
+	// daemon.go only removes it after a graceful httpSrv.Serve return. Probe the
+	// port before handing back a client, otherwise callers surface a cryptic
+	// "connection refused" instead of the clean missing-broker message. On a dead
+	// port, remove the stale file so the next invocation auto-spawns cleanly.
+	conn, derr := net.DialTimeout("tcp", addr, 300*time.Millisecond)
+	if derr != nil {
+		_ = os.Remove(portFile)
+		return brokerClient{}, fmt.Errorf("broker not running — start it first with: rallish daemon (stale port file removed): %w", derr)
+	}
+	_ = conn.Close()
+	url := "http://" + addr
 	return brokerClient{URL: url, Client: &http.Client{Timeout: connectTimeout}}, nil
 }

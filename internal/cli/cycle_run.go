@@ -164,10 +164,14 @@ Exit codes:
 			if !once {
 				return fmt.Errorf("cycle run requires --once (the only supported, bounded mode; this is not a watch loop)")
 			}
+			resolvedStateDir, err := resolveStateDir(stateDir)
+			if err != nil {
+				return err
+			}
 			opts := runOnceOptions{
 				cycleID:          cycleID,
 				goal:             goal,
-				stateDir:         stateDir,
+				stateDir:         resolvedStateDir,
 				maxLifetimeTurns: maxLifetimeTurns,
 				stepTimeout:      stepTimeout,
 				agents:           agents,
@@ -179,7 +183,7 @@ Exit codes:
 	}
 	cmd.Flags().StringVar(&cycleID, "cycle-id", "", "Cycle ID to advance (required)")
 	cmd.Flags().StringVar(&goal, "goal", "", "Override next_cycle_goal for this single pass")
-	cmd.Flags().StringVar(&stateDir, "state-dir", "tmp", "Directory holding cycle-<id>.json and cycle-<id>-ledger.jsonl")
+	cmd.Flags().StringVar(&stateDir, "state-dir", "", "Directory holding cycle-<id>.json and cycle-<id>-ledger.jsonl (default: ~/.rallish/cycles, where the daemon writes them)")
 	cmd.Flags().BoolVar(&once, "once", false, "Run a single bounded pass then exit (required)")
 	cmd.Flags().IntVar(&maxLifetimeTurns, "max-lifetime-turns", 0, "Hard ceiling on agent turns summed across revivals (0 = unlimited)")
 	cmd.Flags().DurationVar(&stepTimeout, "step-timeout", 10*time.Minute, "Maximum duration for the single gated step")
@@ -188,30 +192,35 @@ Exit codes:
 	return cmd
 }
 
+// CyclesDir returns the SSOT directory where cycle state + ledger files live:
+// ~/.rallish/cycles. This is the SAME location the daemon writes to (see
+// RunDaemon), so a broker-created cycle and a broker-free `cycle run --once`
+// resolve the same files — and it sits OUTSIDE any worked-on repo, so the
+// broker never dirties the working tree PreflightGate requires clean.
+func CyclesDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir for cycles state: %w", err)
+	}
+	return filepath.Join(home, ".rallish", "cycles"), nil
+}
+
+// resolveStateDir returns the explicit --state-dir when provided, else the
+// default ~/.rallish/cycles. ROP: an unresolvable home is a hard error, never a
+// silent fallback to a relative path the daemon would not share.
+func resolveStateDir(flag string) (string, error) {
+	if strings.TrimSpace(flag) != "" {
+		return flag, nil
+	}
+	return CyclesDir()
+}
+
 // buildCLIPipeline is the default gate pipeline for the local one-shot, mirroring
 // the broker's standard pipeline plus any repo-local gates appended after audit.
+// It honours state.AuditCmd to override the default `make check-all` command and
+// state.PolishTestCmd to override the default `go test -race ./...` test command.
 func buildCLIPipeline(state cycle.State) cycle.Pipeline {
-	base := cycle.Pipeline{
-		gates.PreflightGate{},
-		gates.AuditGate{},
-		gates.PhilosophyGate{},
-		gates.PolishGate{},
-		gates.CommitGate{},
-	}
-	if len(state.LocalGates) == 0 {
-		return base
-	}
-	pipeline := make(cycle.Pipeline, 0, len(base)+len(state.LocalGates))
-	for _, gate := range base {
-		pipeline = append(pipeline, gate)
-		if gate.Name() != "audit" {
-			continue
-		}
-		for _, rawCmd := range state.LocalGates {
-			pipeline = append(pipeline, gates.CommandGate{RawCmd: rawCmd})
-		}
-	}
-	return pipeline
+	return gates.StandardPipeline(state.AuditCmd, state.PolishTestCmd, state.LocalGates)
 }
 
 // runOnceOptions bundles the inputs to a single bounded pass. pipeline and
@@ -257,9 +266,10 @@ func runCycleOnce(ctx context.Context, opts runOnceOptions, out io.Writer) error
 
 	// An already-halted cycle: report its sticky reason and exit with that code.
 	// Do not re-run a sealed cycle (zombie prevention is the orchestrator's job;
-	// here we simply surface the terminal reason for the scheduler).
+	// here we simply surface the terminal reason for the scheduler). No live gate
+	// report is in hand on this path, so there is no per-gate detail to surface.
 	if state.Halted {
-		return reportHalt(state.HaltReason, statePath, out)
+		return reportHalt(state.HaltReason, "", statePath, out)
 	}
 
 	// Terminal-but-not-halted: max cycles / duration reached. Nothing to do.
@@ -280,7 +290,8 @@ func runCycleOnce(ctx context.Context, opts runOnceOptions, out io.Writer) error
 	}
 	if reason, sealed := cycle.LedgerSealsResume(entries); sealed {
 		// Already sealed by a prior halt with no later progress — refuse to revive.
-		return reportHalt(reason, statePath, out)
+		// The original gate report is not re-derivable here; only the reason persists.
+		return reportHalt(reason, "", statePath, out)
 	}
 
 	// Optional per-pass goal override, applied before either path runs: in the
@@ -305,14 +316,21 @@ func runCycleOnce(ctx context.Context, opts runOnceOptions, out io.Writer) error
 	// bare gated step. A halt seals a cycle_halted entry so the next invocation's
 	// reviver guard stays sticky.
 	if reason, stuck := cycle.Stuck(entries); stuck {
-		return haltOnce(stateSync, ledger, state, reason, statePath, out)
+		// Anti-spin breaker, not a gate report — the reason itself is the detail.
+		return haltOnce(stateSync, ledger, state, reason, "", statePath, out)
 	}
 	if budget.ExceedsLifetimeCeiling(entries, opts.maxLifetimeTurns) {
-		return haltOnce(stateSync, ledger, state, contract.HaltBudgetExceeded, statePath, out)
+		return haltOnce(stateSync, ledger, state, contract.HaltBudgetExceeded, "", statePath, out)
 	}
 
 	driver := cycle.NewCycleDriver(stateSync)
 	driver.SetPipeline(opts.pipeline(state))
+	// Inject the ledger so a successful gated Step records the verifier-produced
+	// completion (gate_passed + validation_green + cycle_completed). Without this
+	// the reference one-shot would advance silently and a later halt could never
+	// be revived (B1: the reviver keys on validation_green). The --agents path
+	// already injects the ledger via orch.SetLedger.
+	driver.SetLedger(ledger)
 	if opts.stepTimeout > 0 {
 		driver.StepTimeout = opts.stepTimeout
 	}
@@ -321,7 +339,7 @@ func runCycleOnce(ctx context.Context, opts runOnceOptions, out io.Writer) error
 	if result.IsFailure() {
 		var he *cycle.HaltedError
 		if errors.As(result.Err(), &he) {
-			return haltOnce(stateSync, ledger, result.Value(), he.Reason, statePath, out)
+			return haltOnce(stateSync, ledger, result.Value(), he.Reason, failedStderr(he.Reports), statePath, out)
 		}
 		// A non-halt operational failure (e.g. missing goal): propagate as a plain
 		// error → the root command's generic exit 1, not a halt code.
@@ -381,8 +399,9 @@ func runCycleOnceAgents(
 		if errors.As(err, &he) {
 			// RunOnce already persisted the sealed state (and, for anti-spin /
 			// handshake halts, the cycle_halted ledger entry). Surface the reason
-			// and map it to the documented exit code.
-			return reportHalt(he.Reason, statePath, out)
+			// (plus the failing gate's detail, when a gate report is in hand) and
+			// map it to the documented exit code.
+			return reportHalt(he.Reason, failedStderr(he.Reports), statePath, out)
 		}
 		// A non-halt operational failure (unknown adapter, adapter run error):
 		// propagate as a plain error → the root command's generic exit 1.
@@ -410,6 +429,7 @@ func haltOnce(
 	ledger *cycle.LedgerFileSync,
 	state cycle.State,
 	reason contract.HaltReason,
+	detail string,
 	statePath string,
 	out io.Writer,
 ) error {
@@ -421,16 +441,39 @@ func haltOnce(
 	if err := stateSync.Write(halted); err != nil {
 		return fmt.Errorf("write halted state: %w", err)
 	}
-	return reportHalt(reason, statePath, out)
+	return reportHalt(reason, detail, statePath, out)
 }
 
 // reportHalt prints the terminal reason and returns the exit-code error (or nil
-// for a success/clean terminal, which is exit 0).
-func reportHalt(reason contract.HaltReason, statePath string, out io.Writer) error {
+// for a success/clean terminal, which is exit 0). When detail is non-empty (the
+// failing gate's Stderr), it is printed on a second line so the user sees WHY the
+// halt fired, not just the opaque reason+code — e.g. all five preflight classes
+// share the reason `preflight-failed` and only the detail discriminates them.
+func reportHalt(reason contract.HaltReason, detail, statePath string, out io.Writer) error {
 	code := exitCodeForHalt(reason)
 	_, _ = fmt.Fprintf(out, "cycle halted: %s (exit %d) [state: %s]\n", reason, code, statePath)
+	if d := strings.TrimSpace(detail); d != "" {
+		_, _ = fmt.Fprintf(out, "  reason: %s\n", d)
+	}
 	if code == exitCleanPass {
 		return nil
 	}
 	return &exitCodeError{code: code, reason: reason}
+}
+
+// failedStderr extracts the human-readable detail to surface alongside a halt: the
+// Stderr of the last failing gate report (the gate that actually tripped the
+// pipeline's short-circuit). It falls back to the last report's Stderr if no
+// report is explicitly marked !Passed, and returns "" for an empty slice — there
+// is then simply no extra line to print (ROP: no fabricated detail).
+func failedStderr(reports []contract.GateReport) string {
+	for i := len(reports) - 1; i >= 0; i-- {
+		if !reports[i].Passed {
+			return reports[i].Stderr
+		}
+	}
+	if len(reports) > 0 {
+		return reports[len(reports)-1].Stderr
+	}
+	return ""
 }

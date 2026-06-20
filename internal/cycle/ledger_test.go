@@ -2,6 +2,8 @@ package cycle
 
 import (
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jazz1x/rallish/pkg/contract"
@@ -92,5 +94,76 @@ func TestLedgerFileSyncReadAllMissingFile(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("entries = %d, want 0", len(entries))
+	}
+}
+
+// TestLedgerFileSyncConcurrentAppendKeepsChainIntact is the regression guard for
+// the concurrent-append fork: many goroutines appending to the SAME cycle ledger
+// (via DISTINCT LedgerFileSync instances, as the broker does on every
+// appendLedger) must serialize so the hash chain never forks. Run with -race.
+func TestLedgerFileSyncConcurrentAppendKeepsChainIntact(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cyc-concurrent-ledger.jsonl")
+
+	const n = 50
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			// A fresh instance per call — mirrors broker.appendLedger, which an
+			// instance-level mutex could not serialize.
+			ledger := NewLedgerFileSync(path)
+			entry := contract.NewHarnessLedgerEntry(int64(i), "cyc_conc", contract.LedgerEventAgentTurn, "turn", nil)
+			if err := ledger.Append(entry); err != nil {
+				t.Errorf("append %d: %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	entries, err := NewLedgerFileSync(path).ReadAll()
+	if err != nil {
+		t.Fatalf("read all: %v", err)
+	}
+	if len(entries) != n {
+		t.Fatalf("entries = %d, want %d (a lost write means the lock did not serialize)", len(entries), n)
+	}
+	// The chain must verify end to end: no fork, every PrevHash links the tail.
+	if broken, ok := contract.VerifyChain(entries); !ok {
+		t.Fatalf("VerifyChain failed at index %d — concurrent appends forked the chain", broken)
+	}
+}
+
+// TestLedgerFileSyncHandlesOversizedEntry is the regression guard for the 64 KiB
+// bufio.Scanner limit: an entry whose JSONL line exceeds 64 KiB must round-trip
+// through Append/lastHash/ReadAll without bricking the chain. False-positive
+// guard: a normal small entry appended after it still chains correctly.
+func TestLedgerFileSyncHandlesOversizedEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cyc-oversized-ledger.jsonl")
+	ledger := NewLedgerFileSync(path)
+
+	// ~200 KiB summary — well past bufio.Scanner's 64 KiB default token cap.
+	big := strings.Repeat("x", 200*1024)
+	if err := ledger.Append(contract.NewHarnessLedgerEntry(1, "cyc_big", contract.LedgerEventGateFailed, big, nil)); err != nil {
+		t.Fatalf("append oversized: %v", err)
+	}
+	// A normal entry after the big one must still link (lastHash must have read
+	// the oversized predecessor, not choked on it).
+	if err := ledger.Append(contract.NewHarnessLedgerEntry(2, "cyc_big", contract.LedgerEventValidationGreen, "green", nil)); err != nil {
+		t.Fatalf("append after oversized: %v", err)
+	}
+
+	entries, err := ledger.ReadAll()
+	if err != nil {
+		t.Fatalf("read all: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2 (oversized line was dropped by a size cap)", len(entries))
+	}
+	if len(entries[0].Summary) != len(big) {
+		t.Fatalf("oversized summary truncated: got %d bytes, want %d", len(entries[0].Summary), len(big))
+	}
+	if broken, ok := contract.VerifyChain(entries); !ok {
+		t.Fatalf("VerifyChain failed at index %d after an oversized entry", broken)
 	}
 }

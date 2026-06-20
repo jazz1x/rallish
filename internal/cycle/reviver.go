@@ -3,9 +3,10 @@ package cycle
 // reviver.go — sticky-halt guard over the harness ledger (G5 reviver guard).
 //
 // A pure harness can only halt; it cannot stop a cron/driver from re-triggering
-// orchestration for the same cycle. Halt already removes the mutable state file
-// ("zombie prevention"), but the append-only ledger persists at
-// tmp/cycle-<id>-ledger.jsonl. This guard reads that ledger so a re-trigger
+// orchestration for the same cycle. The broker path removes the mutable state
+// file on halt ("zombie prevention"); the one-shot CLI path leaves it and relies
+// on this seal instead. Either way the append-only ledger persists at
+// ~/.rallish/cycles/cycle-<id>-ledger.jsonl, so this guard reads that ledger so a re-trigger
 // cannot silently revive a run that has already halted.
 //
 // Rule: a cycle_halted entry is STICKY. Resume is only permitted if measurable

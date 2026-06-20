@@ -162,8 +162,6 @@ type RallyState string
 const (
 	// RallyStateIdle means the session is created but no participant holds the baton.
 	RallyStateIdle RallyState = "idle"
-	// RallyStateCompleted means all participants have passed the baton and the session is done.
-	RallyStateCompleted RallyState = "completed"
 	// RallyStateInterrupted means the session was forcibly ended (e.g. broker SIGTERM).
 	RallyStateInterrupted RallyState = "interrupted"
 )

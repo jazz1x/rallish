@@ -1,0 +1,10 @@
+# trivy ignore list for rallish.
+#
+# Format: one CVE id per line (optionally `CVE-XXXX-YYYY exp:2026-12-31` to
+# auto-expire). Keep this EMPTY by default — every entry is a deliberate,
+# documented risk acceptance, not a convenience mute. The CI trivy job already
+# sets `ignore-unfixed: true`, so CVEs with no available fix do not need an
+# entry here; only add a fixed-but-accepted CVE with a reason + owner + date.
+#
+# Example (do not leave uncommented without a real justification):
+# CVE-2025-00000  # accepted 2026-06-03 by <owner>: not reachable — <why>; revisit on dep bump

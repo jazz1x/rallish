@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -217,19 +218,42 @@ func (s *Store) Replay(ctx context.Context, sessionID string) ([]TurnRecord, err
 	}
 	defer func() { _ = f.Close() }()
 
+	// bufio.Reader (not Scanner): a TurnRecord carries unbounded agent output, so a
+	// single JSONL line routinely exceeds Scanner's 64 KiB default token cap, which
+	// would silently truncate the replay mid-log. ReadBytes grows without a fixed cap.
 	var records []TurnRecord
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		var rec TurnRecord
-		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
-			return nil, fmt.Errorf("decode turn record: %w", err)
+	reader := bufio.NewReader(f)
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if trimmed := bytesTrimNewline(line); len(trimmed) > 0 {
+			var rec TurnRecord
+			if err := json.Unmarshal(trimmed, &rec); err != nil {
+				return nil, fmt.Errorf("decode turn record: %w", err)
+			}
+			records = append(records, rec)
 		}
-		records = append(records, rec)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan log.jsonl: %w", err)
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("read log.jsonl: %w", readErr)
+		}
 	}
 	return records, nil
+}
+
+// bytesTrimNewline drops a single trailing '\n' (and any '\r') from a line read
+// by bufio.Reader.ReadBytes, which includes the delimiter.
+func bytesTrimNewline(b []byte) []byte {
+	n := len(b)
+	if n > 0 && b[n-1] == '\n' {
+		b = b[:n-1]
+		n--
+	}
+	if n > 0 && b[n-1] == '\r' {
+		b = b[:n-1]
+	}
+	return b
 }
 
 func (s *Store) generateID() string {

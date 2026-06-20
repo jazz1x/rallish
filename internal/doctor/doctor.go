@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,7 +137,16 @@ func daemonCheck(ctx context.Context, homeDir string) Check {
 
 	if errors.Is(perr, fs.ErrNotExist) || perr == nil {
 		portFile := filepath.Join(sockDir, "port")
-		if _, err := os.Stat(portFile); err == nil {
+		if port, rerr := os.ReadFile(portFile); rerr == nil { //nolint:gosec // well-known path
+			// A port file can outlive a non-graceful daemon death, so dial before
+			// claiming reachability — os.Stat alone falsely reports a dead port OK.
+			addr := "127.0.0.1:" + strings.TrimSpace(string(port))
+			conn, derr := net.DialTimeout("tcp", addr, 1*time.Second)
+			if derr != nil {
+				return Check{Name: "daemon", Status: StatusFail,
+					Detail: fmt.Sprintf("port file present but not reachable (stale?): %v", derr)}
+			}
+			_ = conn.Close()
 			return Check{Name: "daemon", Status: StatusOK,
 				Detail: "reachable via port fallback"}
 		}

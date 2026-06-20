@@ -47,6 +47,8 @@ func CycleNewCmd() *cobra.Command {
 		agents             string
 		workingDir         string
 		localGates         []string
+		auditCmd           string
+		polishTestCmd      string
 	)
 	cmd := &cobra.Command{
 		Use:   "new",
@@ -56,7 +58,18 @@ func CycleNewCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("get home dir: %w", err)
 			}
-			return runCycleNew(cmd.Context(), home, goal, branch, maxCycles, maxDurationMinutes, autoGoal, agents, workingDir, localGates, cmd.OutOrStdout())
+			// An explicitly passed but empty/whitespace-only override is a
+			// misconfiguration. omitempty would erase an empty string on the
+			// wire, making "passed empty" indistinguishable from "unset", so we
+			// reject it here at the CLI boundary where cobra can still tell them
+			// apart. Leaving the flag unset uses the documented default.
+			if err := rejectBlankOverride(cmd, "audit-cmd", auditCmd); err != nil {
+				return err
+			}
+			if err := rejectBlankOverride(cmd, "polish-test-cmd", polishTestCmd); err != nil {
+				return err
+			}
+			return runCycleNew(cmd.Context(), home, goal, branch, maxCycles, maxDurationMinutes, autoGoal, agents, workingDir, localGates, auditCmd, polishTestCmd, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().StringVar(&goal, "goal", "", "One-sentence objective for the first cycle (required)")
@@ -67,8 +80,26 @@ func CycleNewCmd() *cobra.Command {
 	cmd.Flags().StringVar(&agents, "agents", "", "Comma-separated adapter names for multi-agent orchestration")
 	cmd.Flags().StringVar(&workingDir, "working-dir", "", "Working directory for the cycle")
 	cmd.Flags().StringArrayVar(&localGates, "local-gate", nil, "Repository-specific validation command to run after audit (repeatable)")
+	cmd.Flags().StringVar(&auditCmd, "audit-cmd", "", "Override the audit gate command (default: make check-all); e.g. 'npm test', 'cargo test'")
+	cmd.Flags().StringVar(&polishTestCmd, "polish-test-cmd", "", "Override the polish gate test command (default: go test -race ./...); e.g. 'npm test', 'cargo test'")
 	_ = cmd.MarkFlagRequired("goal")
 	return cmd
+}
+
+// rejectBlankOverride fails loudly when a gate-command override flag was
+// explicitly passed but trims to empty. cobra's Changed reports whether the
+// flag appeared on the command line, which distinguishes "passed empty"
+// (--audit-cmd ” or '   ') from "unset" — the latter is allowed and uses the
+// documented default. This honours the README promise that an empty or
+// whitespace-only override fails loudly with no silent fallback to the default.
+func rejectBlankOverride(cmd *cobra.Command, flagName, value string) error {
+	if !cmd.Flags().Changed(flagName) {
+		return nil
+	}
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("--%s was set but is empty or whitespace-only; provide a command (e.g. 'npm test') or omit the flag to use the default", flagName)
+	}
+	return nil
 }
 
 // CycleStatusCmd returns the `cycle status` subcommand.
@@ -272,7 +303,7 @@ func runCycleStart(ctx context.Context, home string, req contract.NewCycleReques
 			_, _ = fmt.Fprintf(out, "    - %s\n", gate)
 		}
 	}
-	_, _ = fmt.Fprintf(out, "  state_file:  tmp/cycle-%s.json\n", state.ID)
+	_, _ = fmt.Fprintf(out, "  state_file:  %s\n", cycleStateFileDisplay(state.ID))
 
 	// 2. Start orchestration if agents are configured.
 	if len(agents) > 0 {
@@ -303,7 +334,7 @@ func runCycleStart(ctx context.Context, home string, req contract.NewCycleReques
 	return runCycleWatch(ctx, home, state.ID, logFile, out)
 }
 
-func runCycleNew(ctx context.Context, home, goal, branch string, maxCycles, maxDurationMinutes int, autoGoal bool, agents, workingDir string, localGates []string, out io.Writer) error {
+func runCycleNew(ctx context.Context, home, goal, branch string, maxCycles, maxDurationMinutes int, autoGoal bool, agents, workingDir string, localGates []string, auditCmd, polishTestCmd string, out io.Writer) error {
 	bc, err := resolveBrokerClient(home, 0)
 	if err != nil {
 		return err
@@ -316,6 +347,8 @@ func runCycleNew(ctx context.Context, home, goal, branch string, maxCycles, maxD
 		MaxDurationMinutes: maxDurationMinutes,
 		AutoGoal:           autoGoal,
 		LocalGates:         localGates,
+		AuditCmd:           auditCmd,
+		PolishTestCmd:      polishTestCmd,
 	}
 	if agents != "" || workingDir != "" {
 		req.Orchestrator = &contract.OrchestratorConfig{
@@ -357,8 +390,19 @@ func runCycleNew(ctx context.Context, home, goal, branch string, maxCycles, maxD
 			_, _ = fmt.Fprintf(out, "    - %s\n", gate)
 		}
 	}
-	_, _ = fmt.Fprintf(out, "  state_file:   tmp/cycle-%s.json\n", state.ID)
+	_, _ = fmt.Fprintf(out, "  state_file:   %s\n", cycleStateFileDisplay(state.ID))
 	return nil
+}
+
+// cycleStateFileDisplay returns the human-facing path of a cycle's state file
+// (the SSOT ~/.rallish/cycles location the daemon writes to). Falls back to the
+// tilde form only if the home dir is unresolvable — display-only, never used for I/O.
+func cycleStateFileDisplay(id string) string {
+	dir, err := CyclesDir()
+	if err != nil {
+		return filepath.Join("~", ".rallish", "cycles", fmt.Sprintf("cycle-%s.json", id))
+	}
+	return filepath.Join(dir, fmt.Sprintf("cycle-%s.json", id))
 }
 
 func runCycleStatus(ctx context.Context, home, cycleID string, out io.Writer) error {
@@ -388,8 +432,15 @@ func runCycleStatusWithClient(ctx context.Context, bc brokerClient, cycleID stri
 			return fmt.Errorf("decode response: %w", err)
 		}
 	} else {
-		// Fallback: read local state file.
-		data, err := os.ReadFile(filepath.Join("tmp", fmt.Sprintf("cycle-%s.json", cycleID)))
+		// Fallback: read the local state file from the SSOT cycles dir.
+		cyclesDir, derr := CyclesDir()
+		if derr != nil {
+			return derr
+		}
+		// filepath.Base neutralises any separators in the id so the read stays
+		// confined to cyclesDir (no path traversal via a crafted --cycle-id).
+		stateFile := filepath.Join(cyclesDir, fmt.Sprintf("cycle-%s.json", filepath.Base(cycleID)))
+		data, err := os.ReadFile(stateFile) //nolint:gosec // path confined to ~/.rallish/cycles via filepath.Base
 		if err != nil {
 			return fmt.Errorf("cycle not found: %w", err)
 		}
@@ -500,6 +551,11 @@ func runCycleNext(ctx context.Context, home, cycleID, goal string, out io.Writer
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("step cycle failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+
 	var state contract.CycleState
 	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
 		return fmt.Errorf("decode response: %w", err)
@@ -534,6 +590,11 @@ func runCycleHalt(ctx context.Context, home, cycleID, reason string, out io.Writ
 		return fmt.Errorf("post halt: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("halt cycle failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
 
 	var state contract.CycleState
 	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {

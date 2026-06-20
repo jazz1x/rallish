@@ -64,6 +64,153 @@ func TestDriverStepCompletesCycle(t *testing.T) {
 	}
 }
 
+// TestDriverStepEmitsValidationGreenOnGatePass proves the verifier-produced
+// completion record (B1 fix): a successful gated Step with a ledger injected
+// appends gate_passed (one per report), validation_green, and cycle_completed.
+// Before the fix, validation_green had no production emit site (only tests wrote
+// it), so the reviver's revive edge was dead.
+func TestDriverStepEmitsValidationGreenOnGatePass(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "cycle-test.json")
+	sync := NewStateFileSync(tmp)
+	ledger := NewLedgerFileSync(filepath.Join(t.TempDir(), "cycle-ledger.jsonl"))
+
+	state, err := NewState(contract.NewCycleRequest{Goal: "feat: green", MaxCycles: 3}, "cyc_green_1")
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+
+	d := NewCycleDriver(sync)
+	d.SetSleeper(instantSleeper{})
+	d.SetLedger(ledger)
+	d.SetPipeline(Pipeline{passGate{name: "preflight"}, passGate{name: "audit"}})
+
+	result := d.Step(context.Background(), state)
+	if result.IsFailure() {
+		t.Fatalf("step failed: %v", result.Err())
+	}
+
+	entries, err := ledger.ReadAll()
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	var gatePassed, green, completed int
+	for _, e := range entries {
+		switch e.Type {
+		case contract.LedgerEventGatePassed:
+			gatePassed++
+		case contract.LedgerEventValidationGreen:
+			green++
+		case contract.LedgerEventCycleCompleted:
+			completed++
+		}
+	}
+	if gatePassed != 2 {
+		t.Fatalf("gate_passed count = %d, want 2 (one per gate report)", gatePassed)
+	}
+	if green != 1 {
+		t.Fatalf("validation_green count = %d, want exactly 1", green)
+	}
+	if completed != 1 {
+		t.Fatalf("cycle_completed count = %d, want exactly 1", completed)
+	}
+}
+
+// TestDriverStepGreenUnsealsAfterHalt is THE key B1 test: a cycle with a sticky
+// cycle_halted in its ledger is sealed (LedgerSealsResume true); after a real,
+// verifier-produced green Step (the gate pipeline passed, ledger injected), the
+// same ledger now PERMITS resume. This is the previously-impossible un-seal path
+// — it proves the revive-on-measurable-progress edge works from production code.
+func TestDriverStepGreenUnsealsAfterHalt(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "cycle-test.json")
+	sync := NewStateFileSync(tmp)
+	ledger := NewLedgerFileSync(filepath.Join(t.TempDir(), "cycle-ledger.jsonl"))
+
+	const cycleID = "cyc_unseal_1"
+	state, err := NewState(contract.NewCycleRequest{Goal: "feat: recover", MaxCycles: 5}, cycleID)
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+
+	// Seed a sticky halt: the cycle is sealed and must not resume yet.
+	if err := ledger.Append(contract.NewHarnessLedgerEntry(
+		1000, cycleID, contract.LedgerEventCycleHalted, string(contract.HaltStuck), nil)); err != nil {
+		t.Fatalf("seed halt: %v", err)
+	}
+	sealedBefore, _ := ledger.ReadAll()
+	if _, sealed := LedgerSealsResume(sealedBefore); !sealed {
+		t.Fatal("precondition: a halt with no later green must seal the cycle")
+	}
+
+	// A real verifier green: a passing gated Step with the ledger injected.
+	d := NewCycleDriver(sync)
+	d.SetSleeper(instantSleeper{})
+	d.SetLedger(ledger)
+	d.SetPipeline(Pipeline{passGate{name: "ok"}})
+
+	result := d.Step(context.Background(), state)
+	if result.IsFailure() {
+		t.Fatalf("recovery step failed: %v", result.Err())
+	}
+
+	// The seal must now be lifted: measurable progress (validation_green) was
+	// recorded after the halt by the verifier, not by agent self-report.
+	after, err := ledger.ReadAll()
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	if _, sealed := LedgerSealsResume(after); sealed {
+		t.Fatal("a verifier-produced green after the halt must un-seal the cycle (B1 revive edge)")
+	}
+}
+
+// TestDriverStepFailureKeepsSeal is the false-positive guard for B1: a halted
+// cycle whose subsequent Step FAILS its gate emits NO validation_green, so the
+// anti-spin seal must still hold. This proves the fix does not weaken the sticky
+// halt — only a genuine verifier green lifts it.
+func TestDriverStepFailureKeepsSeal(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "cycle-test.json")
+	sync := NewStateFileSync(tmp)
+	ledger := NewLedgerFileSync(filepath.Join(t.TempDir(), "cycle-ledger.jsonl"))
+
+	const cycleID = "cyc_stay_sealed_1"
+	state, err := NewState(contract.NewCycleRequest{Goal: "feat: still-broken", MaxCycles: 5}, cycleID)
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+
+	if err := ledger.Append(contract.NewHarnessLedgerEntry(
+		1000, cycleID, contract.LedgerEventCycleHalted, string(contract.HaltStuck), nil)); err != nil {
+		t.Fatalf("seed halt: %v", err)
+	}
+
+	d := NewCycleDriver(sync)
+	d.SetSleeper(instantSleeper{})
+	d.SetLedger(ledger)
+	d.SetPipeline(Pipeline{failGate{name: "audit"}})
+
+	result := d.Step(context.Background(), state)
+	if result.IsSuccess() {
+		t.Fatal("expected a halt on the failing gate")
+	}
+
+	after, err := ledger.ReadAll()
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	for _, e := range after {
+		if e.Type == contract.LedgerEventValidationGreen {
+			t.Fatal("a failing gate must NOT emit validation_green")
+		}
+	}
+	reason, sealed := LedgerSealsResume(after)
+	if !sealed {
+		t.Fatal("a halt with no later green must stay sealed (anti-spin seal intact)")
+	}
+	if reason != contract.HaltStuck {
+		t.Fatalf("sticky reason = %q, want %q", reason, contract.HaltStuck)
+	}
+}
+
 func TestDriverStepHaltOnGateFailure(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "cycle-test.json")
 	sync := NewStateFileSync(tmp)

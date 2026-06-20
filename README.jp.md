@@ -268,7 +268,25 @@ scratch:
   summarize_with: claude-haiku
 ```
 
-### 6. デーモンのライフサイクル
+### 6. 自律サイクル（ハーネス）
+
+`cycle new`・`cycle status`・`cycle halt` などの `cycle` サブコマンドはブローカーを経由するため、**先にデーモンを起動**しておく必要があります:
+
+```bash
+rallish daemon &                               # 先にデーモンを起動
+rallish cycle new --goal "feat: 認証追加" --branch feat/auth
+rallish cycle new --goal "テスト修正" --branch feat/fix \
+  --audit-cmd "npm test"                       # デフォルト 'make check-all' の代わりに使用
+rallish cycle run --once --cycle-id <id>       # デーモン不要 — ファイルから直接再開
+```
+
+`cycle run --once` は状態を `~/.rallish/cycles/cycle-<id>.json`（デーモンが書き込むのと同じ場所、`--state-dir` で変更可、デフォルト `~/.rallish/cycles`）から直接再開するため、ブローカーは不要です。このパスは作業対象リポジトリの**外**にあるため、ブローカーが Preflight の要求するクリーンなワーキングツリーを汚しません。
+
+オーディットゲートはデフォルトで `make check-all` を実行します。`--audit-cmd` に空白のみを指定するとエラーになり、デフォルトへのサイレントフォールバックは行われません。
+
+ポリッシュゲートはデフォルトで `go test -race ./...` を実行します。`--polish-test-cmd` でプロジェクト固有のコマンドに上書きできます。空白のみの値はエラーです。`scripts/check-no-raw-ansi.sh` チェックは rallish リポジトリ専用であり、スクリプトが存在しないリポジトリでは自動的にスキップされます（エラーではありません）。
+
+### 7. デーモンのライフサイクル
 
 ```bash
 rallish daemon &                            # 明示起動 (任意 — squash が自動スポーン)

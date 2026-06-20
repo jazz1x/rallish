@@ -170,6 +170,8 @@ func TestRunCycleNewSendsLocalGates(t *testing.T) {
 		"",
 		"",
 		[]string{"bun test", "cargo clippy"},
+		"",
+		"",
 		&out,
 	)
 	if err != nil {
@@ -316,6 +318,177 @@ func TestRunCycleLedgerPrintsJSON(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "\n  {") {
 		t.Fatalf("output is not pretty JSON:\n%s", out.String())
+	}
+}
+
+// TestCycleNewRejectsBlankOverride verifies that an explicitly passed but
+// empty/whitespace-only --audit-cmd or --polish-test-cmd fails loudly at
+// `cycle new` time (README: "An empty or whitespace-only ... fails loudly").
+// It also guards against false positives: an unset flag and a valid override
+// must both be accepted and reach the broker.
+func TestCycleNewRejectsBlankOverride(t *testing.T) {
+	hit := false
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { //nolint:revive // standard handler signature
+		hit = true
+		var got contract.NewCycleRequest
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(contract.CycleState{
+			ID:            "cyc_blank_override",
+			Branch:        got.Branch,
+			MaxCycles:     got.MaxCycles,
+			NextCycleGoal: got.Goal,
+			AuditCmd:      got.AuditCmd,
+			PolishTestCmd: got.PolishTestCmd,
+		})
+	}))
+	defer ts.Close()
+
+	home := t.TempDir()
+	if err := writePortFile(home, ts.URL); err != nil {
+		t.Fatalf("writePortFile: %v", err)
+	}
+	t.Setenv("HOME", home)
+
+	// rejected: explicitly passed blank overrides must error before any broker call.
+	rejected := []struct {
+		name string
+		args []string
+	}{
+		{"audit empty", []string{"new", "--goal", "feat: x", "--branch", "feat/work", "--audit-cmd", ""}},
+		{"audit whitespace", []string{"new", "--goal", "feat: x", "--branch", "feat/work", "--audit-cmd", "   "}},
+		{"polish empty", []string{"new", "--goal", "feat: x", "--branch", "feat/work", "--polish-test-cmd", ""}},
+		{"polish whitespace", []string{"new", "--goal", "feat: x", "--branch", "feat/work", "--polish-test-cmd", "\t "}},
+	}
+	for _, tc := range rejected {
+		t.Run(tc.name, func(t *testing.T) {
+			hit = false
+			cmd := CycleCmd()
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(tc.args)
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatalf("expected error for blank override, got nil")
+			}
+			if !strings.Contains(err.Error(), "empty or whitespace-only") {
+				t.Fatalf("error = %q, want 'empty or whitespace-only'", err.Error())
+			}
+			if hit {
+				t.Fatalf("broker was called despite blank override; should fail before request")
+			}
+		})
+	}
+
+	// accepted (false-positive guards): unset and valid overrides must succeed.
+	accepted := []struct {
+		name string
+		args []string
+	}{
+		{"unset uses default", []string{"new", "--goal", "feat: x", "--branch", "feat/work"}},
+		{"valid audit override", []string{"new", "--goal", "feat: x", "--branch", "feat/work", "--audit-cmd", "npm test"}},
+		{"valid polish override", []string{"new", "--goal", "feat: x", "--branch", "feat/work", "--polish-test-cmd", "cargo test"}},
+	}
+	for _, tc := range accepted {
+		t.Run(tc.name, func(t *testing.T) {
+			hit = false
+			cmd := CycleCmd()
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(tc.args)
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("unexpected error for valid args %v: %v", tc.args, err)
+			}
+			if !hit {
+				t.Fatalf("broker was not called for valid args %v", tc.args)
+			}
+		})
+	}
+}
+
+// TestRunCycleNextHaltSurfaceBrokerError verifies that `cycle next` and
+// `cycle halt` against a non-2xx broker response surface the plain-text broker
+// body (e.g. "cycle not found") instead of a cryptic JSON decode error. The
+// broker writes these errors via http.Error (text/plain), so decoding them as
+// the success CycleState JSON used to fail on the first byte. Each subtest also
+// guards against false positives: a valid 200 JSON response must still decode
+// and print the expected output.
+func TestRunCycleNextHaltSurfaceBrokerError(t *testing.T) {
+	cases := []struct {
+		name   string
+		path   string // suffix the broker matches for the success case
+		run    func(home string, out *bytes.Buffer) error
+		okBody contract.CycleState
+		okWant string // substring expected in stdout on success
+	}{
+		{
+			name: "next",
+			path: "/step",
+			run: func(home string, out *bytes.Buffer) error {
+				return runCycleNext(context.Background(), home, "cyc_x", "feat: go", out)
+			},
+			okBody: contract.CycleState{ID: "cyc_x", Phase: contract.CyclePhaseCommit},
+			okWant: "cycle stepped: cyc_x",
+		},
+		{
+			name: "halt",
+			path: "/halt",
+			run: func(home string, out *bytes.Buffer) error {
+				return runCycleHalt(context.Background(), home, "cyc_x", "manual", out)
+			},
+			okBody: contract.CycleState{ID: "cyc_x", HaltReason: contract.HaltUserRequested},
+			okWant: "cycle halted: cyc_x",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Error path: broker returns a plain-text 404 body. The CLI must
+			// surface that body, not a JSON decode error.
+			tsErr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { //nolint:revive // standard handler signature
+				http.Error(w, "cycle not found", http.StatusNotFound)
+			}))
+			defer tsErr.Close()
+
+			home := t.TempDir()
+			if err := writePortFile(home, tsErr.URL); err != nil {
+				t.Fatalf("writePortFile: %v", err)
+			}
+
+			var out bytes.Buffer
+			err := tc.run(home, &out)
+			if err == nil {
+				t.Fatal("expected error for 404 status, got nil")
+			}
+			if !strings.Contains(err.Error(), "cycle not found") {
+				t.Fatalf("error = %q, want it to surface broker body 'cycle not found'", err.Error())
+			}
+			if strings.Contains(err.Error(), "decode response") {
+				t.Fatalf("error = %q, must not be a cryptic JSON decode error", err.Error())
+			}
+
+			// False-positive guard: a valid 200 JSON response must still decode
+			// and print the expected output.
+			tsOK := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { //nolint:revive // standard handler signature
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(tc.okBody)
+			}))
+			defer tsOK.Close()
+
+			homeOK := t.TempDir()
+			if err := writePortFile(homeOK, tsOK.URL); err != nil {
+				t.Fatalf("writePortFile: %v", err)
+			}
+
+			var outOK bytes.Buffer
+			if err := tc.run(homeOK, &outOK); err != nil {
+				t.Fatalf("unexpected error on valid 200 response: %v", err)
+			}
+			if !strings.Contains(outOK.String(), tc.okWant) {
+				t.Fatalf("output = %q, want %q", outOK.String(), tc.okWant)
+			}
+		})
 	}
 }
 

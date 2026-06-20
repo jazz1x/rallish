@@ -146,3 +146,69 @@ jobs:
 
       - name: Smoke test built binary
         run: ./dist/rallish version
+
+  # ── Security pipeline ─────────────────────────────────────────────────────
+  # gitleaks: secret scanning over the working tree AND full git history.
+  # Complements govulncheck (Go CVEs) and trivy (dependency/config CVEs) — none
+  # overlaps: secrets, code-CVEs, and dep/misconfig-CVEs are three distinct axes.
+  gitleaks:
+    name: gitleaks (secret scan)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # full history so the scan covers every commit, not just HEAD
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # trivy: CVE scan of the dependency tree + misconfiguration + secret detection.
+  # Fails the build on HIGH/CRITICAL. Broader than govulncheck (which is Go-call-
+  # graph aware but Go-only); trivy also covers the lockfile and IaC/config files.
+  trivy:
+    name: trivy (CVE scan)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run trivy filesystem scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          severity: HIGH,CRITICAL
+          exit-code: "1"          # fail CI on a HIGH/CRITICAL finding
+          ignore-unfixed: true    # only flag CVEs that have an available fix
+          trivyignores: .trivyignore
+          # .toolchain (pinned linter toolchain) is gitignored and absent in CI;
+          # skip it (and dist/) so neither a stray local cache nor the vendored
+          # linter deps add noise — only the tracked go.mod/go.sum are our surface.
+          skip-dirs: .toolchain,dist
+
+  # arch-guard: the clean-architecture import-direction invariants + the external
+  # deny-list guard (no scheduler/cron/graph-DB), run as an explicit CI gate so an
+  # inverted dependency or a forbidden dep fails the PR (not only the local hooks).
+  arch-guard:
+    name: arch guard (layers + deny-list)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+          cache: true
+          check-latest: true
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Run architecture guards
+        run: go test ./internal/arch/ -run 'TestCoreImportGuard|TestLayerGuard' -v

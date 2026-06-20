@@ -120,3 +120,207 @@ func TestPhilosophyScannerSkipsTestFiles(t *testing.T) {
 		t.Fatalf("scanHardcodedVersions must skip _test.go files, got: %#v", vs)
 	}
 }
+
+// TestForEachAddedLineSpacedPath guards path attribution for files whose names
+// contain spaces. Git emits such paths UNQUOTED in the "diff --git" header
+// (e.g. `diff --git a/dir/my file.go b/dir/my file.go`) and appends a trailing
+// tab to the "+++ b/<path>" marker. A whitespace split of the header would
+// mis-resolve the file to the path's second word ("file.go"); the walker must
+// instead recover the FULL path from the "+++ b/" marker. Impact is the
+// Violation.File display string only, but a wrong filename misdirects the
+// operator, so this pins exact attribution.
+func TestForEachAddedLineSpacedPath(t *testing.T) {
+	const path = "dir/my file.go"
+	// Mirror git's real output: header with the unquoted spaced path on both
+	// sides, a "+++ b/<path>" marker with the trailing tab git appends, and a hunk.
+	diff := strings.Join([]string{
+		"diff --git a/" + path + " b/" + path,
+		"--- a/" + path + "\t",
+		"+++ b/" + path + "\t",
+		"@@ -1 +1,2 @@",
+		" package x",
+		"+var A = 1",
+	}, "\n")
+
+	var got []string
+	forEachAddedLine(diff, nil, func(a addedLine) { got = append(got, a.file) })
+
+	if len(got) != 1 {
+		t.Fatalf("added lines = %d, want 1: %#v", len(got), got)
+	}
+	if got[0] != path {
+		t.Fatalf("file = %q, want %q (spaced path must survive intact, not be split on whitespace)", got[0], path)
+	}
+}
+
+// TestForEachAddedLinePlusPlusContentLine is the regression guard for the
+// "+++ b/" mid-hunk corruption: an ADDED content line whose source begins
+// "++ b/<path>" renders raw as "+++ b/<path>" — byte-identical to the per-file
+// new-file header. The walker must NOT treat such a content line as a header:
+// (a) it must still be SCANNED as an added line (the header-only "+++" case used
+// to swallow it), and (b) Violation.File must stay the real file, not flip to the
+// path embedded in the content. The discriminator is position: a genuine header
+// precedes the first "@@"; a "+++ ..." line after a hunk has started is content.
+func TestForEachAddedLinePlusPlusContentLine(t *testing.T) {
+	// real.go's hunk contains an added line whose CONTENT is "++ b/other.go",
+	// which git renders as the raw line "+++ b/other.go" (leading + for "added").
+	diff := strings.Join([]string{
+		"diff --git a/real.go b/real.go",
+		"--- a/real.go",
+		"+++ b/real.go",
+		"@@ -1,0 +1,2 @@",
+		"+package x",
+		"+++ b/other.go", // an added content line, NOT a header
+	}, "\n")
+
+	type rec struct {
+		file string
+		text string
+	}
+	var got []rec
+	forEachAddedLine(diff, nil, func(a addedLine) {
+		got = append(got, rec{a.file, a.text})
+	})
+
+	// Both added lines must be visited, and the file must remain real.go throughout
+	// (the "+++ b/other.go" content line must not override it to other.go).
+	want := []rec{
+		{"real.go", "+package x"},
+		{"real.go", "+++ b/other.go"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("added lines = %d, want %d (the '+++ b/other.go' content line must be scanned, not swallowed as a header): %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("line %d = %+v, want %+v (file must stay real.go; content line must be scanned verbatim)", i, got[i], want[i])
+		}
+	}
+}
+
+// TestScanHardcodedVersionsPlusPlusContentDoesNotDefeatTestCarveOut is the
+// end-to-end false-positive guard: the _test.go carve-out in scanHardcodedVersions
+// keys off the resolved file name, so a "+++ b/prod.go" content line inside a
+// *_test.go hunk must NOT flip `file` to prod.go and thereby unmask a version
+// literal the carve-out is meant to ignore. Under the bug this yielded a spurious
+// hardcoded-version violation (and could escalate Run() to a self-audit HALT).
+func TestScanHardcodedVersionsPlusPlusContentDoesNotDefeatTestCarveOut(t *testing.T) {
+	// A *_test.go hunk that legitimately hardcodes a version, with an embedded
+	// "+++ b/prod.go" content line (e.g. a diff snippet inside a fixture) before it.
+	diff := strings.Join([]string{
+		"diff --git a/foo_test.go b/foo_test.go",
+		"--- a/foo_test.go",
+		"+++ b/foo_test.go",
+		"@@ -1,0 +1,2 @@",
+		"+++ b/prod.go", // content line inside the test file's hunk
+		`+const Version = "1.2.3"`,
+	}, "\n")
+	if vs := scanHardcodedVersions(diff); len(vs) != 0 {
+		t.Fatalf("a '+++ b/prod.go' content line must not flip the file off foo_test.go and defeat the _test.go carve-out, got: %#v", vs)
+	}
+}
+
+// TestPhilosophyScannerSkipsSpacedTestFile is the false-positive guard for the
+// spaced-path fix: the _test.go carve-out in scanHardcodedVersions keys off the
+// resolved file name, so it must still hold when that name contains a space.
+// (A regression here would FLAG version literals in spaced test fixtures.)
+func TestPhilosophyScannerSkipsSpacedTestFile(t *testing.T) {
+	const path = "dir/my fixture_test.go"
+	diff := strings.Join([]string{
+		"diff --git a/" + path + " b/" + path,
+		"--- a/" + path + "\t",
+		"+++ b/" + path + "\t",
+		"@@ -1 +1,2 @@",
+		" package x",
+		`+want := "1.2.3"`,
+	}, "\n")
+	if vs := scanHardcodedVersions(diff); len(vs) != 0 {
+		t.Fatalf("scanHardcodedVersions must skip a spaced _test.go file, got: %#v", vs)
+	}
+}
+
+// TestNewFileFromGitHeader pins the header fallback used before the "+++ b/"
+// marker is seen (and for diffs lacking that marker): it must split on " b/",
+// not whitespace, so spaced new-file paths are recovered whole.
+func TestNewFileFromGitHeader(t *testing.T) {
+	cases := map[string]string{
+		"diff --git a/svc.go b/svc.go":                 "svc.go",
+		"diff --git a/dir/my file.go b/dir/my file.go": "dir/my file.go",
+		"diff --git a/pkg/x.go b/pkg/x.go":             "pkg/x.go",
+		"diff --git nonsense":                          "", // no " b/" separator
+	}
+	for header, want := range cases {
+		if got := newFileFromGitHeader(header); got != want {
+			t.Errorf("newFileFromGitHeader(%q) = %q, want %q", header, got, want)
+		}
+	}
+}
+
+// TestParseHunkStart pins the hunk-header parser shared by every scanner
+// (the +c value of "@@ -a,b +c,d @@"), including the comma-less single-line form.
+func TestParseHunkStart(t *testing.T) {
+	cases := map[string]int{
+		"@@ -1,0 +1,5 @@":            1,
+		"@@ -10,3 +42,7 @@ func x()": 42,
+		"@@ -0,0 +1 @@":              1, // no comma: single added line
+		"@@ -5 +5 @@":                5,
+		"garbage":                    0, // no '+' -> 0
+	}
+	for hunk, want := range cases {
+		if got := parseHunkStart(hunk); got != want {
+			t.Errorf("parseHunkStart(%q) = %d, want %d", hunk, got, want)
+		}
+	}
+}
+
+// TestForEachAddedLineTracksFileAndLine is the regression guard for the de-dup:
+// the shared walker must resolve the correct file AND new-file line number across
+// MULTIPLE files and MULTIPLE hunks — the exact bookkeeping that was previously
+// copy-pasted into each scanner and could drift. It also proves the per-file
+// reset (onFileBoundary) fires at each new file.
+func TestForEachAddedLineTracksFileAndLine(t *testing.T) {
+	diff := strings.Join([]string{
+		"diff --git a/alpha.go b/alpha.go",
+		"--- a/alpha.go",
+		"+++ b/alpha.go",
+		"@@ -1,0 +10,2 @@",
+		"+line ten",
+		"+line eleven",
+		"@@ -20,0 +30,1 @@",
+		"+line thirty",
+		"diff --git a/beta.go b/beta.go",
+		"--- a/beta.go",
+		"+++ b/beta.go",
+		"@@ -1,0 +1,1 @@",
+		"+beta first",
+	}, "\n")
+
+	type rec struct {
+		file string
+		no   int
+		text string
+	}
+	var got []rec
+	var boundaries []string
+	forEachAddedLine(diff, func(f string) { boundaries = append(boundaries, f) }, func(a addedLine) {
+		got = append(got, rec{a.file, a.no, strings.TrimPrefix(a.text, "+")})
+	})
+
+	want := []rec{
+		{"alpha.go", 10, "line ten"},
+		{"alpha.go", 11, "line eleven"},
+		{"alpha.go", 30, "line thirty"}, // second hunk resets the line counter to +30
+		{"beta.go", 1, "beta first"},    // new file resets to its own hunk start
+	}
+	if len(got) != len(want) {
+		t.Fatalf("added lines = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("line %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if len(boundaries) != 2 || boundaries[0] != "alpha.go" || boundaries[1] != "beta.go" {
+		t.Errorf("file boundaries = %v, want [alpha.go beta.go]", boundaries)
+	}
+}

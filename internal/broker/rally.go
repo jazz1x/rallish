@@ -55,6 +55,10 @@ func newRallyStore() *rallyStore {
 
 // nextParticipant returns the next participant after `current` using round-robin
 // over the ordered participants list. Returns "" if none found (shouldn't happen).
+//
+// Note: when handoff_to is supplied repeatedly to the same participant, that
+// participant receives the baton every turn — starvation of others is a known
+// property of explicit handoffs and is accepted by design.
 func (rs *rallySession) nextParticipant(current contract.ParticipantName, preferredNext contract.ParticipantName) contract.ParticipantName {
 	if preferredNext != "" {
 		for _, p := range rs.participants {
@@ -151,7 +155,8 @@ func writeRallyError(w http.ResponseWriter, err error) {
 		errors.Is(err, contract.ErrInvalidSessionID),
 		errors.Is(err, contract.ErrInvalidPattern),
 		errors.Is(err, contract.ErrDuplicateName),
-		errors.Is(err, contract.ErrTooFewParticipants):
+		errors.Is(err, contract.ErrTooFewParticipants),
+		errors.Is(err, contract.ErrSelfHandoff):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	default:
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -476,6 +481,12 @@ func (s *Server) handleRallyDone(w http.ResponseWriter, r *http.Request) {
 		ht, herr := contract.NewParticipantName(req.HandoffTo)
 		if herr != nil {
 			writeRallyError(w, herr)
+			return
+		}
+		// Reject self-handoff: passing the baton to yourself is a no-op and
+		// almost certainly a client bug.
+		if ht == as {
+			writeRallyError(w, fmt.Errorf("participant %q: %w", as, contract.ErrSelfHandoff))
 			return
 		}
 		handoffTo = ht

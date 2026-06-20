@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,6 +91,36 @@ func TestStore_Append_NotFound(t *testing.T) {
 
 	err = store.Append(ctx, "nonexistent", contract.TurnRequest{}, contract.TurnResponse{})
 	require.Error(t, err)
+}
+
+// TestStore_Replay_OversizedTurn is the regression guard for the 64 KiB
+// bufio.Scanner limit: a TurnRecord whose JSONL line exceeds 64 KiB (a large
+// agent response — common for code/diff output) must replay intact, not be
+// silently truncated mid-log. False-positive guard: a normal turn appended after
+// the big one still replays.
+func TestStore_Replay_OversizedTurn(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, err := NewStore(dir, &fakeClock{t: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)})
+	require.NoError(t, err)
+
+	sess, err := store.Create(ctx, contract.Preset{Name: "p"}, contract.Task{Title: "t", RepoRoot: "/tmp"})
+	require.NoError(t, err)
+
+	// ~200 KiB summary — well past bufio.Scanner's 64 KiB default token cap.
+	big := strings.Repeat("x", 200*1024)
+	require.NoError(t, store.Append(ctx, sess.ID,
+		contract.TurnRequest{Session: sess.ID, Turn: 1, Role: "planner"},
+		contract.TurnResponse{Summary: big}))
+	require.NoError(t, store.Append(ctx, sess.ID,
+		contract.TurnRequest{Session: sess.ID, Turn: 2, Role: "builder"},
+		contract.TurnResponse{Summary: "small"}))
+
+	records, err := store.Replay(ctx, sess.ID)
+	require.NoError(t, err)
+	require.Len(t, records, 2, "oversized line must not truncate the replay")
+	require.Equal(t, big, records[0].Resp.Summary, "oversized summary must round-trip intact")
+	require.Equal(t, "small", records[1].Resp.Summary)
 }
 
 func TestStore_Replay_NotFound(t *testing.T) {

@@ -34,9 +34,9 @@ ssl:
   logical:
     tools: [Bash, Read, Write]
     side_effects:
-      reads: ["tmp/cycle-*.json", "git HEAD", "ssh git@github.com"]
+      reads: ["~/.rallish/cycles/cycle-*.json", "git HEAD", "ssh git@github.com"]
       writes:
-        - "tmp/cycle-*.json (매 사이클 갱신)"
+        - "~/.rallish/cycles/cycle-*.json (매 사이클 갱신)"
         - "git commits (사이클당 1개, conventional message)"
       deletes: []
 ---
@@ -47,7 +47,7 @@ ssl:
 멀티 에이전트 핑퐁 지원: rallish가 3사이클 마다 어댑터를 교체한다.
 
 ## 동반 파일
-- 상태 스키마: `tmp/cycle-<id>.json`
+- 상태 스키마: `~/.rallish/cycles/cycle-<id>.json`
 - 브로커 이벤트: `rallish cycle watch --cycle-id <id>`
 - 로그 스트림: `rallish daemon` 로그 (SSE via `cycle watch`)
 
@@ -55,14 +55,14 @@ ssl:
 
 ```
 ┌─ 사이클 시작 ──────────────────────────────────────┐
-│  1. tmp/cycle-<id>.json 읽기 (재개점)              │
+│  1. 사이클 상태 읽기 (재개점)                      │
 │  2. Preflight 게이트 (브랜치, 클린, 목표, SSH)     │
 │  3. Audit 게이트 (make check-all)                  │
 │  4. Local 게이트 (--local-gate, 설정 시)           │
 │  5. Philosophy 게이트 (ROP / SSOT / SRP 스위프)    │
 │  6. Polish 게이트 (테스트, 린트, no-raw-ansi)      │
 │  7. Commit 게이트 (conventional message, amend 금지)│
-│  8. tmp/cycle-<id>.json 업데이트                   │
+│  8. 사이클 상태 업데이트                           │
 │  9. 3사이클 마다 에이전트 리셋                     │
 └────────────────────────────────────────────────────┘
        ↓ rate-limit / token exhaust
@@ -208,7 +208,7 @@ rallish 용어로:
 - 게이트 비정상 종료
 - 사용자 중단 요청
 
-중단 시 항상 `halted=true` + `halt_reason`을 `tmp/cycle-<id>.json`에 기록.
+중단 시 항상 `halted=true` + `halt_reason`을 `~/.rallish/cycles/cycle-<id>.json`에 기록.
 
 ## 안티 패턴
 

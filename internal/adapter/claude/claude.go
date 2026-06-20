@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/jazz1x/rallish/internal/adapter"
 	"github.com/jazz1x/rallish/pkg/contract"
@@ -86,7 +88,27 @@ func (a *Adapter) Run(ctx context.Context, req contract.TurnRequest) (contract.T
 
 	var resp contract.TurnResponse
 	if err := adapter.ParseLastJSONBlock(out, &resp); err != nil {
-		return contract.TurnResponse{}, fmt.Errorf("parsing response: %w", err)
+		// claude exited 0 but its stdout was not the expected JSON (a CLI notice,
+		// a rate-limit message, an auth prompt, …). Surface a bounded snippet of
+		// that output so the failure is diagnosable instead of an opaque parse error.
+		return contract.TurnResponse{}, fmt.Errorf("parsing response: %w\noutput: %s", err, snippet(out, 2000))
 	}
 	return resp, nil
+}
+
+// snippet returns a bounded, trailing-trimmed view of adapter output for error
+// diagnostics — capped so a large stdout cannot bloat the error/ledger.
+func snippet(b []byte, maxLen int) string {
+	s := strings.TrimSpace(string(b))
+	if len(s) <= maxLen {
+		return s
+	}
+	tail := s[len(s)-maxLen:]
+	// A byte-offset cut can land inside a multibyte rune, leaving a dangling
+	// continuation byte at the front; advance past it so the snippet is always
+	// valid UTF-8 (drops at most the partial leading rune, keeping the byte cap).
+	for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
+		tail = tail[1:]
+	}
+	return "…" + tail
 }

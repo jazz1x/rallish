@@ -51,25 +51,19 @@ type Driver struct {
 	goalDiscoverer func(context.Context, State) (string, error)
 }
 
-// NewCycleDriver creates a driver with the standard gate pipeline.
+// NewCycleDriver creates a driver with no pipeline. The gates package imports
+// cycle, so cycle cannot construct the real gate pipeline itself; the caller
+// injects it via SetPipeline (CLI) or SetPipelineFactory (orchestrator) before
+// the first Step. The canonical pipeline is gates.StandardPipeline.
 func NewCycleDriver(sync *StateFileSync) *Driver {
 	return &Driver{
-		pipeline:       StandardPipeline(),
+		pipeline:       nil,
 		sync:           sync,
 		sleeper:        defaultSleeper{},
 		StepTimeout:    10 * time.Minute,
 		ReadRetries:    3,
 		goalDiscoverer: discoverNextGoal,
 	}
-}
-
-// StandardPipeline returns the default ordered gate list.
-func StandardPipeline() Pipeline {
-	// We import gates here to avoid an import cycle.
-	// gates package imports cycle; cycle must not import gates.
-	// Therefore StandardPipeline lives outside cycle package or we use a registry.
-	// To keep it simple, we leave pipeline construction to the caller (broker/CLI).
-	return nil
 }
 
 // SetPipeline assigns a custom pipeline to the driver.
@@ -226,6 +220,33 @@ func (d *Driver) Step(ctx context.Context, state State) Result[State] {
 	// Goal is consumed; caller (orchestrator or human) must set a new one before next step.
 	current.NextCycleGoal = ""
 	current.UpdatedAt = time.Now().UnixMilli()
+
+	// VERIFIER-PRODUCED completion record (G4 audit completeness + G5 reviver
+	// progress signal). The gate pipeline passed and the cycle completed, so the
+	// *verifier* — the gates, not agent self-report — went green. Record, in order:
+	//   - one gate_passed per gate report (the per-gate outcomes), then
+	//   - one validation_green (the un-gameable progress signal the worker cannot
+	//     write — the only thing that lifts a sticky cycle_halted seal, see
+	//     LedgerSealsResume), then
+	//   - one cycle_completed terminal marker.
+	// These are the same events the broker step path records (gate_passed +
+	// cycle_completed via handleStepCycle); validation_green closes the B1 gap
+	// where the reviver's only revive-condition had no production emit site.
+	//
+	// Driver.Step is the SSOT success path for the one-shot reference driver and
+	// the orchestrator; the broker uses its own pipeline path and does NOT call
+	// Step, so there is no double-emit. Guarded by d.ledger != nil: with no ledger
+	// injected the records are silently absent (additive, never a failure).
+	if d.ledger != nil {
+		now := time.Now().UnixMilli()
+		for _, report := range result.Reports() {
+			_ = d.ledger.Append(contract.NewGateLedgerEntry(now, current.ID, report))
+		}
+		_ = d.ledger.Append(contract.NewHarnessLedgerEntry(
+			now, current.ID, contract.LedgerEventValidationGreen, "gate pipeline passed", nil))
+		_ = d.ledger.Append(contract.NewHarnessLedgerEntry(
+			now, current.ID, contract.LedgerEventCycleCompleted, "cycle step completed", nil))
+	}
 
 	return Success(current, result.Reports()...)
 }

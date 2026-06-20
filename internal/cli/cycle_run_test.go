@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jazz1x/rallish/internal/adapter"
 	"github.com/jazz1x/rallish/internal/adapter/fake"
 	"github.com/jazz1x/rallish/internal/cycle"
+	"github.com/jazz1x/rallish/internal/cycle/gates"
 	"github.com/jazz1x/rallish/pkg/contract"
 )
 
@@ -23,15 +25,18 @@ func (g passCLIGate) Run(_ context.Context, state cycle.State) (contract.GateRes
 	return contract.GateSuccess{R: contract.GateReport{Gate: g.name, Passed: true}}, state
 }
 
-// failCLIGate halts with a configured reason.
+// failCLIGate halts with a configured reason. stderr is optional: when set it
+// populates the failing report's Stderr (the human "why" the halt path should
+// surface); the zero value leaves it empty, matching a gate that reports no detail.
 type failCLIGate struct {
 	name   string
 	reason contract.HaltReason
+	stderr string
 }
 
 func (g failCLIGate) Name() string { return g.name }
 func (g failCLIGate) Run(_ context.Context, state cycle.State) (contract.GateResult, cycle.State) {
-	return contract.GateFailure{R: contract.GateReport{Gate: g.name, Passed: false}, Reason: g.reason}, state
+	return contract.GateFailure{R: contract.GateReport{Gate: g.name, Passed: false, Stderr: g.stderr}, Reason: g.reason}, state
 }
 
 func passPipeline(_ cycle.State) cycle.Pipeline {
@@ -134,6 +139,79 @@ func TestRunCycleOnceGateFailureExitCode(t *testing.T) {
 	entries, _ := ledger.ReadAll()
 	if reason, sealed := cycle.LedgerSealsResume(entries); !sealed || reason != contract.HaltGateFailure {
 		t.Fatalf("ledger not sealed with gate-failure: reason=%q sealed=%v", reason, sealed)
+	}
+}
+
+// TestRunCycleOnceHaltSurfacesGateReason guards the user-facing "why": when a gate
+// fails, the failing report's Stderr (e.g. the preflight reason `branch "main" is
+// forbidden`) must reach stdout alongside the reason+code, not be discarded. All
+// preflight failure classes otherwise collapse to the opaque `preflight-failed`.
+func TestRunCycleOnceHaltSurfacesGateReason(t *testing.T) {
+	dir := t.TempDir()
+	const id = "cyc_why"
+	writeCycle(t, dir, id, contract.NewCycleRequest{Goal: "feat: work", MaxCycles: 5})
+
+	const why = `branch "main" is forbidden`
+	var out bytes.Buffer
+	err := runCycleOnce(context.Background(), runOnceOptions{
+		cycleID:  id,
+		stateDir: dir,
+		pipeline: func(_ cycle.State) cycle.Pipeline {
+			return cycle.Pipeline{failCLIGate{name: "preflight", reason: contract.HaltPreflightFailed, stderr: why}}
+		},
+	}, &out)
+
+	// Behaviour/exit-code unchanged: still the documented preflight code.
+	assertExitCode(t, err, exitHaltPreflight)
+	if !strings.Contains(out.String(), why) {
+		t.Fatalf("halt output dropped the failing gate's reason; got:\n%s", out.String())
+	}
+}
+
+// TestRunCycleOnceHaltNoGateDetailIsQuiet is the false-positive guard for the
+// reason line: a halt whose failing report carries NO Stderr must not print a
+// spurious empty `reason:` line — the extra line appears only when there is a why.
+func TestRunCycleOnceHaltNoGateDetailIsQuiet(t *testing.T) {
+	dir := t.TempDir()
+	const id = "cyc_nowhy"
+	writeCycle(t, dir, id, contract.NewCycleRequest{Goal: "feat: work", MaxCycles: 5})
+
+	var out bytes.Buffer
+	err := runCycleOnce(context.Background(), runOnceOptions{
+		cycleID:  id,
+		stateDir: dir,
+		pipeline: func(_ cycle.State) cycle.Pipeline {
+			return cycle.Pipeline{failCLIGate{name: "audit", reason: contract.HaltGateFailure}}
+		},
+	}, &out)
+
+	assertExitCode(t, err, exitHaltGateFailure)
+	if strings.Contains(out.String(), "reason:") {
+		t.Fatalf("halt with no gate detail printed a spurious reason line; got:\n%s", out.String())
+	}
+}
+
+// TestFailedStderr pins the detail-selection contract: the LAST failing report's
+// Stderr wins (the gate that short-circuited the pipeline), with a fallback to the
+// last report and an empty string for no reports (no fabricated detail).
+func TestFailedStderr(t *testing.T) {
+	if got := failedStderr(nil); got != "" {
+		t.Fatalf("empty reports: got %q, want \"\"", got)
+	}
+	reports := []contract.GateReport{
+		{Gate: "preflight", Passed: true},
+		{Gate: "audit", Passed: false, Stderr: "make check failed"},
+	}
+	if got := failedStderr(reports); got != "make check failed" {
+		t.Fatalf("last failing report: got %q, want %q", got, "make check failed")
+	}
+	// No report marked !Passed → fall back to the last report's Stderr.
+	allPass := []contract.GateReport{
+		{Gate: "preflight", Passed: true, Stderr: "warn-a"},
+		{Gate: "audit", Passed: true, Stderr: "warn-b"},
+	}
+	if got := failedStderr(allPass); got != "warn-b" {
+		t.Fatalf("fallback to last report: got %q, want %q", got, "warn-b")
 	}
 }
 
@@ -441,5 +519,54 @@ func TestRunCycleOnceAgentUnknownAdapterIsOperationalError(t *testing.T) {
 	var coded interface{ ExitCode() int }
 	if errors.As(err, &coded) {
 		t.Fatalf("unknown adapter must be a plain operational error, not an exit-coded halt (got code %d)", coded.ExitCode())
+	}
+}
+
+// TestBuildCLIPipelineGoldenOrder pins the CLI one-shot's canonical gate order,
+// including repo-local command gates inserted after audit. It is the CLI-side
+// half of the single golden assertion shared with the broker
+// (TestPipelineForStateInsertsLocalGatesAfterAudit): both delegate to
+// gates.StandardPipeline, so this guards against a gate being dropped or
+// reordered in the shared constructor or in the CLI delegation. The explicit
+// `want` slice is the false-positive guard — it fails loudly on any drift rather
+// than only checking the two builders agree with each other.
+func TestBuildCLIPipelineGoldenOrder(t *testing.T) {
+	state, err := cycle.NewState(contract.NewCycleRequest{
+		Goal:       "feat: test cli pipeline order",
+		LocalGates: []string{"go test ./...", "go vet ./..."},
+	}, "cyc_cli_order")
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+
+	names := buildCLIPipeline(state).Names()
+	want := []string{
+		"preflight",
+		"audit",
+		"cmd:go test ./...",
+		"cmd:go vet ./...",
+		"philosophy",
+		"polish",
+		"commit",
+	}
+	if len(names) != len(want) {
+		t.Fatalf("names = %v, want %v", names, want)
+	}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("names = %v, want %v", names, want)
+		}
+	}
+
+	// The CLI builder must be exactly the shared constructor — no divergent
+	// wrapping. This ties both entry points to one source of truth.
+	shared := gates.StandardPipeline(state.AuditCmd, state.PolishTestCmd, state.LocalGates).Names()
+	if len(shared) != len(names) {
+		t.Fatalf("buildCLIPipeline %v diverges from gates.StandardPipeline %v", names, shared)
+	}
+	for i := range names {
+		if shared[i] != names[i] {
+			t.Fatalf("buildCLIPipeline %v diverges from gates.StandardPipeline %v", names, shared)
+		}
 	}
 }

@@ -242,7 +242,43 @@ the skill invocation.
 
 ### Autonomous harness commands
 
-rallish also ships a repo-local work harness for long autonomous runs (G1–G6 guardrails: safety, verification gates, A2A interop, audit ledger, anti-spin, action-gate). Two harness-specific commands:
+rallish also ships a repo-local work harness for long autonomous runs (G1–G6 guardrails: safety, verification gates, A2A interop, audit ledger, anti-spin, action-gate).
+
+**Daemon requirement:** `cycle new`, `cycle status`, `cycle halt`, and the SSE-watch commands route through the broker. **The daemon must be running** before invoking these:
+
+```bash
+rallish daemon &                              # start the daemon first
+rallish cycle new --goal "fix tests" \
+  --branch feat/fix \
+  --audit-cmd "npm test"                      # optional: override the default 'make check-all'
+rallish cycle status --cycle-id <id>
+rallish cycle halt   --cycle-id <id>
+```
+
+`cycle run --once` is the exception — it resumes state directly from `~/.rallish/cycles/cycle-<id>.json` (the SAME location the daemon writes to; override via `--state-dir`, default `~/.rallish/cycles`) and does **not** require the daemon. That path is outside any worked-on repo, so the broker never dirties the working tree PreflightGate requires clean.
+
+**Audit gate:** the built-in audit gate runs `make check-all` by default. Every repo that uses the cycle harness must expose a `make check-all` target, or override it at cycle creation time with `--audit-cmd`:
+
+| Ecosystem | Example `--audit-cmd` |
+|---|---|
+| Node / npm | `npm test` |
+| Node / bun | `bun run test` |
+| Rust | `cargo test` |
+| Python | `pytest` |
+| Make (custom target) | `make my-check` |
+
+An empty or whitespace-only `--audit-cmd` is a misconfiguration: the gate fails loudly and does not silently revert to the default.
+
+**Polish gate:** the built-in polish gate runs `go test -race ./...` by default. Override with `--polish-test-cmd` at cycle creation:
+
+| Ecosystem | Example `--polish-test-cmd` |
+|---|---|
+| Node / npm | `npm test` |
+| Rust | `cargo test` |
+| Python | `pytest` |
+| Make | `make test` |
+
+An empty or whitespace-only `--polish-test-cmd` is a misconfiguration (fails loudly). The `scripts/check-no-raw-ansi.sh` check is rallish-repo-specific and is silently skipped when the script is absent in the target repo (not applicable, not an error).
 
 ```bash
 # Bounded one-shot pass a cron/scheduler drives (exit code = halt reason)
@@ -299,7 +335,21 @@ See [Installation](#installation) for the one-time setup.
 - Preset files are validated for path traversal before loading.
 - `forbidigo` lint rules ban `os.Environ()` and `exec.Command("sh"…)`
   in library code (see DESIGN.md §14).
-- `govulncheck` runs on every push/PR.
+- CI security pipeline (every push/PR) runs four complementary scanners,
+  each on a distinct axis so none is redundant:
+  - **govulncheck** — Go-call-graph-aware CVEs in the source + deps.
+  - **trivy** (`fs`) — CVEs in the dependency tree + misconfiguration +
+    secret detection; fails on HIGH/CRITICAL with an available fix
+    (`ignore-unfixed`); `.toolchain`/`dist` skipped, `.trivyignore` for
+    documented risk acceptances.
+  - **gitleaks** — secret scanning over the working tree AND full git
+    history; `.gitleaks.toml` allowlists synthetic test fixtures.
+  - **arch-guard** — `go test ./internal/arch/`: the external deny-list
+    (no scheduler/cron/graph-DB) and the clean-architecture layer
+    invariants (contract is the SSOT leaf; no inner→outer import).
+- Locally, `lefthook` pre-push runs gitleaks when installed
+  (skip-if-absent — CI is authoritative); install with `brew install
+  gitleaks` (and `trivy`) to scan before pushing.
 - Release artifacts carry SBOMs (SPDX-JSON, via syft) and cosign
   keyless signatures.
 

@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,6 +27,76 @@ func newTestBroker(t *testing.T) *Server {
 	}
 	b := budget.NewBudgeter(&realClock{})
 	return NewServer(store, b)
+}
+
+// TestRefreshFromFilePicksUpExternalHalt is the regression guard for the stale
+// cycle-status bug: a cycle the daemon cached, then halted out-of-band by a
+// separate `cycle run --once` process (a disk write the daemon never saw), must
+// be reflected after refreshFromFile — get() alone would serve the stale cache.
+func TestRefreshFromFilePicksUpExternalHalt(t *testing.T) {
+	dir := t.TempDir()
+	cs := newCycleStore()
+	cs.baseDir = dir
+
+	id := "cyc_stale_1"
+	live, err := cycle.NewState(contract.NewCycleRequest{Goal: "feat: x", MaxCycles: 5}, id)
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+	live.UpdatedAt = 1000
+	cs.put(id, live) // daemon caches the live (not-halted) state
+
+	if got, _ := cs.get(id); got.Halted {
+		t.Fatal("precondition: cached state must be live")
+	}
+
+	// An external process advances the SAME cycle on disk to halted, newer.
+	halted := live
+	halted.Halted = true
+	halted.HaltReason = contract.HaltStuck
+	halted.UpdatedAt = 2000
+	if err := cycle.NewStateFileSync(cs.statePath(id)).Write(halted); err != nil {
+		t.Fatalf("write halted state: %v", err)
+	}
+
+	cs.refreshFromFile(id)
+	got, ok := cs.get(id)
+	if !ok {
+		t.Fatal("cycle vanished after refresh")
+	}
+	if !got.Halted || got.HaltReason != contract.HaltStuck {
+		t.Fatalf("stale status: halted=%v reason=%q, want halted+stuck after external halt", got.Halted, got.HaltReason)
+	}
+}
+
+// TestRefreshFromFileDoesNotRegressNewerCache is the false-positive guard: an
+// OLDER disk snapshot must NOT clobber a newer in-process cache (the daemon's own
+// handleStep -> put write), or refresh would undo fresh state.
+func TestRefreshFromFileDoesNotRegressNewerCache(t *testing.T) {
+	dir := t.TempDir()
+	cs := newCycleStore()
+	cs.baseDir = dir
+
+	id := "cyc_fresh_1"
+	old, err := cycle.NewState(contract.NewCycleRequest{Goal: "feat: x", MaxCycles: 5}, id)
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+	old.UpdatedAt = 1000
+	if err := cycle.NewStateFileSync(cs.statePath(id)).Write(old); err != nil {
+		t.Fatalf("write old state: %v", err)
+	}
+
+	newer := old
+	newer.NextCycleGoal = "feat: newer in-process goal"
+	newer.UpdatedAt = 3000
+	cs.put(id, newer) // daemon's newer in-process state
+
+	cs.refreshFromFile(id)
+	got, _ := cs.get(id)
+	if got.NextCycleGoal != "feat: newer in-process goal" {
+		t.Fatalf("newer cache regressed to stale disk: goal = %q", got.NextCycleGoal)
+	}
 }
 
 func TestHandleCreateCycle(t *testing.T) {
@@ -287,14 +359,21 @@ func TestHandleStepCycleRequiresGoal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read ledger: %v", err)
 	}
-	if len(entries) < 3 {
-		t.Fatalf("ledger entries = %#v, want at least create/complete/gate", entries)
+	// On a passing step the broker now records, after cycle_created:
+	// validation_green (B1 — the verifier-produced progress signal the reviver
+	// keys on) → cycle_completed → one gate_passed per report. Before the B1 fix
+	// validation_green had no emit site here.
+	if len(entries) < 4 {
+		t.Fatalf("ledger entries = %#v, want at least create/green/complete/gate", entries)
 	}
-	if entries[1].Type != contract.LedgerEventCycleCompleted {
-		t.Fatalf("second ledger entry = %q, want cycle_completed", entries[1].Type)
+	if entries[1].Type != contract.LedgerEventValidationGreen {
+		t.Fatalf("second ledger entry = %q, want validation_green", entries[1].Type)
 	}
-	if entries[2].Type != contract.LedgerEventGatePassed || entries[2].Gate != "mock" {
-		t.Fatalf("third ledger entry = %#v, want mock gate passed", entries[2])
+	if entries[2].Type != contract.LedgerEventCycleCompleted {
+		t.Fatalf("third ledger entry = %q, want cycle_completed", entries[2].Type)
+	}
+	if entries[3].Type != contract.LedgerEventGatePassed || entries[3].Gate != "mock" {
+		t.Fatalf("fourth ledger entry = %#v, want mock gate passed", entries[3])
 	}
 
 	// Step again without a new goal should fail because CompleteCycle cleared it.
@@ -509,6 +588,70 @@ func TestBrokerOrchestrateEndToEnd(t *testing.T) {
 	}
 	if final.Halted {
 		t.Fatal("expected not halted after max cycles")
+	}
+}
+
+// TestCycleSyncsMapConcurrentAccess drives the real cycle handlers concurrently
+// to assert the syncs map is never touched outside cs.mu. handleCreateCycle
+// writes syncs (putSync) while handleGetCycle on a memory-miss id makes cs.get()
+// mutate the same map under the lock. Run under -race this would report
+// `DATA RACE` (and risk `fatal error: concurrent map writes`) if any handler
+// reached s.cycleStore.syncs directly instead of via the locked accessors.
+func TestCycleSyncsMapConcurrentAccess(t *testing.T) {
+	srv := newTestBroker(t)
+	srv.SetCyclesDir(t.TempDir())
+
+	const workers = 16
+	var wg sync.WaitGroup
+	wg.Add(workers * 2)
+
+	for i := 0; i < workers; i++ {
+		// Writer: POST /cycles -> handleCreateCycle -> putSync(id, sync).
+		go func(n int) {
+			defer wg.Done()
+			body, _ := json.Marshal(contract.NewCycleRequest{
+				Goal:      "feat: race writer",
+				Branch:    fmt.Sprintf("feat/race-%d", n),
+				MaxCycles: 1,
+			})
+			req := httptest.NewRequest(http.MethodPost, "/cycles", bytes.NewReader(body))
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+		}(i)
+
+		// Reader: GET /cycles/{miss} -> handleGetCycle -> cs.get() mutates syncs.
+		// Unknown ids force the memory-miss filesystem path that writes the map
+		// under cs.mu, racing the writers above on the shared map header.
+		go func(n int) {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/cycles/miss_%d", n), nil)
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+		}(i)
+	}
+	wg.Wait()
+
+	// False-positive guard: the locked accessors must not have broken the happy
+	// path. A fresh create still returns 201, and the sync it registers must be
+	// retrievable via getSync (proving putSync actually stored it, not that the
+	// race merely disappeared because writes were dropped).
+	body, _ := json.Marshal(contract.NewCycleRequest{
+		Goal:      "feat: guard",
+		Branch:    "feat/guard",
+		MaxCycles: 1,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/cycles", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("guard create status = %d, want 201", rec.Code)
+	}
+	var created contract.CycleState
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("guard unmarshal: %v", err)
+	}
+	if _, ok := srv.cycleStore.getSync(created.ID); !ok {
+		t.Fatalf("getSync(%q) = false, want registered sync after create", created.ID)
 	}
 }
 

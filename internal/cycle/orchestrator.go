@@ -76,9 +76,10 @@ func (o *MultiAgentOrchestrator) Run(ctx context.Context, cfg contract.Orchestra
 	}
 
 	// Reviver guard (G5): a cycle that already halted is sealed. A cron/driver
-	// re-trigger must not silently revive it. The mutable state file is removed
-	// on halt, but the append-only ledger persists, so read it once up front and
-	// refuse to resume when the last cycle_halted has no later validation_green.
+	// re-trigger must not silently revive it. Regardless of whether the mutable
+	// state file survives (the broker removes it on halt; the one-shot path does
+	// not), the append-only ledger persists, so read it once up front and refuse
+	// to resume when the last cycle_halted has no later validation_green.
 	if o.ledger != nil {
 		entries, lerr := o.ledger.ReadAll()
 		if lerr != nil {

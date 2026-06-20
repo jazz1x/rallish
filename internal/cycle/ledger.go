@@ -3,12 +3,46 @@ package cycle
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/jazz1x/rallish/pkg/contract"
 )
+
+// ledgerLocks serializes the read-modify-write of the hash chain PER LEDGER FILE
+// (keyed by absolute path), not per LedgerFileSync instance. The broker creates a
+// fresh LedgerFileSync on every appendLedger call, and an async orchestrate
+// goroutine can race a step handler writing the SAME cycle ledger; an
+// instance-level mutex would not see the other instance. Without this, two
+// concurrent Append calls both read the same on-disk tail as PrevHash and fork
+// the chain (VerifyChain then fails). A process-wide registry keyed by path is
+// the in-process serialization point for a given ledger.
+//
+// Scope and lifetime (intentional): the guarantee is IN-PROCESS only. The
+// registry holds one entry per distinct ledger path for the lifetime of the
+// process and never reclaims entries — a halted cycle may still be appended to
+// (revival re-reads/writes the same path), so there is no point at which a given
+// path is provably append-free and safe to Delete. Entries are tiny (one path
+// string + a *sync.Mutex) and cycle creation is low-frequency, so the resulting
+// growth is bounded by the number of cycles a daemon ever runs (kilobytes over a
+// long lifetime), not a hot path. Cross-process serialization is NOT provided:
+// an in-memory mutex cannot coordinate a daemon and a separate `cycle run --once`
+// writing the same ledger — that relies on single-active-writer-per-cycle across
+// processes, and would need an OS file lock (flock) on the path if ever required.
+var ledgerLocks sync.Map // map[string]*sync.Mutex
+
+func lockForLedger(path string) *sync.Mutex {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path // best-effort key; a relative path still locks consistently within a process
+	}
+	m, _ := ledgerLocks.LoadOrStore(abs, &sync.Mutex{})
+	return m.(*sync.Mutex)
+}
 
 // LedgerFileSync persists append-only harness ledger events as JSONL.
 type LedgerFileSync struct {
@@ -27,6 +61,12 @@ func NewLedgerFileSync(path string) *LedgerFileSync {
 // form. Single-writer append-only ordering already holds, so the on-disk tail is
 // the authoritative predecessor.
 func (s *LedgerFileSync) Append(entry contract.HarnessLedgerEntry) error {
+	// Serialize the whole read-modify-write against any other writer of the SAME
+	// ledger file so prev_hash → hash → append is atomic and the chain cannot fork.
+	lock := lockForLedger(s.path)
+	lock.Lock()
+	defer lock.Unlock()
+
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("mkdir ledger: %w", err)
@@ -72,22 +112,46 @@ func (s *LedgerFileSync) lastHash() (string, error) {
 	defer func() { _ = f.Close() }()
 
 	last := contract.LedgerGenesisHash
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
+	err = forEachLedgerLine(f, func(line []byte) error {
 		var entry contract.HarnessLedgerEntry
 		if err := json.Unmarshal(line, &entry); err != nil {
-			return "", fmt.Errorf("unmarshal ledger entry: %w", err)
+			return fmt.Errorf("unmarshal ledger entry: %w", err)
 		}
 		last = entry.Hash
-	}
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("scan ledger: %w", err)
+		return nil
+	})
+	if err != nil {
+		return "", err
 	}
 	return last, nil
+}
+
+// forEachLedgerLine streams the JSONL file line-by-line with NO fixed line-size
+// cap. bufio.Scanner has a 64 KiB default token limit that silently bricks the
+// whole chain on one oversized entry (a gate report with large stdout/violations
+// can exceed it); bufio.Reader.ReadBytes grows unbounded, so the audit layer is
+// not brittle to entry size. Empty lines are skipped.
+func forEachLedgerLine(r io.Reader, fn func(line []byte) error) error {
+	reader := bufio.NewReader(r)
+	for {
+		line, err := reader.ReadBytes('\n')
+		trimmed := line
+		// Drop the trailing newline (ReadBytes includes it except possibly at EOF).
+		if n := len(trimmed); n > 0 && trimmed[n-1] == '\n' {
+			trimmed = trimmed[:n-1]
+		}
+		if len(trimmed) > 0 {
+			if ferr := fn(trimmed); ferr != nil {
+				return ferr
+			}
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return fmt.Errorf("read ledger: %w", err)
+		}
+	}
 }
 
 // ReadAll returns every ledger event in append order.
@@ -102,16 +166,16 @@ func (s *LedgerFileSync) ReadAll() ([]contract.HarnessLedgerEntry, error) {
 	defer func() { _ = f.Close() }()
 
 	var entries []contract.HarnessLedgerEntry
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
+	err = forEachLedgerLine(f, func(line []byte) error {
 		var entry contract.HarnessLedgerEntry
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			return nil, fmt.Errorf("unmarshal ledger entry: %w", err)
+		if err := json.Unmarshal(line, &entry); err != nil {
+			return fmt.Errorf("unmarshal ledger entry: %w", err)
 		}
 		entries = append(entries, entry)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan ledger: %w", err)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return entries, nil
 }

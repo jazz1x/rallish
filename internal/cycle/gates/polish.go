@@ -4,6 +4,7 @@ package gates
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -11,46 +12,79 @@ import (
 	"github.com/jazz1x/rallish/pkg/contract"
 )
 
+// defaultPolishTestCmd is the test command run by PolishGate when no override is set.
+const defaultPolishTestCmd = "go test -race ./..."
+
 // PolishGate runs the completion self-check table before claiming a cycle is done.
-// It mirrors the /polish skill gate: tests, lint, no raw ANSI, conventional commit ready.
-type PolishGate struct{}
+// It mirrors the /polish skill gate: tests pass, no raw ANSI (rallish-repo-specific),
+// and conventional commit prefix present.
+//
+// TestCmdOverride, if non-empty, replaces the default `go test -race ./...` test command.
+// It is split on whitespace; the first token is the executable. An override that is set
+// but contains only whitespace is a misconfiguration and causes the gate to fail loudly
+// (no silent revert to default).
+//
+// The `scripts/check-no-raw-ansi.sh` check is skipped when the script is not present in
+// the working directory — it is a rallish-repo-specific check that does not apply to
+// arbitrary repositories. This is "not applicable" (structural skip), not error-masking,
+// and is therefore not a ROP violation. When the script IS present, a failure hard-fails
+// the gate exactly as before.
+type PolishGate struct {
+	// TestCmdOverride replaces the default `go test -race ./...` when non-empty.
+	// Configure via the cycle's polish_test_cmd config field. Leave empty to use
+	// the default.
+	TestCmdOverride string
+}
 
 // Name returns the canonical gate name.
 func (PolishGate) Name() string { return "polish" }
 
-// Run executes the polish checks.
-func (PolishGate) Run(ctx context.Context, state cycle.State) (contract.GateResult, cycle.State) {
+// Run executes the polish checks. The default test command is `go test -race ./...`;
+// set TestCmdOverride to use a project-specific command (e.g. "npm test", "cargo test").
+// An override that trims to empty is a misconfiguration and fails loudly — it does not
+// silently revert to the default.
+func (g PolishGate) Run(ctx context.Context, state cycle.State) (contract.GateResult, cycle.State) {
 	start := timeNow()
 	report := contract.GateReport{Gate: "polish"}
 	var violations []contract.Violation
 
 	// 1. Tests pass.
-	if err := runCheck(ctx, "go", "test", "-race", "./..."); err != nil {
+	rawCmd := defaultPolishTestCmd
+	if g.TestCmdOverride != "" {
+		trimmed := strings.TrimSpace(g.TestCmdOverride)
+		if trimmed == "" {
+			// Override was set to whitespace-only: misconfiguration — fail loudly.
+			report.Passed = false
+			report.Stderr = "polish_test_cmd override is set but contains only whitespace — cannot silently revert to default; set it to a valid command or leave it unset"
+			report.DurationMS = elapsed(start)
+			return contract.GateFailure{R: report, Reason: contract.HaltGateFailure}, state
+		}
+		rawCmd = trimmed
+	}
+	parts := strings.Fields(rawCmd)
+	testCmd := exec.CommandContext(ctx, parts[0], parts[1:]...) //nolint:gosec // polish_test_cmd is an explicit cycle-owner configuration surface
+	testOut, testErr := testCmd.CombinedOutput()
+	if testErr != nil {
 		violations = append(violations, contract.Violation{
 			Type:    "polish",
-			Message: fmt.Sprintf("tests failed: %v", err),
+			Message: truncateOutput(fmt.Sprintf("tests failed (%s): %v (%s)", rawCmd, testErr, strings.TrimSpace(string(testOut))), 500),
 		})
 	}
 
-	// 2. Lint pass (golangci-lint).
-	if err := runCheck(ctx, "make", "check"); err != nil {
-		// make check is a superset; if it fails we note it but don't hard-fail
-		// because the AuditGate already ran the full suite.
-		violations = append(violations, contract.Violation{
-			Type:    "polish",
-			Message: truncateOutput(fmt.Sprintf("lint check: %v", err), 500),
-		})
+	// 2. No raw ANSI in new code (rallish-repo-specific; skipped when absent).
+	// If the script does not exist in the working directory, this check is not
+	// applicable to this repository and is silently skipped — it is not an error.
+	const ansiScript = "scripts/check-no-raw-ansi.sh"
+	if _, statErr := os.Stat(ansiScript); statErr == nil {
+		if err := runCheck(ctx, "bash", ansiScript); err != nil {
+			violations = append(violations, contract.Violation{
+				Type:    "polish",
+				Message: truncateOutput(fmt.Sprintf("raw ANSI check failed: %v", err), 500),
+			})
+		}
 	}
 
-	// 3. No raw ANSI in new code.
-	if err := runCheck(ctx, "bash", "scripts/check-no-raw-ansi.sh"); err != nil {
-		violations = append(violations, contract.Violation{
-			Type:    "polish",
-			Message: truncateOutput(fmt.Sprintf("raw ANSI check failed: %v", err), 500),
-		})
-	}
-
-	// 4. Conventional commit message ready (non-empty, contains a prefix).
+	// 3. Conventional commit message ready (non-empty, contains a prefix).
 	goal := strings.TrimSpace(state.NextCycleGoal)
 	if goal == "" {
 		violations = append(violations, contract.Violation{
