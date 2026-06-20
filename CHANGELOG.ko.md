@@ -106,6 +106,16 @@
 - **`scripts/check-no-raw-ANSI.sh` 가드레일** + lefthook 훅 —
   `internal/ui` 외부에 `\x1b[` 이스케이프가 들어가면 커밋을 실패시킵니다.
 
+### 수정됨
+
+- **랠리 바통 패싱 하드닝.** `rally done` 과 데몬 종료 사이의 닫힌 채널에
+  send 하는 panic 경쟁 조건을 수정했습니다. 이미 interrupted 된 세션에서
+  `done` 을 호출하면 세션이 부활하지 않고 거부됩니다. interrupted 세션에
+  참가자가 join 하면 `{"closed":true}` 센티널을 즉시 수신합니다. 세션 참가자가
+  아닌 `handoff_to` 는 조용히 round-robin 으로 돌아가지 않고 거부됩니다.
+  중복 join 은 스트림 orphaning 과 cleanup 손상을 막기 위해 거부됩니다.
+  CLI 는 interrupted-session 409 와 "not your turn" 409 를 구분하여 출력합니다.
+
 ## [0.2.1] - 2026-05-18
 
 ### 변경됨

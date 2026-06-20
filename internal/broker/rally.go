@@ -151,12 +151,17 @@ func writeRallyError(w http.ResponseWriter, err error) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 	case errors.Is(err, contract.ErrNotHolder):
 		http.Error(w, err.Error(), http.StatusConflict)
+	case errors.Is(err, contract.ErrSessionInterrupted):
+		http.Error(w, err.Error(), http.StatusConflict)
+	case errors.Is(err, contract.ErrAlreadyConnected):
+		http.Error(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, contract.ErrInvalidName),
 		errors.Is(err, contract.ErrInvalidSessionID),
 		errors.Is(err, contract.ErrInvalidPattern),
 		errors.Is(err, contract.ErrDuplicateName),
 		errors.Is(err, contract.ErrTooFewParticipants),
-		errors.Is(err, contract.ErrSelfHandoff):
+		errors.Is(err, contract.ErrSelfHandoff),
+		errors.Is(err, contract.ErrHandoffToNotMember):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	default:
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -303,6 +308,34 @@ func (s *Server) handleRallyBaton(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If the session has already been interrupted, send the terminal close
+	// sentinel immediately so the client does not hang.
+	if sess.status == contract.RallyStateInterrupted {
+		rallies.mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusOK)
+		rc := http.NewResponseController(w)
+		if err := rc.Flush(); err != nil {
+			logger.ErrorContext(ctx, "initial flush", "error", err)
+			return
+		}
+		_ = rc.SetWriteDeadline(time.Now().Add(2 * time.Second))
+		_, _ = fmt.Fprintf(w, "data: {\"closed\":true}\n\n")
+		_ = rc.SetWriteDeadline(time.Time{})
+		_ = rc.Flush()
+		return
+	}
+
+	// Reject duplicate joins: a second live stream for the same participant
+	// would orphan the first one and corrupt cleanupStream.
+	if existingCh := sess.streams[as]; existingCh != nil {
+		rallies.mu.Unlock()
+		writeRallyError(w, fmt.Errorf("participant %q: %w", as, contract.ErrAlreadyConnected))
+		return
+	}
+
 	// Register stream channel (buffer=1 so sender never blocks).
 	ch := make(chan contract.BatonEvent, 1)
 	sess.streams[as] = ch
@@ -329,6 +362,13 @@ func (s *Server) handleRallyBaton(w http.ResponseWriter, r *http.Request) {
 		evt := contract.BatonEvent{TurnN: sess.turnN, From: from, Note: note}
 		immediateEvent = &evt
 	}
+
+	// Queue the immediate event on the channel so it is delivered by the same
+	// SSE loop as regular handoff events. This removes a special-case write
+	// that raced with CloseAllRallies.
+	if immediateEvent != nil {
+		ch <- *immediateEvent
+	}
 	rallies.mu.Unlock()
 
 	// Flush SSE headers immediately.
@@ -340,20 +380,6 @@ func (s *Server) handleRallyBaton(w http.ResponseWriter, r *http.Request) {
 	if err := rc.Flush(); err != nil {
 		logger.ErrorContext(ctx, "initial flush", "error", err)
 		return
-	}
-
-	// Deliver immediate baton event if applicable.
-	if immediateEvent != nil {
-		if err := writeSSEEvent(w, rc, *immediateEvent); err != nil {
-			logger.ErrorContext(ctx, "write immediate baton event", "error", err)
-			cleanupStream(id, as)
-			return
-		}
-		// Drain channel if the sender also sent the event.
-		select {
-		case <-ch:
-		default:
-		}
 	}
 
 	// Heartbeat ticker — every 15 s.
@@ -500,12 +526,35 @@ func (s *Server) handleRallyDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reject operations on an already-interrupted session.
+	if sess.status == contract.RallyStateInterrupted {
+		rallies.mu.Unlock()
+		writeRallyError(w, fmt.Errorf("session %q: %w", rawID, contract.ErrSessionInterrupted))
+		return
+	}
+
 	// Only the current holder may call done.
 	if sess.holder != as {
 		rallies.mu.Unlock()
 		writeRallyError(w, fmt.Errorf("participant %q is not the current baton holder (holder: %q): %w",
 			as, sess.holder, contract.ErrNotHolder))
 		return
+	}
+
+	// Validate handoff_to membership if provided.
+	if handoffTo != "" {
+		member := false
+		for _, p := range sess.participants {
+			if p == handoffTo {
+				member = true
+				break
+			}
+		}
+		if !member {
+			rallies.mu.Unlock()
+			writeRallyError(w, fmt.Errorf("handoff_to %q: %w", handoffTo, contract.ErrHandoffToNotMember))
+			return
+		}
 	}
 
 	// Determine next participant.
@@ -526,17 +575,14 @@ func (s *Server) handleRallyDone(w http.ResponseWriter, r *http.Request) {
 	sess.status = contract.RallyTurnState(next.String())
 
 	// Deliver baton event to next participant's stream if connected.
+	// This send is performed while holding the mutex so that CloseAllRallies
+	// cannot close the channel underneath us (send-on-closed-channel panic).
 	evt := contract.BatonEvent{
 		TurnN: sess.turnN,
 		From:  as.String(),
 		Note:  req.Note,
 	}
-	nextCh := sess.streams[next]
-	turnN := sess.turnN // snapshot before unlock to avoid data race
-	rallies.mu.Unlock()
-
-	// Send non-blocking to avoid deadlock if the channel is full or participant absent.
-	if nextCh != nil {
+	if nextCh := sess.streams[next]; nextCh != nil {
 		select {
 		case nextCh <- evt:
 		default:
@@ -548,10 +594,9 @@ func (s *Server) handleRallyDone(w http.ResponseWriter, r *http.Request) {
 		"session_id", id,
 		"from", as,
 		"to", next,
-		"turn_n", turnN,
+		"turn_n", sess.turnN,
 	)
 
-	rallies.mu.Lock()
 	pub := sess.toPublic(nowMS)
 	rallies.mu.Unlock()
 
@@ -622,12 +667,13 @@ func setRallyStaleThreshold(sessionID contract.SessionID, thresholdMS int64) {
 // streams. Idempotent.
 func CloseAllRallies() {
 	rallies.mu.Lock()
-	defer rallies.mu.Unlock()
+	var toClose []chan contract.BatonEvent
 	for _, sess := range rallies.sessions {
 		if sess.status == contract.RallyStateInterrupted {
 			continue
 		}
 		sess.status = contract.RallyStateInterrupted
+		sess.holder = ""
 		for name, ch := range sess.streams {
 			if ch == nil {
 				continue
@@ -638,8 +684,12 @@ func CloseAllRallies() {
 			case ch <- contract.BatonEvent{Closed: true}:
 			default:
 			}
-			close(ch)
 			delete(sess.streams, name)
+			toClose = append(toClose, ch)
 		}
+	}
+	rallies.mu.Unlock()
+	for _, ch := range toClose {
+		close(ch)
 	}
 }

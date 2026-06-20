@@ -195,11 +195,11 @@ While alice holds the baton:
 **Expected:**
 
 ```
-not your turn — participant "bob" is not the current baton holder (holder: "alice")
+not your turn — participant "bob" is not the current baton holder (holder: "alice"): rally: not the current baton holder
 Error: not your turn
 ```
 
-HTTP layer returns `409 Conflict`.
+HTTP layer returns `409 Conflict`. If the session has been interrupted (e.g. by daemon shutdown), the message is instead `session interrupted — session "rly_...": rally: session interrupted`.
 
 ---
 
@@ -217,7 +217,7 @@ Kill Terminal B's `rally join` process (Ctrl-C). Wait 31 s or use a test helper,
   - bob (last seen 32s ago) [stale]
 ```
 
-Staleness is advisory — the broker does not auto-advance the baton. Alice may call `done --handoff-to alice` to skip bob if desired.
+Staleness is advisory — the broker does not auto-advance the baton. With three or more participants Alice may call `done --handoff-to carol` to skip bob; self-handoff (`--handoff-to alice`) is rejected.
 
 ---
 
@@ -230,7 +230,7 @@ Staleness is advisory — the broker does not auto-advance the baton. Alice may 
 **Expected:**
 
 ```
-Error: create rally session failed: 400 invalid participant name "bad name!": must match ^[a-zA-Z0-9_-]{1,16}$
+Error: create rally session failed: 400 participant "bad name!": rally: invalid participant name
 ```
 
 Same validation applies at `rally join` and `rally done`.
@@ -247,12 +247,6 @@ wait "$DAEMON_PID"
 echo "Exit code: $?"
 ```
 
-**Expected broker log:**
-
-```
-time=... level=INFO msg="session_interrupted" session_id=rly_1747382400000_a3f9
-```
-
 **Expected on each join terminal:** the SSE stream closes cleanly (clients see `session closed`).
 
 After the broker restarts:
@@ -264,10 +258,10 @@ After the broker restarts:
 **Expected:**
 
 ```
-Status:       interrupted
+status failed: 404 session "rly_...": rally: session not found
 ```
 
-The session state is preserved in memory until the broker process exits; after a restart the session is gone (in-memory store; no disk persistence for rally sessions).
+The session state is preserved in memory until the broker process exits; after a restart the session is gone (in-memory store; no disk persistence for rally sessions). Calling `rally done` on an interrupted session returns `409 session interrupted`; calling `rally join` returns the `{"closed":true}` sentinel immediately.
 
 ---
 
