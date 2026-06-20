@@ -91,16 +91,19 @@ idle
   → non-current participant POSTs done → 409 Conflict
   → current participant POSTs done → transition to next participant (round-robin
     or handoff_to if provided and in participants list)
+  → handoff_to not in participants list → 400 Bad Request
 
 interrupted
   → set on broker SIGTERM; SSE connections receive clean close before handler returns
+  → any subsequent POST done → 409 Conflict (session interrupted)
+  → any subsequent baton join by a session member → immediate `{"closed":true}` sentinel (non-members still receive 403)
 ```
 
 Session ID format: `rly_<unixmillis>_<rand4hex>` (e.g. `rly_1747382400000_a3f9`). Four hex chars from `crypto/rand` read once at create time. Validated by `validateRallyID`.
 
 ### 4.5 Heartbeat / liveness
 
-Each open baton SSE stream sends a `data: {"ping":true}\n\n` comment every 15 s. Broker records `last_seen[name] = now.UnixMilli()` on each ping write. `handleRallyStatus` marks a participant `stale` if `now - last_seen[name] > 30000 ms`. Staleness is advisory; it does not auto-advance the baton.
+Each open baton SSE stream sends a `: ping\n\n` SSE comment every 15 s. Broker records `last_seen[name] = now.UnixMilli()` on each ping write. `handleRallyStatus` marks a participant `stale` if `now - last_seen[name] > 30000 ms`. Staleness is advisory; it does not auto-advance the baton.
 
 SSE writes use `http.ResponseController.SetWriteDeadline` (2 s per write) + `select` on `ctx.Done()` to avoid blocking on dead clients.
 
@@ -112,7 +115,7 @@ rallish rally new --participants A,B [--repo <path>] [--task <text>]
 
 rallish rally join --session-id <id> --as <name>
   → GET /rally/sessions/:id/baton?as=<name>
-  → blocks on SSE; on BatonEvent prints: "baton → you (turn <N>, from <from>)"
+  → blocks on SSE; on BatonEvent prints: "🎾 your turn (turn <N>, from <from>): <note>"
 
 rallish rally done --session-id <id> --as <name> [--note <text>] [--handoff-to <name>]
   → POST /rally/sessions/:id/done?as=<name>  body: DoneRequest
@@ -157,5 +160,5 @@ rallish rally status --session-id <id>
 1. `make check` passes (`go vet` + `golangci-lint` + `go test -race ./...`).
 2. Two-terminal manual smoke: `rallish rally new --participants A,B --task "ping"` → session-id printed; terminal-1 `rallish rally join ... --as A` blocks; terminal-2 `rallish rally status ...` shows `A_turn`; terminal-1 `rallish rally done ... --as A`; terminal-2's join unblocks and prints baton cue; repeat one more round; `rallish rally status` shows 2 handoffs in history.
 3. `rallish squash --preset solo-ralph --task "ping"` runs to completion identically to the former `rallish start --preset solo-ralph --task "ping"` (no regression on session creation, runner loop, exit conditions).
-4. SIGTERM to broker mid-rally: broker logs `session_interrupted`, participants' SSE connections receive `data: {"closed":true}` before the process exits; subsequent `rallish rally status` returns `status: interrupted`.
+4. SIGTERM to broker mid-rally: participants' SSE connections receive `data: {"closed":true}` before the process exits; after restart, `rallish rally status` returns `404 session not found` (rally sessions are in-memory only).
 5. README (EN/KO/JP) and CHANGELOG (EN/KO/JP) updated; `docs/runbook-rally-mode.md` exists and describes the two-terminal smoke test end-to-end.
