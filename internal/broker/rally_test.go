@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -64,6 +65,64 @@ func createSession(t *testing.T, ts *httptest.Server, participants []string) con
 	var sess contract.RallySession
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&sess))
 	return sess
+}
+
+// awaitBaton opens a baton long-poll as `as` and blocks until the first SSE
+// data frame arrives (the participant now holds the baton), then returns while a
+// background goroutine keeps the stream open until ctx is cancelled so the
+// caller can drive subsequent handoffs against a live holder.
+//
+// The single deadline is ctx (the caller's existing 5 s budget) — not an
+// arbitrary inner bound — and every failure path returns the REAL reason (HTTP
+// status, stream error, premature close) instead of a blind "did not receive
+// baton" timeout. The result channel is buffered (cap 1) and written exactly
+// once on every path, so the sender never blocks and the readiness signal can
+// never be lost, even if the caller has already given up on ctx. This replaces
+// three copies of a hand-rolled goroutine whose tight 3 s sub-deadline raced and
+// flaked under the race detector on a loaded CI runner.
+func awaitBaton(ctx context.Context, baseURL, sessionID, as string) error {
+	result := make(chan error, 1)
+	go func() {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			baseURL+"/rally/sessions/"+sessionID+"/baton?as="+as, nil)
+		if err != nil {
+			result <- fmt.Errorf("build baton request: %w", err)
+			return
+		}
+		resp, err := (&http.Client{}).Do(req)
+		if err != nil {
+			result <- fmt.Errorf("baton request: %w", err)
+			return
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			result <- fmt.Errorf("baton HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			return
+		}
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			if strings.HasPrefix(scanner.Text(), "data: ") {
+				result <- nil
+				// Hold the stream open until ctx is cancelled (test teardown).
+				for scanner.Scan() {
+				}
+				return
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			result <- fmt.Errorf("baton stream: %w", err)
+			return
+		}
+		result <- errors.New("baton stream closed before any data frame")
+	}()
+
+	select {
+	case err := <-result:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("awaiting baton for %s: %w", as, ctx.Err())
+	}
 }
 
 // ---- Tests ----
@@ -426,38 +485,7 @@ func TestRallyDoneNonHolder409(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	ready := make(chan struct{})
-	go func() {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			ts.URL+"/rally/sessions/"+sessionID+"/baton?as=alice", nil)
-		if err != nil {
-			return
-		}
-		client := &http.Client{}
-		resp, err := client.Do(req)
-		if err != nil {
-			return
-		}
-		defer func() { _ = resp.Body.Close() }()
-		// Signal after first data line read.
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.HasPrefix(line, "data: ") {
-				close(ready)
-				// Block.
-				break
-			}
-		}
-		for scanner.Scan() {
-		}
-	}()
-
-	select {
-	case <-ready:
-	case <-time.After(3 * time.Second):
-		t.Fatal("alice baton not received")
-	}
+	require.NoError(t, awaitBaton(ctx, ts.URL, sessionID, "alice"))
 
 	// Bob calls done while alice holds → 409.
 	resp := postJSON(t, ts.URL+"/rally/sessions/"+sessionID+"/done?as=bob", `{}`)
@@ -717,37 +745,7 @@ func TestRallySelfHandoffRejected(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	ready := make(chan struct{})
-	go func() {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			ts.URL+"/rally/sessions/"+sessionID+"/baton?as=alice", nil)
-		if err != nil {
-			return
-		}
-		resp, err := (&http.Client{}).Do(req)
-		if err != nil {
-			return
-		}
-		defer func() { _ = resp.Body.Close() }()
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
-			if strings.HasPrefix(scanner.Text(), "data: ") {
-				select {
-				case ready <- struct{}{}:
-				default:
-				}
-				break
-			}
-		}
-		for scanner.Scan() {
-		}
-	}()
-
-	select {
-	case <-ready:
-	case <-time.After(3 * time.Second):
-		t.Fatal("alice did not receive baton in time")
-	}
+	require.NoError(t, awaitBaton(ctx, ts.URL, sessionID, "alice"))
 
 	// Alice tries to pass the baton to herself — must be 400.
 	doneBody := `{"handoff_to":"alice"}`
@@ -773,37 +771,7 @@ func TestRallyExplicitHandoffToDifferentParticipant(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	ready := make(chan struct{})
-	go func() {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			ts.URL+"/rally/sessions/"+sessionID+"/baton?as=alice", nil)
-		if err != nil {
-			return
-		}
-		resp, err := (&http.Client{}).Do(req)
-		if err != nil {
-			return
-		}
-		defer func() { _ = resp.Body.Close() }()
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
-			if strings.HasPrefix(scanner.Text(), "data: ") {
-				select {
-				case ready <- struct{}{}:
-				default:
-				}
-				break
-			}
-		}
-		for scanner.Scan() {
-		}
-	}()
-
-	select {
-	case <-ready:
-	case <-time.After(3 * time.Second):
-		t.Fatal("alice did not receive baton in time")
-	}
+	require.NoError(t, awaitBaton(ctx, ts.URL, sessionID, "alice"))
 
 	// Alice explicitly passes to charlie (skipping bob) — must succeed with 200.
 	doneBody := `{"handoff_to":"charlie"}`
