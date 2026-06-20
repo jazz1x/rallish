@@ -97,6 +97,15 @@ type addedLine struct {
 func forEachAddedLine(diff string, onFileBoundary func(file string), fn func(addedLine)) {
 	file := ""
 	lineNo := 0
+	// sawHunk gates the "+++ b/" override to the genuine per-file header position.
+	// The new-file marker appears exactly once per file, in the header block BEFORE
+	// the first "@@" hunk. Once a hunk has started, an added CONTENT line whose
+	// source begins "++ b/<path>" renders raw as "+++ b/<path>" — identical to the
+	// header — so matching "+++ b/" anywhere would corrupt `file` mid-hunk and skip
+	// that line. Restricting the override to the pre-hunk window (and routing
+	// post-hunk "+++ ..." lines through the "+" content case below) keeps both the
+	// path attribution and the scan correct. Reset per file at the "diff --git" header.
+	sawHunk := false
 	for _, line := range strings.Split(diff, "\n") {
 		switch {
 		case strings.HasPrefix(line, "diff --git"):
@@ -107,21 +116,24 @@ func forEachAddedLine(diff string, onFileBoundary func(file string), fn func(add
 			// strings.Fields would split spaced paths into the wrong token.
 			file = newFileFromGitHeader(line)
 			lineNo = 0
+			sawHunk = false
 			if onFileBoundary != nil {
 				onFileBoundary(file)
 			}
-		case strings.HasPrefix(line, "+++ "):
+		case !sawHunk && strings.HasPrefix(line, "+++ "):
 			// "+++ b/<path>" names the new file exactly (a trailing tab is
 			// appended when the path contains spaces); "+++ /dev/null" marks a
 			// deletion, which has no new file — leave the header-derived name.
+			// Only the pre-hunk header is honoured here; see sawHunk above.
 			if p := strings.TrimPrefix(line, "+++ b/"); p != line {
 				file = strings.TrimRight(p, "\t")
 			}
 		case strings.HasPrefix(line, "@@"):
 			// The hunk header names the first new-file line; the next added line
 			// IS that number, so seed one below it and let the increment land on it.
+			sawHunk = true
 			lineNo = parseHunkStart(line) - 1
-		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
+		case strings.HasPrefix(line, "+"):
 			lineNo++
 			fn(addedLine{file: file, no: lineNo, text: line})
 		}

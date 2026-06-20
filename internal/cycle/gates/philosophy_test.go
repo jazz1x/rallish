@@ -153,6 +153,73 @@ func TestForEachAddedLineSpacedPath(t *testing.T) {
 	}
 }
 
+// TestForEachAddedLinePlusPlusContentLine is the regression guard for the
+// "+++ b/" mid-hunk corruption: an ADDED content line whose source begins
+// "++ b/<path>" renders raw as "+++ b/<path>" — byte-identical to the per-file
+// new-file header. The walker must NOT treat such a content line as a header:
+// (a) it must still be SCANNED as an added line (the header-only "+++" case used
+// to swallow it), and (b) Violation.File must stay the real file, not flip to the
+// path embedded in the content. The discriminator is position: a genuine header
+// precedes the first "@@"; a "+++ ..." line after a hunk has started is content.
+func TestForEachAddedLinePlusPlusContentLine(t *testing.T) {
+	// real.go's hunk contains an added line whose CONTENT is "++ b/other.go",
+	// which git renders as the raw line "+++ b/other.go" (leading + for "added").
+	diff := strings.Join([]string{
+		"diff --git a/real.go b/real.go",
+		"--- a/real.go",
+		"+++ b/real.go",
+		"@@ -1,0 +1,2 @@",
+		"+package x",
+		"+++ b/other.go", // an added content line, NOT a header
+	}, "\n")
+
+	type rec struct {
+		file string
+		text string
+	}
+	var got []rec
+	forEachAddedLine(diff, nil, func(a addedLine) {
+		got = append(got, rec{a.file, a.text})
+	})
+
+	// Both added lines must be visited, and the file must remain real.go throughout
+	// (the "+++ b/other.go" content line must not override it to other.go).
+	want := []rec{
+		{"real.go", "+package x"},
+		{"real.go", "+++ b/other.go"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("added lines = %d, want %d (the '+++ b/other.go' content line must be scanned, not swallowed as a header): %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("line %d = %+v, want %+v (file must stay real.go; content line must be scanned verbatim)", i, got[i], want[i])
+		}
+	}
+}
+
+// TestScanHardcodedVersionsPlusPlusContentDoesNotDefeatTestCarveOut is the
+// end-to-end false-positive guard: the _test.go carve-out in scanHardcodedVersions
+// keys off the resolved file name, so a "+++ b/prod.go" content line inside a
+// *_test.go hunk must NOT flip `file` to prod.go and thereby unmask a version
+// literal the carve-out is meant to ignore. Under the bug this yielded a spurious
+// hardcoded-version violation (and could escalate Run() to a self-audit HALT).
+func TestScanHardcodedVersionsPlusPlusContentDoesNotDefeatTestCarveOut(t *testing.T) {
+	// A *_test.go hunk that legitimately hardcodes a version, with an embedded
+	// "+++ b/prod.go" content line (e.g. a diff snippet inside a fixture) before it.
+	diff := strings.Join([]string{
+		"diff --git a/foo_test.go b/foo_test.go",
+		"--- a/foo_test.go",
+		"+++ b/foo_test.go",
+		"@@ -1,0 +1,2 @@",
+		"+++ b/prod.go", // content line inside the test file's hunk
+		`+const Version = "1.2.3"`,
+	}, "\n")
+	if vs := scanHardcodedVersions(diff); len(vs) != 0 {
+		t.Fatalf("a '+++ b/prod.go' content line must not flip the file off foo_test.go and defeat the _test.go carve-out, got: %#v", vs)
+	}
+}
+
 // TestPhilosophyScannerSkipsSpacedTestFile is the false-positive guard for the
 // spaced-path fix: the _test.go carve-out in scanHardcodedVersions keys off the
 // resolved file name, so it must still hold when that name contains a space.
