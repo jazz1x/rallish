@@ -120,3 +120,72 @@ func TestPhilosophyScannerSkipsTestFiles(t *testing.T) {
 		t.Fatalf("scanHardcodedVersions must skip _test.go files, got: %#v", vs)
 	}
 }
+
+// TestParseHunkStart pins the hunk-header parser shared by every scanner
+// (the +c value of "@@ -a,b +c,d @@"), including the comma-less single-line form.
+func TestParseHunkStart(t *testing.T) {
+	cases := map[string]int{
+		"@@ -1,0 +1,5 @@":            1,
+		"@@ -10,3 +42,7 @@ func x()": 42,
+		"@@ -0,0 +1 @@":              1, // no comma: single added line
+		"@@ -5 +5 @@":                5,
+		"garbage":                    0, // no '+' -> 0
+	}
+	for hunk, want := range cases {
+		if got := parseHunkStart(hunk); got != want {
+			t.Errorf("parseHunkStart(%q) = %d, want %d", hunk, got, want)
+		}
+	}
+}
+
+// TestForEachAddedLineTracksFileAndLine is the regression guard for the de-dup:
+// the shared walker must resolve the correct file AND new-file line number across
+// MULTIPLE files and MULTIPLE hunks — the exact bookkeeping that was previously
+// copy-pasted into each scanner and could drift. It also proves the per-file
+// reset (onFileBoundary) fires at each new file.
+func TestForEachAddedLineTracksFileAndLine(t *testing.T) {
+	diff := strings.Join([]string{
+		"diff --git a/alpha.go b/alpha.go",
+		"--- a/alpha.go",
+		"+++ b/alpha.go",
+		"@@ -1,0 +10,2 @@",
+		"+line ten",
+		"+line eleven",
+		"@@ -20,0 +30,1 @@",
+		"+line thirty",
+		"diff --git a/beta.go b/beta.go",
+		"--- a/beta.go",
+		"+++ b/beta.go",
+		"@@ -1,0 +1,1 @@",
+		"+beta first",
+	}, "\n")
+
+	type rec struct {
+		file string
+		no   int
+		text string
+	}
+	var got []rec
+	var boundaries []string
+	forEachAddedLine(diff, func(f string) { boundaries = append(boundaries, f) }, func(a addedLine) {
+		got = append(got, rec{a.file, a.no, strings.TrimPrefix(a.text, "+")})
+	})
+
+	want := []rec{
+		{"alpha.go", 10, "line ten"},
+		{"alpha.go", 11, "line eleven"},
+		{"alpha.go", 30, "line thirty"}, // second hunk resets the line counter to +30
+		{"beta.go", 1, "beta first"},    // new file resets to its own hunk start
+	}
+	if len(got) != len(want) {
+		t.Fatalf("added lines = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("line %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if len(boundaries) != 2 || boundaries[0] != "alpha.go" || boundaries[1] != "beta.go" {
+		t.Errorf("file boundaries = %v, want [alpha.go beta.go]", boundaries)
+	}
+}
