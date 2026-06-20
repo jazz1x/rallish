@@ -137,7 +137,7 @@ func (r *realClock) Now() time.Time { return time.Now() }
 // the dial timeout, or a non-nil error otherwise (no file, or stale socket).
 // Callers treat a nil return as "live daemon present — abort".
 func dialExistingDaemon(socketPath string, timeout time.Duration) error {
-	if _, err := os.Stat(socketPath); err != nil {
+	if _, err := os.Stat(socketPath); err != nil { //nolint:gosec // callers validate socketPath under the rallish home (socketUnderRoot) before dialing
 		return err // no file → no live daemon
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
