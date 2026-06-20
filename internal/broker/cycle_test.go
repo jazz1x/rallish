@@ -29,6 +29,76 @@ func newTestBroker(t *testing.T) *Server {
 	return NewServer(store, b)
 }
 
+// TestRefreshFromFilePicksUpExternalHalt is the regression guard for the stale
+// cycle-status bug: a cycle the daemon cached, then halted out-of-band by a
+// separate `cycle run --once` process (a disk write the daemon never saw), must
+// be reflected after refreshFromFile — get() alone would serve the stale cache.
+func TestRefreshFromFilePicksUpExternalHalt(t *testing.T) {
+	dir := t.TempDir()
+	cs := newCycleStore()
+	cs.baseDir = dir
+
+	id := "cyc_stale_1"
+	live, err := cycle.NewState(contract.NewCycleRequest{Goal: "feat: x", MaxCycles: 5}, id)
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+	live.UpdatedAt = 1000
+	cs.put(id, live) // daemon caches the live (not-halted) state
+
+	if got, _ := cs.get(id); got.Halted {
+		t.Fatal("precondition: cached state must be live")
+	}
+
+	// An external process advances the SAME cycle on disk to halted, newer.
+	halted := live
+	halted.Halted = true
+	halted.HaltReason = contract.HaltStuck
+	halted.UpdatedAt = 2000
+	if err := cycle.NewStateFileSync(cs.statePath(id)).Write(halted); err != nil {
+		t.Fatalf("write halted state: %v", err)
+	}
+
+	cs.refreshFromFile(id)
+	got, ok := cs.get(id)
+	if !ok {
+		t.Fatal("cycle vanished after refresh")
+	}
+	if !got.Halted || got.HaltReason != contract.HaltStuck {
+		t.Fatalf("stale status: halted=%v reason=%q, want halted+stuck after external halt", got.Halted, got.HaltReason)
+	}
+}
+
+// TestRefreshFromFileDoesNotRegressNewerCache is the false-positive guard: an
+// OLDER disk snapshot must NOT clobber a newer in-process cache (the daemon's own
+// handleStep -> put write), or refresh would undo fresh state.
+func TestRefreshFromFileDoesNotRegressNewerCache(t *testing.T) {
+	dir := t.TempDir()
+	cs := newCycleStore()
+	cs.baseDir = dir
+
+	id := "cyc_fresh_1"
+	old, err := cycle.NewState(contract.NewCycleRequest{Goal: "feat: x", MaxCycles: 5}, id)
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+	old.UpdatedAt = 1000
+	if err := cycle.NewStateFileSync(cs.statePath(id)).Write(old); err != nil {
+		t.Fatalf("write old state: %v", err)
+	}
+
+	newer := old
+	newer.NextCycleGoal = "feat: newer in-process goal"
+	newer.UpdatedAt = 3000
+	cs.put(id, newer) // daemon's newer in-process state
+
+	cs.refreshFromFile(id)
+	got, _ := cs.get(id)
+	if got.NextCycleGoal != "feat: newer in-process goal" {
+		t.Fatalf("newer cache regressed to stale disk: goal = %q", got.NextCycleGoal)
+	}
+}
+
 func TestHandleCreateCycle(t *testing.T) {
 	srv := newTestBroker(t)
 

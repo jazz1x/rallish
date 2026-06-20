@@ -115,13 +115,22 @@ func (cs *cycleStore) putSync(id string, sync *cycle.StateFileSync) {
 	cs.syncs[id] = sync
 }
 
-// refreshFromFile re-reads the state from disk and updates the in-memory cache.
+// refreshFromFile reconciles the in-memory cache with the on-disk state when an
+// EXTERNAL writer (a separate `cycle run --once` process) has advanced or halted
+// the cycle. Without this, get() serves whatever the daemon last cached, so a
+// cycle halted out-of-band keeps reporting halted=false forever (a stale-status
+// bug). It overwrites the cache only when the disk copy is at least as fresh
+// (UpdatedAt >= cached), so the daemon's own newer in-process writes (handleStep
+// -> put) are never clobbered by a slightly older disk snapshot.
 func (cs *cycleStore) refreshFromFile(id string) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	fs, err := loadCycleFromFile(cs.statePath(id))
 	if err != nil || fs.ID == "" {
 		return
+	}
+	if cached, ok := cs.states[id]; ok && fs.UpdatedAt < cached.UpdatedAt {
+		return // cache is newer (in-process write) — do not regress to a stale disk copy
 	}
 	cs.states[id] = fs
 	if cs.syncs[id] == nil {
@@ -236,6 +245,10 @@ func (s *Server) handleGetCycle(w http.ResponseWriter, r *http.Request) {
 	logger := slog.With("handler", "get_cycle")
 
 	id := r.PathValue("id")
+	// Reconcile with disk first: a separate `cycle run --once` process may have
+	// advanced or halted this cycle out-of-band, and get() would otherwise serve
+	// a stale cached state (e.g. halted=false on an already-halted cycle).
+	s.cycleStore.refreshFromFile(id)
 	state, ok := s.cycleStore.get(id)
 	if !ok {
 		logger.InfoContext(ctx, "cycle not found", "cycle_id", id)
