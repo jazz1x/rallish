@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/jazz1x/rallish/internal/adapter"
 	"github.com/jazz1x/rallish/pkg/contract"
@@ -86,7 +87,20 @@ func (a *Adapter) Run(ctx context.Context, req contract.TurnRequest) (contract.T
 
 	var resp contract.TurnResponse
 	if err := adapter.ParseLastJSONBlock(out, &resp); err != nil {
-		return contract.TurnResponse{}, fmt.Errorf("parsing response: %w", err)
+		// claude exited 0 but its stdout was not the expected JSON (a CLI notice,
+		// a rate-limit message, an auth prompt, …). Surface a bounded snippet of
+		// that output so the failure is diagnosable instead of an opaque parse error.
+		return contract.TurnResponse{}, fmt.Errorf("parsing response: %w\noutput: %s", err, snippet(out, 2000))
 	}
 	return resp, nil
+}
+
+// snippet returns a bounded, trailing-trimmed view of adapter output for error
+// diagnostics — capped so a large stdout cannot bloat the error/ledger.
+func snippet(b []byte, maxLen int) string {
+	s := strings.TrimSpace(string(b))
+	if len(s) <= maxLen {
+		return s
+	}
+	return "…" + s[len(s)-maxLen:]
 }
