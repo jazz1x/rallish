@@ -297,9 +297,30 @@ func (s *Server) handleStepCycle(w http.ResponseWriter, r *http.Request) {
 	logger := slog.With("handler", "step_cycle")
 
 	id := r.PathValue("id")
+	// Reconcile with disk first: a separate `cycle run --once` may have halted or
+	// advanced this cycle out-of-band. Without this, step runs on a stale cached
+	// state and writes it back — overwriting an on-disk halt, and (worse) emitting
+	// validation_green below, the very signal LedgerSealsResume keys on, which
+	// would lift the sticky seal. Mirrors handleGetCycle.
+	s.cycleStore.refreshFromFile(id)
 	state, ok := s.cycleStore.get(id)
 	if !ok {
 		http.Error(w, "cycle not found", http.StatusNotFound)
+		return
+	}
+
+	// Reviver guard (G5): refuse to advance a cycle the ledger has sealed with a
+	// sticky halt — the same 409 handleOrchestrate and `cycle run --once` return.
+	// Without it, a step with no preceding GET would resurrect a sealed cycle.
+	ledgerEntries, lerr := cycle.NewLedgerFileSync(s.cycleStore.ledgerPath(id)).ReadAll()
+	if lerr != nil {
+		logger.ErrorContext(ctx, "step read ledger", "cycle_id", id, "error", lerr)
+		http.Error(w, fmt.Sprintf("read ledger: %v", lerr), http.StatusInternalServerError)
+		return
+	}
+	if reason, sealed := cycle.LedgerSealsResume(ledgerEntries); sealed {
+		logger.InfoContext(ctx, "step refused: cycle sealed by halt", "cycle_id", id, "halt_reason", reason)
+		http.Error(w, fmt.Sprintf("cycle halted (%s); resume refused", reason), http.StatusConflict)
 		return
 	}
 
