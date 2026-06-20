@@ -20,7 +20,19 @@ import (
 // instance-level mutex would not see the other instance. Without this, two
 // concurrent Append calls both read the same on-disk tail as PrevHash and fork
 // the chain (VerifyChain then fails). A process-wide registry keyed by path is
-// the SSOT lock for a given ledger.
+// the in-process serialization point for a given ledger.
+//
+// Scope and lifetime (intentional): the guarantee is IN-PROCESS only. The
+// registry holds one entry per distinct ledger path for the lifetime of the
+// process and never reclaims entries — a halted cycle may still be appended to
+// (revival re-reads/writes the same path), so there is no point at which a given
+// path is provably append-free and safe to Delete. Entries are tiny (one path
+// string + a *sync.Mutex) and cycle creation is low-frequency, so the resulting
+// growth is bounded by the number of cycles a daemon ever runs (kilobytes over a
+// long lifetime), not a hot path. Cross-process serialization is NOT provided:
+// an in-memory mutex cannot coordinate a daemon and a separate `cycle run --once`
+// writing the same ledger — that relies on single-active-writer-per-cycle across
+// processes, and would need an OS file lock (flock) on the path if ever required.
 var ledgerLocks sync.Map // map[string]*sync.Mutex
 
 func lockForLedger(path string) *sync.Mutex {
