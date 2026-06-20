@@ -63,16 +63,37 @@ func RunSquash(ctx context.Context, opts SquashOptions) error {
 	socketFile := filepath.Join(sockDir, "socket")
 	socketPath, readErr := os.ReadFile(socketFile) //nolint:gosec // well-known path
 	trimmed := strings.TrimSpace(string(socketPath))
-	if readErr == nil && trimmed != "" && socketUnderRoot(trimmed, sockDir) {
+	// A live, in-root socket pointer wins. But the pointer (and socket file)
+	// survive a non-graceful daemon death (kill -9, OOM, reboot): without a
+	// liveness probe we would reuse the dead socket and fail at create session
+	// with a cryptic "connection refused" instead of auto-spawning a fresh
+	// daemon. Probe the socket; on a dead one, remove the stale pointer and fall
+	// through to the port/auto-spawn path, mirroring resolveBrokerClient.
+	socketLive := readErr == nil && trimmed != "" && socketUnderRoot(trimmed, sockDir) &&
+		dialExistingDaemon(trimmed, 300*time.Millisecond) == nil
+	if socketLive {
 		brokerURL = "http://rallish.local"
 		client = ipc.HTTPClientOverSocket(trimmed)
 		client.Timeout = 30 * time.Second
 	} else {
 		if readErr == nil && trimmed != "" {
-			slog.Warn("ignoring socket pointer outside rallish home", "path", trimmed)
+			if socketUnderRoot(trimmed, sockDir) {
+				_ = os.Remove(socketFile) // stale in-root pointer
+			} else {
+				slog.Warn("ignoring socket pointer outside rallish home", "path", trimmed)
+			}
 		}
 		portFile := filepath.Join(sockDir, "port")
 		port, err := readPortFile(portFile)
+		// A stale port file outlives a non-graceful daemon death just like the
+		// socket pointer, so a successful read is not enough — probe it. A dead
+		// (or missing) port both mean "no live broker": remove the stale file and
+		// auto-spawn, rather than reusing a dead port and failing at create
+		// session with a cryptic "connection refused".
+		if err == nil && dialPort(strings.TrimSpace(port)) != nil {
+			_ = os.Remove(portFile)
+			err = errors.New("stale port file removed")
+		}
 		if err != nil {
 			slog.Info("broker not running, starting daemon")
 			if err := startDaemon(opts.HomeDir); err != nil {

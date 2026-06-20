@@ -386,6 +386,70 @@ func TestHandleStepCycleRequiresGoal(t *testing.T) {
 	}
 }
 
+// TestHandleStepCycleRefusesSealedCycle is the regression guard for the step
+// seal-bypass: a cycle the ledger has sealed with a sticky halt (cycle_halted,
+// no later validation_green) must NOT be advanced by POST /step — not even with
+// no preceding GET to refresh the cache. Before the fix the step ran on the
+// stale (un-halted) cache, advanced the cycle, and emitted validation_green —
+// the very signal LedgerSealsResume keys on — silently lifting the seal and
+// resurrecting the halted cycle. A valid goal is supplied so the expected 409
+// can only come from the seal guard, not the empty-goal 400 (false-positive
+// guard); TestHandleStepCycleRequiresGoal already pins the un-sealed 200 path.
+func TestHandleStepCycleRefusesSealedCycle(t *testing.T) {
+	srv := newTestBroker(t)
+	srv.SetCyclePipeline(cycle.Pipeline{testGate{name: "mock"}}) // a passing pipeline
+
+	reqBody, _ := json.Marshal(contract.NewCycleRequest{Goal: "feat: sealed step"})
+	req := httptest.NewRequest(http.MethodPost, "/cycles", bytes.NewReader(reqBody))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201", rec.Code)
+	}
+	var created contract.CycleState
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created: %v", err)
+	}
+
+	// Seal it out-of-band: append cycle_halted straight to the ledger, exactly as
+	// an external `cycle run --once` halt would, with NO GET after — so the
+	// broker's in-memory cache still reads halted=false.
+	ledger := cycle.NewLedgerFileSync("tmp/cycle-" + created.ID + "-ledger.jsonl")
+	if err := ledger.Append(contract.NewHarnessLedgerEntry(
+		time.Now().UnixMilli(), created.ID, contract.LedgerEventCycleHalted, "stuck", nil)); err != nil {
+		t.Fatalf("seal ledger: %v", err)
+	}
+	if entries, err := ledger.ReadAll(); err != nil {
+		t.Fatalf("read ledger: %v", err)
+	} else if _, sealed := cycle.LedgerSealsResume(entries); !sealed {
+		t.Fatal("precondition: ledger must be sealed after the cycle_halted append")
+	}
+
+	// Step with a valid goal and no preceding GET → must be refused 409.
+	req = httptest.NewRequest(http.MethodPost, "/cycles/"+created.ID+"/step",
+		bytes.NewReader([]byte(`{"goal":"feat: try resume"}`)))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("sealed step status = %d, want 409 (resume refused)", rec.Code)
+	}
+
+	// The seal must still hold: the refused step must not have appended
+	// validation_green (which would lift it) or any cycle_completed.
+	entries, err := ledger.ReadAll()
+	if err != nil {
+		t.Fatalf("read ledger after step: %v", err)
+	}
+	if _, sealed := cycle.LedgerSealsResume(entries); !sealed {
+		t.Fatal("step must not have lifted the seal (no validation_green after the halt)")
+	}
+	for _, e := range entries {
+		if e.Type == contract.LedgerEventValidationGreen || e.Type == contract.LedgerEventCycleCompleted {
+			t.Fatalf("refused step must append no progress entries, found %q", e.Type)
+		}
+	}
+}
+
 func TestHandleOrchestrateNoRegistry(t *testing.T) {
 	srv := newTestBroker(t)
 
