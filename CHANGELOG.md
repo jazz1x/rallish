@@ -116,6 +116,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`scripts/check-no-raw-ANSI.sh` guardrail** + lefthook hook — fails
   the commit if a `\x1b[` escape lands outside `internal/ui`.
 
+### Fixed
+
+- **Rally baton-passing hardening.** Fixed a send-on-closed-channel panic
+  race between `rally done` and daemon shutdown. `done` on an already
+  interrupted session is now rejected instead of resurrecting the session.
+  Joining an interrupted session receives the `{"closed":true}` sentinel
+  immediately. `handoff_to` naming a non-member is now rejected rather
+  than silently falling back to round-robin. Duplicate joins are rejected
+  to prevent stream orphaning and cleanup corruption. The CLI now
+  distinguishes an interrupted-session 409 from "not your turn".
+
 ## [0.2.1] - 2026-05-18
 
 ### Changed

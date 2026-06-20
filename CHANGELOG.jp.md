@@ -113,6 +113,17 @@
 - **`scripts/check-no-raw-ANSI.sh` ガードレール** + lefthook フック —
   `internal/ui` の外で `\x1b[` エスケープが見つかればコミットを失敗させます。
 
+### 修正
+
+- **ラリー バトン パッシングのハードニング.** `rally done` とデーモン終了の
+  間に閉じたチャンネルへ send する panic 競合状態を修正しました。既に
+  interrupted となったセッションで `done` を呼ぶと、セッションが復活する
+  ことなく拒否されます。interrupted セッションに参加者が join すると
+  `{"closed":true}` センチネルを即座に受信します。セッション参加者でない
+  `handoff_to` は、黙って round-robin に戻るのではなく拒否されます。
+  重複 join はストリームの orphaning と cleanup 破損を防ぐため拒否されます。
+  CLI は interrupted-session 409 と "not your turn" 409 を区別して出力します。
+
 ## [0.2.1] - 2026-05-18
 
 ### 変更
