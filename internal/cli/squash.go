@@ -90,9 +90,9 @@ func RunSquash(ctx context.Context, opts SquashOptions) error {
 		// (or missing) port both mean "no live broker": remove the stale file and
 		// auto-spawn, rather than reusing a dead port and failing at create
 		// session with a cryptic "connection refused".
-		if err == nil && !portReachable(strings.TrimSpace(port)) {
+		if err == nil && dialPort(strings.TrimSpace(port)) != nil {
 			_ = os.Remove(portFile)
-			err = fmt.Errorf("stale port file removed")
+			err = errors.New("stale port file removed")
 		}
 		if err != nil {
 			slog.Info("broker not running, starting daemon")

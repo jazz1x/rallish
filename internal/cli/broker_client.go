@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -60,26 +61,27 @@ func resolveBrokerClient(homeDir string, connectTimeout time.Duration) (brokerCl
 	// port before handing back a client, otherwise callers surface a cryptic
 	// "connection refused" instead of the clean missing-broker message. On a dead
 	// port, remove the stale file so the next invocation auto-spawns cleanly.
-	if !portReachable(port) {
+	if derr := dialPort(port); derr != nil {
 		_ = os.Remove(portFile)
-		return brokerClient{}, fmt.Errorf("broker not running — start it first with: rallish daemon (stale port file removed): dial 127.0.0.1:%s: connection refused", port)
+		return brokerClient{}, fmt.Errorf("broker not running — start it first with: rallish daemon (stale port file removed): %w", derr)
 	}
 	url := "http://127.0.0.1:" + port
 	return brokerClient{URL: url, Client: &http.Client{Timeout: connectTimeout}}, nil
 }
 
-// portReachable reports whether a TCP listener answers on 127.0.0.1:port within
-// a short timeout. A stale port file (left by a non-graceful daemon death)
-// reads fine but dials refused, so callers use this to distinguish a live
-// broker from a leftover pointer. An empty port is never reachable.
-func portReachable(port string) bool {
+// dialPort dials 127.0.0.1:port with a short timeout and returns the dial error
+// (nil means a listener answered — a live broker). A stale port file left by a
+// non-graceful daemon death reads fine but dials refused, so callers treat a
+// non-nil result as "no live broker" and surface the real error rather than a
+// synthesized one. An empty port is never reachable.
+func dialPort(port string) error {
 	if port == "" {
-		return false
+		return errors.New("empty port")
 	}
 	conn, err := net.DialTimeout("tcp", "127.0.0.1:"+port, 300*time.Millisecond)
 	if err != nil {
-		return false
+		return err
 	}
 	_ = conn.Close()
-	return true
+	return nil
 }
