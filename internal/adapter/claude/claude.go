@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jazz1x/rallish/internal/adapter"
 	"github.com/jazz1x/rallish/pkg/contract"
@@ -102,5 +103,12 @@ func snippet(b []byte, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return "…" + s[len(s)-maxLen:]
+	tail := s[len(s)-maxLen:]
+	// A byte-offset cut can land inside a multibyte rune, leaving a dangling
+	// continuation byte at the front; advance past it so the snippet is always
+	// valid UTF-8 (drops at most the partial leading rune, keeping the byte cap).
+	for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
+		tail = tail[1:]
+	}
+	return "…" + tail
 }

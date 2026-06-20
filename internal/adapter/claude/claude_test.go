@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/jazz1x/rallish/pkg/contract"
 	"github.com/stretchr/testify/require"
@@ -31,6 +32,16 @@ func TestSnippet(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "x") {
 		t.Fatalf("oversized snippet must keep the trailing bytes")
+	}
+	// A byte-offset cap landing inside a multibyte rune must not emit invalid
+	// UTF-8: "한" is 3 bytes, so cap 4 cuts mid-rune. The dangling leading byte is
+	// dropped, leaving a clean rune-boundary tail (no U+FFFD replacement char).
+	multibyte := snippet([]byte("한한한한"), 4)
+	if !utf8.ValidString(multibyte) {
+		t.Fatalf("multibyte snippet = % x, must be valid UTF-8", []byte(multibyte))
+	}
+	if r, _ := utf8.DecodeRuneInString(strings.TrimPrefix(multibyte, "…")); r == utf8.RuneError {
+		t.Fatalf("multibyte snippet = %q, must not start with a replacement rune", multibyte)
 	}
 }
 
