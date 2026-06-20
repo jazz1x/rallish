@@ -220,27 +220,7 @@ func resolveStateDir(flag string) (string, error) {
 // It honours state.AuditCmd to override the default `make check-all` command and
 // state.PolishTestCmd to override the default `go test -race ./...` test command.
 func buildCLIPipeline(state cycle.State) cycle.Pipeline {
-	base := cycle.Pipeline{
-		gates.PreflightGate{},
-		gates.AuditGate{CmdOverride: state.AuditCmd},
-		gates.PhilosophyGate{},
-		gates.PolishGate{TestCmdOverride: state.PolishTestCmd},
-		gates.CommitGate{},
-	}
-	if len(state.LocalGates) == 0 {
-		return base
-	}
-	pipeline := make(cycle.Pipeline, 0, len(base)+len(state.LocalGates))
-	for _, gate := range base {
-		pipeline = append(pipeline, gate)
-		if gate.Name() != "audit" {
-			continue
-		}
-		for _, rawCmd := range state.LocalGates {
-			pipeline = append(pipeline, gates.CommandGate{RawCmd: rawCmd})
-		}
-	}
-	return pipeline
+	return gates.StandardPipeline(state.AuditCmd, state.PolishTestCmd, state.LocalGates)
 }
 
 // runOnceOptions bundles the inputs to a single bounded pass. pipeline and

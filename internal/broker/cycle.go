@@ -175,7 +175,7 @@ func (cs *cycleStore) closeAll(id string) {
 func (s *Server) registerCycleRoutes() {
 	s.cycleStore = newCycleStore()
 	if s.cyclePipeline == nil {
-		s.cyclePipeline = buildStandardPipeline("", "")
+		s.cyclePipeline = gates.StandardPipeline("", "", nil)
 	}
 	s.mux.HandleFunc("POST /cycles", s.handleCreateCycle)
 	s.mux.HandleFunc("GET /cycles/{id}", s.handleGetCycle)
@@ -549,28 +549,19 @@ func (s *Server) appendLedger(ctx context.Context, id string, entry contract.Har
 	}
 }
 
-func buildStandardPipeline(auditCmd, polishTestCmd string) cycle.Pipeline {
-	return cycle.Pipeline{
-		gates.PreflightGate{},
-		gates.AuditGate{CmdOverride: auditCmd},
-		gates.PhilosophyGate{},
-		gates.PolishGate{TestCmdOverride: polishTestCmd},
-		gates.CommitGate{},
-	}
-}
-
 func (s *Server) pipelineForState(state cycle.State) cycle.Pipeline {
 	// Always build a fresh base incorporating the state's AuditCmd and PolishTestCmd
 	// so that per-cycle overrides are respected even when s.cyclePipeline is pre-set
 	// with empty overrides (the default path). If the server has a custom
 	// cyclePipeline injected (tests / future extension), honour it but only when the
-	// state carries no overrides.
-	var base cycle.Pipeline
+	// state carries no overrides. The canonical order and local-gate insertion are
+	// owned by gates.StandardPipeline (shared with the CLI one-shot) — do not
+	// re-implement them here.
 	if state.AuditCmd != "" || state.PolishTestCmd != "" || s.cyclePipeline == nil {
-		base = buildStandardPipeline(state.AuditCmd, state.PolishTestCmd)
-	} else {
-		base = s.cyclePipeline
+		return gates.StandardPipeline(state.AuditCmd, state.PolishTestCmd, state.LocalGates)
 	}
+
+	base := s.cyclePipeline
 	if len(state.LocalGates) == 0 {
 		return base
 	}

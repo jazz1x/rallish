@@ -12,6 +12,7 @@ import (
 	"github.com/jazz1x/rallish/internal/adapter"
 	"github.com/jazz1x/rallish/internal/adapter/fake"
 	"github.com/jazz1x/rallish/internal/cycle"
+	"github.com/jazz1x/rallish/internal/cycle/gates"
 	"github.com/jazz1x/rallish/pkg/contract"
 )
 
@@ -518,5 +519,54 @@ func TestRunCycleOnceAgentUnknownAdapterIsOperationalError(t *testing.T) {
 	var coded interface{ ExitCode() int }
 	if errors.As(err, &coded) {
 		t.Fatalf("unknown adapter must be a plain operational error, not an exit-coded halt (got code %d)", coded.ExitCode())
+	}
+}
+
+// TestBuildCLIPipelineGoldenOrder pins the CLI one-shot's canonical gate order,
+// including repo-local command gates inserted after audit. It is the CLI-side
+// half of the single golden assertion shared with the broker
+// (TestPipelineForStateInsertsLocalGatesAfterAudit): both delegate to
+// gates.StandardPipeline, so this guards against a gate being dropped or
+// reordered in the shared constructor or in the CLI delegation. The explicit
+// `want` slice is the false-positive guard — it fails loudly on any drift rather
+// than only checking the two builders agree with each other.
+func TestBuildCLIPipelineGoldenOrder(t *testing.T) {
+	state, err := cycle.NewState(contract.NewCycleRequest{
+		Goal:       "feat: test cli pipeline order",
+		LocalGates: []string{"go test ./...", "go vet ./..."},
+	}, "cyc_cli_order")
+	if err != nil {
+		t.Fatalf("new state: %v", err)
+	}
+
+	names := buildCLIPipeline(state).Names()
+	want := []string{
+		"preflight",
+		"audit",
+		"cmd:go test ./...",
+		"cmd:go vet ./...",
+		"philosophy",
+		"polish",
+		"commit",
+	}
+	if len(names) != len(want) {
+		t.Fatalf("names = %v, want %v", names, want)
+	}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("names = %v, want %v", names, want)
+		}
+	}
+
+	// The CLI builder must be exactly the shared constructor — no divergent
+	// wrapping. This ties both entry points to one source of truth.
+	shared := gates.StandardPipeline(state.AuditCmd, state.PolishTestCmd, state.LocalGates).Names()
+	if len(shared) != len(names) {
+		t.Fatalf("buildCLIPipeline %v diverges from gates.StandardPipeline %v", names, shared)
+	}
+	for i := range names {
+		if shared[i] != names[i] {
+			t.Fatalf("buildCLIPipeline %v diverges from gates.StandardPipeline %v", names, shared)
+		}
 	}
 }

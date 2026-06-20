@@ -51,25 +51,19 @@ type Driver struct {
 	goalDiscoverer func(context.Context, State) (string, error)
 }
 
-// NewCycleDriver creates a driver with the standard gate pipeline.
+// NewCycleDriver creates a driver with no pipeline. The gates package imports
+// cycle, so cycle cannot construct the real gate pipeline itself; the caller
+// injects it via SetPipeline (CLI) or SetPipelineFactory (orchestrator) before
+// the first Step. The canonical pipeline is gates.StandardPipeline.
 func NewCycleDriver(sync *StateFileSync) *Driver {
 	return &Driver{
-		pipeline:       StandardPipeline(),
+		pipeline:       nil,
 		sync:           sync,
 		sleeper:        defaultSleeper{},
 		StepTimeout:    10 * time.Minute,
 		ReadRetries:    3,
 		goalDiscoverer: discoverNextGoal,
 	}
-}
-
-// StandardPipeline returns the default ordered gate list.
-func StandardPipeline() Pipeline {
-	// We import gates here to avoid an import cycle.
-	// gates package imports cycle; cycle must not import gates.
-	// Therefore StandardPipeline lives outside cycle package or we use a registry.
-	// To keep it simple, we leave pipeline construction to the caller (broker/CLI).
-	return nil
 }
 
 // SetPipeline assigns a custom pipeline to the driver.
