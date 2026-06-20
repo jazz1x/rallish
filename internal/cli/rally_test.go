@@ -148,6 +148,9 @@ func TestRallyDoneNonHolder(t *testing.T) {
 	if !strings.Contains(err.Error(), "not your turn") {
 		t.Fatalf("error should surface broker message, got: %v", err)
 	}
+	if strings.Contains(err.Error(), "session interrupted") {
+		t.Fatalf("non-holder 409 was misclassified as session interrupted: %v", err)
+	}
 }
 
 // writePortFile drops a ~/.rallish/port file pointing at the httptest server
