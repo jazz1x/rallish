@@ -183,6 +183,29 @@ func TestMCPAgentJoinTimeout(t *testing.T) {
 	require.True(t, timeout.Timeout)
 }
 
+func TestMCPAgentInterrupt(t *testing.T) {
+	homeDir, _ := setupMCPAgentTest(t)
+
+	out, err := runMCPAgent(t, homeDir, mcpAgentOptions{
+		Mode:         "create",
+		Participants: "alice,bob",
+		FirstHolder:  "alice",
+	})
+	require.NoError(t, err)
+	var sess contract.RallySession
+	require.NoError(t, json.Unmarshal([]byte(out), &sess))
+
+	interruptOut, err := runMCPAgent(t, homeDir, mcpAgentOptions{
+		Mode:      "interrupt",
+		SessionID: sess.ID,
+	})
+	require.NoError(t, err)
+	var status contract.RallySession
+	require.NoError(t, json.Unmarshal([]byte(interruptOut), &status))
+	require.Equal(t, sess.ID, status.ID)
+	require.Equal(t, contract.RallyStateInterrupted, status.Status)
+}
+
 func TestMCPAgentUnknownMode(t *testing.T) {
 	homeDir, _ := setupMCPAgentTest(t)
 	_, err := runMCPAgent(t, homeDir, mcpAgentOptions{Mode: "fly"})

@@ -6,6 +6,9 @@
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![go](https://img.shields.io/badge/go-1.25+-blue)
 
+
+> **注:** `main` ブランチは最新タグより多くの機能を含んでいます. 最新の変更は
+> [CHANGELOG.md](CHANGELOG.md) の `[Unreleased]` セクションを参照してください.
 **rallish** は複数のエージェントランタイム間に配置される小さなローカルブローカープロセスです。各ランタイムはアダプタさえあれば、どのコーディング CLI（Claude, Kimi, Cursor, Codex など、同種でも異なるコンテキストで実行する場合も含む）も使用できます。ブローカーは会話状態を管理し、誰のターンかを決定し、エージェント間で簡潔なターンのペイロードを中継します。
 
 すべてローカルで実行されます。クラウドブローカーや外部調整サービスはありません。ワイヤフォーマットは合理的な範囲で **A2A（Agent2Agent）プロトコル** に準拠しており、アダプターを介して A2A 対応エージェントを接続できます。
@@ -18,7 +21,7 @@
 |------|------|
 | **Squash（ヘッドレス）** | `rallish squash` でヘッドレスプリセットセッションを実行（`solo-ralph`、`pair-review`）; ブローカーがアダプターを自動スポーン |
 | **Rally（インタラクティブ）** | `rallish rally` で 2 つのコーディング CLI セッション間のライブバトン受け渡し; エージェントがピンポンを自律ループ (ターンごとのユーザートリガー不要); SSE による排他的ホルダー強制 |
-| **A2A プロトコル** | 部分 A2A v1.0: `/.well-known/agent-card.json` + `protocolVersion`, PascalCase JSON-RPC タスク（厳格な型付きインテーク）, SSE ストリーミング |
+| **A2A プロトコル** | A2A v1.0 ワイヤ形状: `/.well-known/agent-card.json`, `protocolVersion`, PascalCase JSON-RPC タスク, SSE ストリーミング. 署名済みカードと相互認証は未実装（先送り）. |
 | **トークン予算** | セッションごとのトークン、ターン数、時間の上限を強制 |
 | **スクラッチパッド** | 自動圧縮(compaction)が適用されたローリング共有スクラッチ |
 | **プリセット** | 役割、ルーティング、終了条件を定義した YAML テンプレート |
@@ -32,7 +35,7 @@ rallish はベンダー中立・リポローカルの**作業ハーネス**で�
 
 - **Safety & resumability** — アトミックな `.bak` 回復チェックポイント状態; `cycle run --once` は cron/スケジューラが呼び出す有界基準ドライバです (終了コード = 停止理由)。
 - **Verification gates** — parse-don't-validate エージェントハンドシェイク、gate self-eval、ハッシュ固定 gate 定義。
-- **Interop** — A2A **v1.0** (`/.well-known/agent-card.json` の署名済み Agent Card、実際の `protocolVersion`、厳格な型付きインテーク)。
+- **Interop** — A2A v1.0 ワイヤ形状 (`/.well-known/agent-card.json` の Agent Card、実際の `protocolVersion`、厳格な型付きインテーク). 署名済みカードと相互認証は未実装（先送り）.
 - **Audit** — `schema_version` スタンプ、ハッシュチェーン、再生可能な台帳 + RFC 9162 Merkle 包含/一貫性証明。
 - **Anti-spin** — スタック/予算サーキットブレーカー + スティッキーホルト復活防止ガード (cron が再起動したスピニング実行は自己停止し、復活しない)。
 - **Action-gate** — 実行前の破壊的コマンド拒否リスト + シークレット封じ込め; rallish が決定を宣言・記録し、ランタイムフックが強制します。
@@ -49,6 +52,8 @@ rallish はベンダー中立・リポローカルの**作業ハーネス**で�
 │  POST /sessions/:id/turn                 │
 │  GET  /.well-known/agent-card.json       │
 │  POST /a2a                               │
+│  GET  /mcp/sse                           │
+│  POST /mcp/message                       │
 └──┬───────────────┬───────────────────┬───┘
    │ unix socket   │ unix socket       │ tcp ループバック
    │ ~/.rallish/   │ ~/.rallish/       │ 127.0.0.1:<port>
@@ -96,8 +101,8 @@ npx skills add jazz1x/rallish
 
 | 方法 | コマンド |
 |---|---|
-| **Homebrew tap** (macOS) | _準備中_ — `jazz1x/homebrew-rallish` tap リポと `TAP_GITHUB_TOKEN` シークレットを設定後に `brew install jazz1x/rallish/rallish` が動作予定 |
 | **curl** (Unix 全般) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
+| **Homebrew tap** (macOS) | _準備中_ — リポジトリ issue で追跡中; まだ提供されていません |
 | **ソースビルド** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
 | **`go install`** | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
 
@@ -133,6 +138,9 @@ npx skills add jazz1x/rallish
 # 同梱アダプター/プリセット一覧
 ./dist/rallish add --list
 
+# 自然言語フレーズでバンドルスキルを実行 (例: 自律サイクル)
+rallish trigger "자율 사이클"   # --dry-run で実行せずにコマンドをプレビュー
+
 # ヘッドレスプリセットセッションを開始 (デーモン自動スポーン)
 ./dist/rallish squash \
   --preset pair-review \
@@ -150,6 +158,9 @@ exit_when: [turns_exhausted]
 scratch: {max_kb: 16}
 EOF
 ./dist/rallish squash --preset fake-demo --task "smoke test" --repo /tmp
+
+# `bootstrap` 以降は任意のディレクトリから bare `rallish` コマンドを使用します。
+# `./dist/rallish` はソースビルドを直接実行する場合のみ使用します。
 
 # 2 ターミナル テニスラリー (ライブバトン受け渡し)
 # skills/rallish による自然言語 UX を推奨 —
@@ -171,6 +182,13 @@ SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-u
 rallish cycle run --once --cycle-id <id>
 # ランタイム PreToolUse フックが呼び出す実行前ポリシーゲート (宣言 + 記録; フックが強制)
 rallish gate tooluse --command 'rm -rf /'    # -> {"verdict":"deny",...}  exit 13
+# ゲート終了コード: 0=許可, 13=拒否, 14=エラー; --cycle-id で判決を記録できます。
+
+# MCP 経由の rally (デーモンの MCP 2025-03-26 表面を使うワンショットクライアント)
+rallish rally mcp-agent --mode create --participants alice,bob --task "refactor auth"
+rallish rally mcp-agent --mode join  --session-id <id> --as alice --timeout 30s
+rallish rally mcp-agent --mode done  --session-id <id> --as alice --handoff-to bob
+rallish rally mcp-agent --mode status --session-id <id>
 
 # A2A discovery (外部クライアントは TCP ループバックを使用)
 curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent-card.json
@@ -215,11 +233,17 @@ rallish squash --preset <name> --task "<説明>" --repo <パス>
 **Raw CLI (スクリプトやスキル未対応クライアント用):**
 
 ```bash
-rallish rally new    --participants <a>,<b> [--task "<説明>"]
-rallish rally join   --session-id <id> --as <名前>           # SSE ブロック
-rallish rally done   --session-id <id> --as <名前> [--note "<サマリ>"] [--handoff-to <名前>]
-rallish rally status --session-id <id>
+rallish rally new       --participants <a>,<b> [--task "<説明>"]
+rallish rally join      --session-id <id> --as <名前>           # SSE ブロック
+rallish rally done      --session-id <id> --as <名前> [--note "<サマリ>"] [--handoff-to <名前>]
+rallish rally status    --session-id <id>
+rallish rally mcp-agent --mode create|join|done|status|interrupt [...]
 ```
+
+`mcp-agent` サブコマンドは MCP 2025-03-26 ワンショットクライアントです.
+SSE と JSON-RPC を内部で処理し、ツール結果の JSON を出力します. 詳細は
+[docs/mcp-compatibility.md](docs/mcp-compatibility.md) と
+[docs/runbook-rally-mcp-agent.md](docs/runbook-rally-mcp-agent.md) を参照.
 
 完全な 2 ターミナルウォークスルーは [docs/runbook-rally-mode.md](docs/runbook-rally-mode.md)
 を参照してください。
@@ -270,22 +294,41 @@ scratch:
 
 ### 6. 自律サイクル（ハーネス）
 
-`cycle new`・`cycle status`・`cycle halt` などの `cycle` サブコマンドはブローカーを経由するため、**先にデーモンを起動**しておく必要があります:
+`cycle` サブコマンドはブローカーを経由するため、**先にデーモンを起動**しておく必要があります. ただし `cycle run --once` はファイルから状態を直接再開します:
 
 ```bash
-rallish daemon &                               # 先にデーモンを起動
+rallish daemon &                                       # 先にデーモンを起動
 rallish cycle new --goal "feat: 認証追加" --branch feat/auth
-rallish cycle new --goal "テスト修正" --branch feat/fix \
-  --audit-cmd "npm test"                       # デフォルト 'make check-all' の代わりに使用
-rallish cycle run --once --cycle-id <id>       # デーモン不要 — ファイルから直接再開
+rallish cycle start --cycle-id <id>                    # ワンショット create + orchestrate + watch
+rallish cycle run --once --cycle-id <id>               # デーモン不要 — ファイルから直接再開
+rallish cycle status --cycle-id <id>                   # 進捗、ゲート、台帳サマリー
+rallish cycle ledger --cycle-id <id>                   # append-only ハーネス台帳を出力
+rallish cycle next --cycle-id <id>                     # 対話的に 1 ターン進める
+rallish cycle watch --cycle-id <id>                    # ターンを実行せずに状態を追跡
+rallish cycle halt --cycle-id <id>                     # 実行中のサイクルを停止
 ```
 
-`cycle run --once` は状態を `~/.rallish/cycles/cycle-<id>.json`（デーモンが書き込むのと同じ場所、`--state-dir` で変更可、デフォルト `~/.rallish/cycles`）から直接再開するため、ブローカーは不要です。このパスは作業対象リポジトリの**外**にあるため、ブローカーが Preflight の要求するクリーンなワーキングツリーを汚しません。
+作成時によく使うフラグ:
 
-オーディットゲートはデフォルトで `make check-all` を実行します。`--audit-cmd` に空白のみを指定するとエラーになり、デフォルトへのサイレントフォールバックは行われません。
+```bash
+rallish cycle new --goal "テスト修正" --branch feat/fix \
+  --audit-cmd "npm test" \
+  --polish-test-cmd "npm test" \
+  --agents claude,kimi \
+  --max-lifetime-turns 100 \
+  --max-duration 4h \
+  --local-gate "make lint"
+```
 
-ポリッシュゲートはデフォルトで `go test -race ./...` を実行します。`--polish-test-cmd` でプロジェクト固有のコマンドに上書きできます。空白のみの値はエラーです。`scripts/check-no-raw-ansi.sh` チェックは rallish リポジトリ専用であり、スクリプトが存在しないリポジトリでは自動的にスキップされます（エラーではありません）。
+- `--audit-cmd` はデフォルトの `make check-all` オーディットゲートを上書きします.
+- `--polish-test-cmd` はデフォルトの `go test -race ./...` ポリッシュゲートを上書きします.
+- `--agents` は参加者のローテーションを設定します.
+- `--max-lifetime-turns` / `--max-duration` はハードな anti-spin 上限です.
+- `--local-gate` はサイクル状態に保持されるプロジェクト固有のチェックを追加します.
 
+`--audit-cmd` や `--polish-test-cmd` に空白のみを指定するとエラーになり、デフォルトへのサイレントフォールバックは行われません. `scripts/check-no-raw-ansi.sh` チェックは rallish リポジトリ専用であり、スクリプトが存在しないリポジトリでは自動的にスキップされます（エラーではありません）.
+
+`cycle run --once` は `~/.rallish/cycles/cycle-<id>.json` から直接再開します. このパスは作業対象リポジトリの**外**にあるため、サイクルが自身の Preflight が要求するクリーンなワーキングツリーを汚しません. `--state-dir` で変更できます.
 ### 7. デーモンのライフサイクル
 
 ```bash
@@ -319,11 +362,13 @@ Windows ではブローカーは TCP ループバックのみを使用します 
 make setup-hooks
 ```
 
-完全な検証スイートを実行:
+完全な検証スイートを実行 (CI と同じゲート):
 
 ```bash
-make check   # go vet + golangci-lint + go test -race
+make check-all   # gofmt + go vet + go test -race + golangci-lint + no-raw-ansi + go mod verify
 ```
+
+高速な部分集合は `make check` (go vet + golangci-lint + go test -race) を使用してください.
 
 ### テスト
 

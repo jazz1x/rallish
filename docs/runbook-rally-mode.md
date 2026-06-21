@@ -23,7 +23,7 @@ Key differences from squash and autonomous-cycle:
 > - **squash** — quick headless preset runs (solo review, pair review).
 > - **rally** — two human terminals collaborating in real time.
 > - **autonomous-cycle** — overnight single-agent refactor with gate pipeline.
-> See `docs/runbook-autonomous-cycle.md` (planned) or `~/.claude/runbooks/cycle-handoff.md` for cycle details.
+> See [docs/runbook-autonomous-work-harness.md](runbook-autonomous-work-harness.md) or `~/.claude/runbooks/cycle-handoff.md` for cycle details.
 
 Routes:
 

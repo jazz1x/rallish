@@ -7,7 +7,7 @@ backport fixes.
 
 ## Reporting a Vulnerability
 
-Email **security@jazz1x.dev** (replace with actual contact if different)
+Email **security@jazz1x.dev**
 with a description of the issue and reproduction steps. Please do **not**
 file public GitHub issues for security-sensitive reports.
 

@@ -18,7 +18,7 @@ Everything runs locally. No cloud broker, no external coordination service. The 
 |---------|-------------|
 | **Squash (headless)** | `rallish squash` runs headless preset sessions (`solo-ralph`, `pair-review`); broker spawns adapters automatically |
 | **Rally (interactive)** | `rallish rally` provides live baton-passing between two coding-CLI sessions; agents self-loop the ping-pong (no per-turn user trigger needed); exclusive holder enforcement via SSE |
-| **A2A Protocol** | partial A2A v1.0: `/.well-known/agent-card.json` + `protocolVersion`, PascalCase JSON-RPC tasks (strict typed intake), SSE streaming |
+| **A2A Protocol** | A2A v1.0 wire shape: `/.well-known/agent-card.json`, `protocolVersion`, PascalCase JSON-RPC tasks, SSE streaming. Signed cards and mutual auth are deferred. |
 | **Token Budgets** | Hard caps on tokens, turns, and wall-clock time per session |
 | **Scratchpad** | Rolling shared scratch with automatic compaction |
 | **Presets** | YAML templates for roles, routing, and exit conditions |
@@ -32,7 +32,7 @@ rallish is a vendor-neutral, repo-local **work harness**: it makes any agent run
 
 - **Safety & resumability** — atomic, `.bak`-recovering checkpointed state; `cycle run --once` is the bounded reference driver a cron/scheduler invokes (exit code = halt reason).
 - **Verification gates** — parse-don't-validate agent handshake, a gate self-eval, hash-pinned gate definitions.
-- **Interop** — A2A **v1.0** (signed Agent Card at `/.well-known/agent-card.json`, real `protocolVersion`, strict typed intake).
+- **Interop** — A2A v1.0 wire shape (Agent Card at `/.well-known/agent-card.json`, real `protocolVersion`, strict typed intake). Signed cards and mutual auth are deferred.
 - **Audit** — `schema_version`-stamped, hash-chained, replayable ledger with RFC 9162 Merkle inclusion/consistency proofs.
 - **Anti-spin** — stuck/budget circuit-breakers + a sticky-halt reviver guard (a cron-revived spinning run self-halts and is not resurrected).
 - **Action-gate** — pre-execution destructive-command deny-list + secret containment; rallish declares + records the decision, the runtime hook enforces.
@@ -49,6 +49,8 @@ Full direction + rationale: `docs/north-star.md`.
 │  POST /sessions/:id/turn                 │
 │  GET  /.well-known/agent-card.json       │
 │  POST /a2a                               │
+│  GET  /mcp/sse                           │
+│  POST /mcp/message                       │
 └──┬───────────────┬───────────────────┬───┘
    │ unix socket   │ unix socket       │ tcp loopback
    │ ~/.rallish/   │ ~/.rallish/       │ 127.0.0.1:<port>
@@ -95,8 +97,8 @@ Open any project in Claude Code (or another skill-aware coding CLI) and say
 
 | Method | Command |
 |---|---|
-| **Homebrew tap** (macOS) | _coming soon_ — `brew install jazz1x/rallish/rallish` will work once the `jazz1x/homebrew-rallish` tap repo and `TAP_GITHUB_TOKEN` secret are provisioned (see [#issues](https://github.com/jazz1x/rallish/issues)) |
 | **curl** (any Unix) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
+| **Homebrew tap** (macOS) | _coming soon_ — tracked in repo issues; not yet provisioned |
 | **From source** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
 | **`go install`** | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
 
@@ -130,6 +132,9 @@ skill bundle and verifies the daemon.
 # List built-in adapters and presets
 ./dist/rallish add --list
 
+# Trigger a bundled skill by natural-language phrase (e.g. autonomous cycle)
+rallish trigger "자율 사이클"   # --dry-run prints the equivalent command
+
 # Headless preset session (auto-spawns the daemon)
 ./dist/rallish squash \
   --preset pair-review \
@@ -147,6 +152,9 @@ exit_when: [turns_exhausted]
 scratch: {max_kb: 16}
 EOF
 ./dist/rallish squash --preset fake-demo --task "smoke test" --repo /tmp
+
+# After `bootstrap` / install, use the bare `rallish` command from any
+# directory. Use `./dist/rallish` only when running a source build.
 
 # Two-terminal tennis rally (live baton-passing between human sessions)
 # Prefer the natural-language UX driven by skills/rallish —
@@ -169,6 +177,13 @@ SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-u
 rallish cycle run --once --cycle-id <id>
 # Pre-execution policy gate a runtime PreToolUse hook calls (declare + record; the hook enforces)
 rallish gate tooluse --command 'rm -rf /'    # -> {"verdict":"deny",...}  exit 13
+# Gate exit codes: 0=allow, 13=deny, 14=error; use --cycle-id to record the verdict.
+
+# Rally via MCP (one-shot client over the daemon's MCP 2025-03-26 surface)
+rallish rally mcp-agent --mode create --participants alice,bob --task "refactor auth"
+rallish rally mcp-agent --mode join  --session-id <id> --as alice --timeout 30s
+rallish rally mcp-agent --mode done  --session-id <id> --as alice --handoff-to bob
+rallish rally mcp-agent --mode status --session-id <id>
 
 # A2A discovery (external clients use TCP loopback)
 curl http://127.0.0.1:$(cat ~/.rallish/port)/.well-known/agent-card.json
@@ -191,9 +206,9 @@ not a TTY.
 | Group | Commands |
 |---|---|
 | **Setup** | `bootstrap` (one-shot wizard) · `skill install` |
-| **Rally** | `rally` (live baton) · `squash` (headless preset) |
+| **Rally** | `cycle` (autonomous harness) · `rally` (live baton; includes `mcp-agent`) · `squash` (headless preset) · `trigger` (natural-language skill invocation) |
 | **Manage** | `add` (interactive picker · `--list` for catalog) · `config` (`list` / `get` / `set` / `path` / `edit`) |
-| **System** | `doctor` (status table) · `daemon` · `version` |
+| **System** | `daemon` · `doctor` (status table) · `gate` (policy gates) · `version` |
 
 `rallish bootstrap` fits on one screen by design — the wizard never
 exceeds ~12 lines so coding-CLI session banners (skills discography,
@@ -230,11 +245,17 @@ a prior prep trigger set the role + SID; bare generic words are ignored.
 **Raw CLI (for scripts or non-skill-aware clients):**
 
 ```bash
-rallish rally new    --participants <a>,<b> [--task "<desc>"]
-rallish rally join   --session-id <id> --as <name>           # blocks on SSE
-rallish rally done   --session-id <id> --as <name> [--note "<s>"] [--handoff-to <n>]
-rallish rally status --session-id <id>
+rallish rally new       --participants <a>,<b> [--task "<desc>"]
+rallish rally join      --session-id <id> --as <name>           # blocks on SSE
+rallish rally done      --session-id <id> --as <name> [--note "<s>"] [--handoff-to <n>]
+rallish rally status    --session-id <id>
+rallish rally mcp-agent --mode create|join|done|status|interrupt [...]
 ```
+
+The `mcp-agent` subcommand is a one-shot MCP 2025-03-26 client; it handles SSE
+and JSON-RPC internally and prints raw tool-result JSON. See
+[docs/mcp-compatibility.md](docs/mcp-compatibility.md) and
+[docs/runbook-rally-mcp-agent.md](docs/runbook-rally-mcp-agent.md).
 
 See [docs/runbook-rally-mode.md](docs/runbook-rally-mode.md) for the full
 two-terminal walkthrough.
@@ -285,32 +306,49 @@ scratch:
 
 ### 6. Autonomous cycle (harness)
 
-`cycle new`, `cycle status`, `cycle halt`, and other `cycle` subcommands route through the broker and **require a running daemon**:
+`cycle` subcommands route through the broker and **require a running daemon**, except `cycle run --once` which resumes persisted state directly:
 
 ```bash
-rallish daemon &                               # must be running first
+rallish daemon &                                       # must be running first
 rallish cycle new --goal "feat: add auth" --branch feat/auth
-rallish cycle run --once --cycle-id <id>       # bounded one-shot (cron/scheduler entry point)
-rallish cycle status --cycle-id <id>
+rallish cycle start --cycle-id <id>                    # one-shot create + orchestrate + watch
+rallish cycle run --once --cycle-id <id>               # bounded daemon-free one-shot (cron/scheduler entry point)
+rallish cycle status --cycle-id <id>                   # shows progress, gates, ledger summary
+rallish cycle ledger --cycle-id <id>                   # print append-only harness ledger
+rallish cycle next --cycle-id <id>                     # advance one turn interactively
+rallish cycle watch --cycle-id <id>                    # tail status without driving turns
+rallish cycle halt --cycle-id <id>                     # stop a running cycle
 ```
 
-The audit gate runs `make check-all` by default. To use a project-specific command, pass `--audit-cmd` at cycle creation:
+Useful flags at creation:
 
 ```bash
 rallish cycle new --goal "fix tests" --branch feat/fix \
-  --audit-cmd "npm test"   # or "cargo test", "bun run test", etc.
+  --audit-cmd "npm test" \
+  --polish-test-cmd "npm test" \
+  --agents claude,kimi \
+  --max-lifetime-turns 100 \
+  --max-duration 4h \
+  --local-gate "make lint"
 ```
 
-An empty or whitespace-only `--audit-cmd` is a misconfiguration and fails loudly (no silent fallback to the default).
+- `--audit-cmd` overrides the default `make check-all` audit gate.
+- `--polish-test-cmd` overrides the default `go test -race ./...` polish gate.
+- `--agents` sets the participant rotation.
+- `--max-lifetime-turns` / `--max-duration` are hard anti-spin ceilings.
+- `--local-gate` adds a project-specific check that persists in cycle state.
 
-The polish gate runs `go test -race ./...` by default. To use a project-specific test command, pass `--polish-test-cmd` at cycle creation:
+An empty or whitespace-only `--audit-cmd` or `--polish-test-cmd` is a
+misconfiguration and fails loudly (no silent fallback). The
+`scripts/check-no-raw-ansi.sh` check inside the polish gate is
+rallish-repo-specific and is silently skipped when the script is not present in
+the target repository.
 
-```bash
-rallish cycle new --goal "fix tests" --branch feat/fix \
-  --polish-test-cmd "npm test"   # or "cargo test", "pytest", etc.
-```
-
-An empty or whitespace-only `--polish-test-cmd` is a misconfiguration and fails loudly. The `scripts/check-no-raw-ansi.sh` check inside the polish gate is rallish-repo-specific and is silently skipped when the script is not present in the target repository (not applicable, not an error). `cycle run --once` is the daemon-free path: it resumes persisted state directly from `~/.rallish/cycles/cycle-<id>.json` — the SAME directory the daemon writes to, so a broker-created cycle and a broker-free re-trigger share state. Override with `--state-dir`. The state lives outside the worked-on repo, so the cycle never dirties the working tree its own preflight requires clean.
+`cycle run --once` is the daemon-free path: it reads persisted state directly
+from `~/.rallish/cycles/cycle-<id>.json` — the same directory the daemon writes
+to, so a broker-created cycle and a broker-free re-trigger share state. Override
+with `--state-dir`. The state lives outside the worked-on repo, so the cycle
+never dirties the working tree its own preflight requires clean.
 
 ### 7. Daemon lifecycle
 
@@ -345,11 +383,13 @@ Enable the repo's pre-commit hook once per clone:
 make setup-hooks
 ```
 
-Run the full check suite:
+Run the full check suite (same gate as CI):
 
 ```bash
-make check   # go vet + golangci-lint + go test -race
+make check-all   # gofmt + go vet + go test -race + golangci-lint + no-raw-ansi + go mod verify
 ```
+
+A faster subset is available with `make check` (go vet + golangci-lint + go test -race).
 
 ### Test suite
 

@@ -12,22 +12,32 @@ ssl:
     anti_triggers:
       - "브로커 MCP 표면 수정 — docs/prd-rally-mcp.md, internal/broker/mcp.go 참조"
       - "일반 Go 코딩 컨벤션 — AGENTS.md 참조"
+      - "일반 HTTP/SSE rally (MCP 키워드 없음) — rallish 스킬 사용"
+      - "자율 사이클, squash, rally 외 작업 — 해당 스킬 사용"
+      - "daemon 생애주기 또는 CLI 플래그 수정 — internal/cli/daemon.go, internal/cli/rally_mcp_agent.go 참조"
+      - "스킬 감사 / SSL 검사 — skill-audit 사용"
   structural:
     scenes: [DaemonCheck, Create, Join, Work, Done, Status]
-    resumable: true
+    resumable: false
     branches:
-      - "DaemonCheck: daemon 미실행 시 `rallish daemon &`로 백그라운드 실행"
-      - "Create: `rally mcp-agent --mode create`의 JSON stdout에서 session id 추출"
-      - "Join: `rally mcp-agent --mode join`은 baton 도착 또는 timeout까지 블록; exit 2는 timeout"
-      - "Done: holder 불일치 시 tool 에러; 실제 holder를 보고하고 양보"
-      - "Status: 블록하지 않을 때 `--mode status`로 폴링"
+      - "바이너리 해석: `command -v rallish` 시도, 다음 `$PWD/dist/rallish`, 다음 `make build`"
+      - "DaemonCheck: `~/.rallish/port`가 없으면 백그라운드에서 `rallish daemon` 실행 후 port 파일 대기"
+      - "Create: `--participants`에 2명 이상 필요; 선택적 `--first`, `--task`, `--repo`"
+      - "Create: RallySession JSON stdout에서 `id` 추출"
+      - "Join: baton 도착 또는 `--timeout`까지 블록; exit 2 = timeout; exit 1 = 세션 없음 / 멤버 아님 / 중복 연결"
+      - "Done: `--as`가 현재 holder여야 함; 선택적 `--handoff-to`; 에러 메시지에 실제 holder 포함"
+      - "Status: `--session-id` 필요; RallySession JSON 출력"
+      - "Interrupt: `rally mcp-agent --mode interrupt --session-id <SID>`로 rally 중단"
   logical:
-    tools: [Bash, Read]
+    tools: [Bash]
     side_effects:
       reads: ["~/.rallish/socket", "~/.rallish/port"]
       writes:
-        - "~/.rallish/rallish.sock (mode 0600, daemon 소유)"
-      network: []
+        - "~/.rallish/port — daemon 시작 시 기록"
+        - "~/.rallish/rallish.sock — daemon이 생성 (mode 0600)"
+        - "~/.rallish/sessions/<id>/log.jsonl — daemon 세션 저장소가 기록"
+        - "~/.rallish/daemon.log — daemon 출력을 리다이렉트할 경우"
+      network: ["rallish 바이너리를 통한 로컬 HTTP/SSE loopback"]
     idempotent: false
     rollback: "`rallish rally mcp-agent --mode interrupt --session-id <SID>`로 rally 중단"
 ---
@@ -36,7 +46,7 @@ ssl:
 
 이 스킬은 daemon의 MCP 2025-03-26 표면을 통해 rallish rally에 참여합니다.
 에이전트는 `rallish rally mcp-agent`만 호출하면 되며, SSE 전송, JSON-RPC,
-tool dispatch는 서브커맨드가 날部 처리합니다.
+tool dispatch는 서브커맨드가 날부 처리합니다.
 
 ## `rallish` 바이너리 찾기
 
@@ -58,11 +68,18 @@ tool dispatch는 서브커맨드가 날部 처리합니다.
 
 ### 1. daemon 확인
 
+`rallish doctor`는 daemon이 없어도 상태 테이블을 출력하고 exit 0을
+반환하므로, `doctor || daemon` 패턴에 의존하지 마세요. 대신 daemon port
+파일을 직접 확인합니다:
+
 ```sh
-$RALLISH doctor || ($RALLISH daemon &)
+if [ ! -f ~/.rallish/port ]; then
+    $RALLISH daemon > ~/.rallish/daemon.log 2>&1 &
+    while [ ! -f ~/.rallish/port ]; do sleep 0.5; done
+fi
 ```
 
-daemon이 `~/.rallish/port`를 작성할 때까지 잠시 대기.
+`~/.rallish/port`가 생길 때까지 대기한 후 `mcp-agent` 명령을 호출합니다.
 
 ### 2. rally 세션 생성
 
@@ -73,8 +90,9 @@ SID=$($RALLISH rally mcp-agent --mode create \
   --task "[pattern:cycle] refactor auth")
 ```
 
-명령은 `RallySession` JSON 객체를 출력합니다. 여기서 `id`를 추출해 `SID`에
-저장합니다.
+`--participants`는 쉼표로 구분된 2명 이상의 이름이 필요합니다. `--first`,
+`--task`, `--repo`는 선택적입니다. 명령은 `RallySession` JSON 객체를 출력합니다.
+여기서 `id`를 추출해 `SID`에 저장합니다.
 
 ### 3. 내 차례가 오면 baton 대기
 
@@ -89,7 +107,8 @@ baton이 도착할 때까지 블록. 출력은 `BatonEvent` JSON 객체입니다
 ```
 
 명령이 exit code 2로 끝나면 timeout이 발생한 것이므로, 사용자에게 계속
-대기할지 중단할지 묻습니다.
+대기할지 중단할지 묻습니다. exit 1은 세션이 없거나 participant가 멤버가
+아니거나 이미 연결되어 있음을 의미합니다.
 
 ### 4. 작업 수행
 
@@ -101,11 +120,14 @@ baton note나 session task에 설명된 작업을 수행합니다.
 $RALLISH rally mcp-agent --mode done \
   --session-id "$SID" \
   --as "$ROLE" \
-  --note "내가 한 일 요약"
+  --note "내가 한 일 요약" \
+  --handoff-to bob
 ```
 
-출력은 업데이트된 `RallySession` JSON입니다. holder가 아니면 "not the current
-baton holder" 메시지와 함께 실패합니다.
+출력은 업데이트된 `RallySession` JSON입니다. holder가 아니면 실제 holder를
+포함한 "not the current baton holder" 메시지와 함께 실패합니다.
+특정 participant에게 baton을 넘기려면 `--handoff-to`를 사용하고, 그렇지
+않으면 rally 순서에 따라 다음 holder가 결정됩니다.
 
 ### 6. status로 폴링 (선택)
 
@@ -115,8 +137,16 @@ baton holder" 메시지와 함께 실패합니다.
 $RALLISH rally mcp-agent --mode status --session-id "$SID"
 ```
 
+### 7. 멈춘 rally 중단
+
+세션이 멈춰서 중단해야 할 때:
+
+```sh
+$RALLISH rally mcp-agent --mode interrupt --session-id "$SID"
+```
+
 ## HTTP/SSE rally 스킬과의 공존
 
 `rally mcp-agent --mode create`로 만든 세션은 `rallish rally join`(HTTP/SSE)을
-사용하는 participant도 참여할 수 있고, 그 반대도 가능합니다. MCP와 HTTP
-표면은 동일한 in-memory rally 상태를 공유합니다.
+통해 참여할 수 있고, 그 반대도 가능합니다. MCP 표면과 HTTP 표면은 동일한
+메모리 내 rally 상태를 공유합니다.

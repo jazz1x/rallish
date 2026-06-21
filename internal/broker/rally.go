@@ -326,10 +326,9 @@ func (s *Server) handleRallyBaton(w http.ResponseWriter, r *http.Request) {
 			logger.ErrorContext(ctx, "initial flush", "error", err)
 			return
 		}
-		_ = rc.SetWriteDeadline(time.Now().Add(2 * time.Second))
-		_, _ = fmt.Fprintf(w, "data: {\"closed\":true}\n\n")
-		_ = rc.SetWriteDeadline(time.Time{})
-		_ = rc.Flush()
+		if err := writeCloseSentinel(w, rc); err != nil {
+			logger.ErrorContext(ctx, "write close sentinel", "error", err)
+		}
 		return
 	}
 
@@ -403,19 +402,17 @@ func (s *Server) handleRallyBaton(w http.ResponseWriter, r *http.Request) {
 		case evt, more := <-ch:
 			if !more {
 				// Channel closed (session interrupted): send terminal close event.
-				_ = rc.SetWriteDeadline(time.Now().Add(2 * time.Second))
-				_, _ = fmt.Fprintf(w, "data: {\"closed\":true}\n\n")
-				_ = rc.SetWriteDeadline(time.Time{})
-				_ = rc.Flush()
+				if err := writeCloseSentinel(w, rc); err != nil {
+					logger.ErrorContext(ctx, "write close sentinel", "error", err)
+				}
 				cleanupStream(id, as)
 				return
 			}
 			if evt.Closed {
 				// Explicit close sentinel sent before channel close.
-				_ = rc.SetWriteDeadline(time.Now().Add(2 * time.Second))
-				_, _ = fmt.Fprintf(w, "data: {\"closed\":true}\n\n")
-				_ = rc.SetWriteDeadline(time.Time{})
-				_ = rc.Flush()
+				if err := writeCloseSentinel(w, rc); err != nil {
+					logger.ErrorContext(ctx, "write close sentinel", "error", err)
+				}
 				cleanupStream(id, as)
 				return
 			}
@@ -458,10 +455,23 @@ func writeSSEEvent(w http.ResponseWriter, rc *http.ResponseController, evt contr
 	if err != nil {
 		return err
 	}
-	_ = rc.SetWriteDeadline(time.Now().Add(2 * time.Second))
-	_, err = fmt.Fprintf(w, "data: %s\n\n", data)
-	_ = rc.SetWriteDeadline(time.Time{})
-	if err != nil {
+	if err := rc.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		return err
+	}
+	defer func() { _ = rc.SetWriteDeadline(time.Time{}) }()
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+		return err
+	}
+	return rc.Flush()
+}
+
+// writeCloseSentinel writes the terminal {"closed":true} SSE event.
+func writeCloseSentinel(w http.ResponseWriter, rc *http.ResponseController) error {
+	if err := rc.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		return err
+	}
+	defer func() { _ = rc.SetWriteDeadline(time.Time{}) }()
+	if _, err := fmt.Fprintf(w, "data: {\"closed\":true}\n\n"); err != nil {
 		return err
 	}
 	return rc.Flush()
