@@ -4,6 +4,7 @@
 package broker
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -15,6 +16,16 @@ import (
 	"time"
 
 	"github.com/jazz1x/rallish/pkg/contract"
+)
+
+const (
+	// sseHeartbeatInterval is how often an open SSE stream emits a heartbeat
+	// (a ":ping" comment) to keep the TCP connection alive through idle proxies.
+	sseHeartbeatInterval = 15 * time.Second
+
+	// sseWriteDeadline bounds a single SSE frame write so a stuck client cannot
+	// block the writer indefinitely.
+	sseWriteDeadline = 2 * time.Second
 )
 
 // rallyStore holds all active rally sessions keyed by session ID.
@@ -317,12 +328,8 @@ func (s *Server) handleRallyBaton(w http.ResponseWriter, r *http.Request) {
 	// sentinel immediately so the client does not hang.
 	if sess.status == contract.RallyStateInterrupted {
 		rallies.mu.Unlock()
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.WriteHeader(http.StatusOK)
-		rc := http.NewResponseController(w)
-		if err := rc.Flush(); err != nil {
+		rc, err := writeSSEHeaders(w)
+		if err != nil {
 			logger.ErrorContext(ctx, "initial flush", "error", err)
 			return
 		}
@@ -375,19 +382,36 @@ func (s *Server) handleRallyBaton(w http.ResponseWriter, r *http.Request) {
 	}
 	rallies.mu.Unlock()
 
-	// Flush SSE headers immediately.
+	rc, err := writeSSEHeaders(w)
+	if err != nil {
+		logger.ErrorContext(ctx, "initial flush", "error", err)
+		return
+	}
+
+	streamBatonEvents(ctx, w, rc, logger, id, as, ch)
+}
+
+// writeSSEHeaders sets the SSE response headers, writes a 200, and flushes so
+// the client sees the stream open immediately. It returns the ResponseController
+// used for subsequent writes.
+func writeSSEHeaders(w http.ResponseWriter) (*http.ResponseController, error) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 	rc := http.NewResponseController(w)
 	if err := rc.Flush(); err != nil {
-		logger.ErrorContext(ctx, "initial flush", "error", err)
-		return
+		return nil, err
 	}
+	return rc, nil
+}
 
-	// Heartbeat ticker — every 15 s.
-	ticker := time.NewTicker(15 * time.Second)
+// streamBatonEvents runs the SSE delivery loop for one joined participant: it
+// forwards baton events from ch, emits periodic heartbeats, refreshes the
+// participant's last_seen, and unregisters the stream on client disconnect or
+// session close. It returns when the connection ends.
+func streamBatonEvents(ctx context.Context, w http.ResponseWriter, rc *http.ResponseController, logger *slog.Logger, id contract.SessionID, as contract.ParticipantName, ch chan contract.BatonEvent) {
+	ticker := time.NewTicker(sseHeartbeatInterval)
 	defer ticker.Stop()
 
 	logger.InfoContext(ctx, "rally_baton_waiting", "session_id", id, "participant", as)
@@ -426,7 +450,7 @@ func (s *Server) handleRallyBaton(w http.ResponseWriter, r *http.Request) {
 
 		case <-ticker.C:
 			// Send heartbeat ping comment.
-			_ = rc.SetWriteDeadline(time.Now().Add(2 * time.Second))
+			_ = rc.SetWriteDeadline(time.Now().Add(sseWriteDeadline))
 			if _, err := fmt.Fprintf(w, ": ping\n\n"); err != nil {
 				logger.ErrorContext(ctx, "write heartbeat", "error", err)
 				_ = rc.SetWriteDeadline(time.Time{})
@@ -455,7 +479,7 @@ func writeSSEEvent(w http.ResponseWriter, rc *http.ResponseController, evt contr
 	if err != nil {
 		return err
 	}
-	if err := rc.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
+	if err := rc.SetWriteDeadline(time.Now().Add(sseWriteDeadline)); err != nil {
 		return err
 	}
 	defer func() { _ = rc.SetWriteDeadline(time.Time{}) }()
@@ -467,7 +491,7 @@ func writeSSEEvent(w http.ResponseWriter, rc *http.ResponseController, evt contr
 
 // writeCloseSentinel writes the terminal {"closed":true} SSE event.
 func writeCloseSentinel(w http.ResponseWriter, rc *http.ResponseController) error {
-	if err := rc.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
+	if err := rc.SetWriteDeadline(time.Now().Add(sseWriteDeadline)); err != nil {
 		return err
 	}
 	defer func() { _ = rc.SetWriteDeadline(time.Time{}) }()

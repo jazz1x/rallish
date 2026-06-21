@@ -117,7 +117,7 @@ func (s *Server) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Heartbeat to keep the TCP connection alive.
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(sseHeartbeatInterval)
 	defer ticker.Stop()
 
 	for {
