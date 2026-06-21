@@ -110,6 +110,18 @@ func RunBootstrap(ctx context.Context, opts BootstrapOptions) error {
 		for _, r := range results {
 			t.Detail("%s %s", r.Action, filepath.Base(r.Path))
 		}
+
+		// Install the MCP client skill as well.
+		mcpSkillDir := filepath.Join(home, ".claude", "skills", "rallish-mcp")
+		t.Detail("installing mcp skill → %s", mcpSkillDir)
+		mcpResults, mcpErr := skills.InstallNamed("rallish-mcp", mcpSkillDir)
+		if mcpErr != nil {
+			t.StepErr(1, total, "mcp skill install failed: %v", mcpErr)
+			return mcpErr
+		}
+		for _, r := range mcpResults {
+			t.Detail("%s %s", r.Action, filepath.Base(r.Path))
+		}
 		// Install autonomous-cycle companion files (scripts + runbooks).
 		companionResults, compErr := skills.InstallCompanionFiles("autonomous-cycle", home)
 		if compErr != nil {
@@ -119,7 +131,7 @@ func RunBootstrap(ctx context.Context, opts BootstrapOptions) error {
 				t.Detail("%s %s", r.Action, filepath.Base(r.Path))
 			}
 		}
-		t.StepOK(1, total, "skill installed (%d files)", len(results)+len(companionResults))
+		t.StepOK(1, total, "skills installed (%d files)", len(results)+len(mcpResults)+len(companionResults))
 	}
 
 	// Step 2 — config wizard.

@@ -44,7 +44,7 @@ run pre-commit`).
 | `internal/config/` | `~/.rallish/config.yaml` schema + Get / Set / Save / Resolve. |
 | `pkg/contract/` | Public types (A2A, Budget, Session, Rally) |
 | `skills/` | Symlink → `internal/skills/`. Vendor-neutral Agent Skills discovery path |
-| `internal/skills/` | Canonical SKILL.md sources (embedded into the rallish binary via `go:embed`); installed globally by `rallish bootstrap` |
+| `internal/skills/` | Canonical SKILL.md sources (embedded into the rallish binary via `go:embed`). Bundled skills: `rallish`, `autonomous-cycle`, `rallish-mcp`. All three are installed by `rallish bootstrap`; `rallish-mcp` is the MCP 2025-03-26 client skill for `rallish rally mcp-agent`. |
 
 **Package surface rule:** `pkg/contract` is the only package importable by
 external adapters or A2A clients. Everything under `internal/` is private

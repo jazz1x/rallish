@@ -65,3 +65,27 @@ errors set `isError: true` and include the error message in the content text.
 - No MCP resources or prompts; only tools are exposed.
 - `rally_join` is a blocking long-poll tool. Clients that need push-style
   delivery can open a long-poll loop.
+
+## Client subcommand
+
+For agents (and humans debugging flows), `rallish rally mcp-agent` implements a
+one-shot MCP 2025-03-26 client over the daemon SSE surface:
+
+```bash
+rallish rally mcp-agent --mode create --participants alice,bob --task "refactor auth"
+rallish rally mcp-agent --mode join  --session-id <id> --as alice --timeout 30s
+rallish rally mcp-agent --mode done  --session-id <id> --as alice --handoff-to bob
+rallish rally mcp-agent --mode status --session-id <id>
+```
+
+The subcommand handles transport open, `initialize`, `tools/call`, response
+matching, and close. It prints the raw JSON tool result to stdout and exits
+with the same conventions as `rallish rally join/done/status`:
+
+- Exit `0` — success.
+- Exit `1` — MCP/daemon or tool error.
+- Exit `2` — `join` timeout (prints `{"timeout":true}`).
+
+The bundled `rallish-mcp` skill instructs Kimi/Claude to call this subcommand
+instead of speaking raw MCP. `rallish bootstrap` installs the skill
+automatically.

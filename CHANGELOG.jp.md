@@ -21,6 +21,14 @@
   でスキル + ドライバースクリプト (`~/.claude/scripts/autonomous-cycle.sh`) +
   ハンドオフランブック (`~/.claude/runbooks/cycle-handoff.md`) をインストール.
   Bootstrap ステップ1で自動インストール.
+- **`rallish rally mcp-agent` — MCP 2025-03-26 クライアントサブコマンド.**
+  rally ツール (`create`, `join`, `done`, `status`) 用のワンショットクライアント.
+  SSE トランスポートを開き JSON-RPC ハンドシェイク後、要求ツールを呼び出して
+  生 JSON を出力. `join` は `--timeout` 付きブロッキング long-poll に対応し、
+  timeout 時は終了コード `2` を返す.
+- **`rallish-mcp` バンドルスキル.** Kimi/Claude に直接 MCP/SSE を実装せず
+  `rallish rally mcp-agent` を呼び出すよう指示するスキル. `rallish bootstrap`
+  で自動インストール.
 - **AutoGoal + 時間ベース終了.** `go vet`, `golangci-lint --fast-only`,
   TODO/FIXME スキャンで次の目標を自動発見. `MaxDurationMinutes` で実行時間を
   制限; コードベースがクリーンなら `HaltSuccess` で graceful 終了.

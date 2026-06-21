@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus driver script (`~/.claude/scripts/autonomous-cycle.sh`) and handoff
   runbook (`~/.claude/runbooks/cycle-handoff.md`). Bootstrap step 1
   installs them automatically.
+- **`rallish rally mcp-agent` — MCP 2025-03-26 client subcommand.**
+  One-shot client for rally tools (`create`, `join`, `done`, `status`).
+  Opens the SSE transport, performs the JSON-RPC handshake, calls the
+  requested tool, and prints the raw JSON result. `join` supports blocking
+  long-poll with `--timeout` and exits `2` on timeout.
+- **`rallish-mcp` bundled skill.** Instructions-only skill that tells
+  Kimi/Claude to invoke `rallish rally mcp-agent` instead of hand-rolling
+  MCP/SSE. Installed automatically by `rallish bootstrap`.
 - **AutoGoal + time-based termination.** `autogoal.go` discovers next
   goals via `go vet`, `golangci-lint --fast-only`, and TODO/FIXME scan.
   `MaxDurationMinutes` caps runtime; `HaltSuccess` exits cleanly when the

@@ -21,6 +21,14 @@
   스킬 + 드라이버 스크립트(`~/.claude/scripts/autonomous-cycle.sh`) +
   핸드오프 런북(`~/.claude/runbooks/cycle-handoff.md`) 설치. Bootstrap
   1단계에서 자동 설치.
+- **`rallish rally mcp-agent` — MCP 2025-03-26 클라이언트 서브커맨드.**
+  rally 툴(`create`, `join`, `done`, `status`)을 위한 원샷 클라이언트.
+  SSE 트랜스포트를 열고 JSON-RPC 핸드셰이크 후 요청한 툴을 호출해 원시
+  JSON 결과를 출력. `join`은 `--timeout` 블로킹 롱폴을 지원하며 timeout
+  시 종료 코드 `2`를 반환.
+- **`rallish-mcp` 번들 스킬.** Kimi/Claude에게 직접 MCP/SSE를 구현하지 말고
+  `rallish rally mcp-agent`를 호출하도록 안내하는 스킬. `rallish bootstrap`
+  시 자동 설치.
 - **AutoGoal + 시간 기반 종료.** `go vet`, `golangci-lint --fast-only`,
   TODO/FIXME 스캔으로 다음 목표 자동 발견. `MaxDurationMinutes`로 실행
   시간 제한; 코드베이스가 깨끗하면 `HaltSuccess`로 graceful 종료.

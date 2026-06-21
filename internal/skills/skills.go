@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-//go:embed all:rallish all:autonomous-cycle
+//go:embed all:rallish all:autonomous-cycle all:rallish-mcp
 var embedded embed.FS
 
 // InstallResult reports what happened to one file during Install.
@@ -35,7 +35,7 @@ func Install(targetDir string) ([]InstallResult, error) {
 }
 
 // InstallNamed writes the embedded skill named skillName to targetDir.
-// Supported names: "rallish", "autonomous-cycle".
+// Supported names: "rallish", "autonomous-cycle", "rallish-mcp".
 func InstallNamed(skillName, targetDir string) ([]InstallResult, error) {
 	if err := os.MkdirAll(targetDir, 0o750); err != nil { //nolint:gosec // skill dir; world-readable is fine but 0750 satisfies gosec
 		return nil, fmt.Errorf("create target dir %q: %w", targetDir, err)
