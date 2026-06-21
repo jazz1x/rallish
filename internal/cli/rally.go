@@ -35,6 +35,7 @@ func RallyCmd() *cobra.Command {
 		RallyJoinCmd(),
 		RallyDoneCmd(),
 		RallyStatusCmd(),
+		RallyMCPAgentCmd(),
 	)
 	return cmd
 }
