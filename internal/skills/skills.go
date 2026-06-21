@@ -20,6 +20,28 @@ type InstallResult struct {
 	Action string // "written", "unchanged", or "created"
 }
 
+// writeFileIfChanged writes content to destPath with the given mode, but only
+// when the on-disk content differs. It returns an InstallResult describing the
+// outcome: "unchanged" when the file already matched, "written" when an existing
+// file was overwritten, or "created" when destPath did not exist yet. The parent
+// directory must already exist.
+func writeFileIfChanged(destPath string, content []byte, mode fs.FileMode) (InstallResult, error) {
+	existing, statErr := os.ReadFile(destPath) //nolint:gosec // caller-supplied dest path
+	if statErr == nil {
+		if bytes.Equal(existing, content) {
+			return InstallResult{Path: destPath, Action: "unchanged"}, nil
+		}
+		if err := os.WriteFile(destPath, content, mode); err != nil { //nolint:gosec // skill/companion file
+			return InstallResult{}, fmt.Errorf("overwrite %q: %w", destPath, err)
+		}
+		return InstallResult{Path: destPath, Action: "written"}, nil
+	}
+	if err := os.WriteFile(destPath, content, mode); err != nil { //nolint:gosec // skill/companion file
+		return InstallResult{}, fmt.Errorf("create %q: %w", destPath, err)
+	}
+	return InstallResult{Path: destPath, Action: "created"}, nil
+}
+
 // Install writes the embedded rallish skill files to targetDir.
 // targetDir is typically ~/.claude/skills/rallish. It is created
 // (mode 0755) if missing. Existing files are overwritten only when their
@@ -72,24 +94,11 @@ func InstallNamed(skillName, targetDir string) ([]InstallResult, error) {
 			mode = 0o755
 		}
 
-		existing, statErr := os.ReadFile(destPath) //nolint:gosec // targetDir is caller-supplied
-		if statErr == nil {
-			if bytes.Equal(existing, content) {
-				results = append(results, InstallResult{Path: destPath, Action: "unchanged"})
-				return nil
-			}
-			if writeErr := os.WriteFile(destPath, content, mode); writeErr != nil { //nolint:gosec // skill file
-				return fmt.Errorf("overwrite %q: %w", destPath, writeErr)
-			}
-			results = append(results, InstallResult{Path: destPath, Action: "written"})
-			return nil
+		res, writeErr := writeFileIfChanged(destPath, content, mode)
+		if writeErr != nil {
+			return writeErr
 		}
-
-		// File does not exist yet — create it.
-		if writeErr := os.WriteFile(destPath, content, mode); writeErr != nil { //nolint:gosec // skill file
-			return fmt.Errorf("create %q: %w", destPath, writeErr)
-		}
-		results = append(results, InstallResult{Path: destPath, Action: "created"})
+		results = append(results, res)
 		return nil
 	})
 	if err != nil {
@@ -227,23 +236,11 @@ func InstallCompanionFiles(skillName, homeDir string) ([]InstallResult, error) {
 			return fmt.Errorf("create dir %q: %w", destDir, mkErr)
 		}
 
-		existing, statErr := os.ReadFile(destPath) //nolint:gosec // well-known path
-		if statErr == nil {
-			if bytes.Equal(existing, content) {
-				results = append(results, InstallResult{Path: destPath, Action: "unchanged"})
-				return nil
-			}
-			if writeErr := os.WriteFile(destPath, content, mode); writeErr != nil { //nolint:gosec // companion file
-				return fmt.Errorf("overwrite %q: %w", destPath, writeErr)
-			}
-			results = append(results, InstallResult{Path: destPath, Action: "written"})
-			return nil
+		res, writeErr := writeFileIfChanged(destPath, content, mode)
+		if writeErr != nil {
+			return writeErr
 		}
-
-		if writeErr := os.WriteFile(destPath, content, mode); writeErr != nil { //nolint:gosec // companion file
-			return fmt.Errorf("create %q: %w", destPath, writeErr)
-		}
-		results = append(results, InstallResult{Path: destPath, Action: "created"})
+		results = append(results, res)
 		return nil
 	})
 
