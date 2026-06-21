@@ -17,6 +17,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	mcpClientDefaultTimeout  = 30 * time.Second
+	mcpClientJoinTimeoutSlop = 5 * time.Second
+)
+
 // mcpAgentOptions holds the flags for `rallish rally mcp-agent`.
 type mcpAgentOptions struct {
 	Mode         string
@@ -40,10 +45,11 @@ func RallyMCPAgentCmd() *cobra.Command {
 		Long: `One-shot MCP client that talks to the rallish daemon's MCP surface.
 
 Modes:
-  create  Create a new rally session.
-  join    Wait until the baton arrives for the named participant.
-  done    Pass the baton to the next participant.
-  status  Print the current rally session snapshot.
+  create     Create a new rally session.
+  join       Wait until the baton arrives for the named participant.
+  done       Pass the baton to the next participant.
+  status     Print the current rally session snapshot.
+  interrupt  Forcibly interrupt a rally session.
 
 The command prints raw JSON to stdout and exits.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -78,8 +84,10 @@ func runRallyMCPAgent(ctx context.Context, homeDir string, opts mcpAgentOptions,
 		return runMCPAgentDone(ctx, homeDir, opts, out)
 	case "status":
 		return runMCPAgentStatus(ctx, homeDir, opts, out)
+	case "interrupt":
+		return runMCPAgentInterrupt(ctx, homeDir, opts, out)
 	default:
-		return fmt.Errorf("unknown mode %q: must be one of create, join, done, status", opts.Mode)
+		return fmt.Errorf("unknown mode %q: must be one of create, join, done, status, interrupt", opts.Mode)
 	}
 }
 
@@ -88,7 +96,7 @@ func runMCPAgentCreate(ctx context.Context, homeDir string, opts mcpAgentOptions
 	if len(names) < 2 {
 		return fmt.Errorf("--participants requires at least 2 comma-separated names: %w", contract.ErrTooFewParticipants)
 	}
-	client, err := newMCPClient(homeDir, 30*time.Second)
+	client, err := newMCPClient(homeDir, mcpClientDefaultTimeout)
 	if err != nil {
 		return err
 	}
@@ -124,7 +132,7 @@ func runMCPAgentJoin(ctx context.Context, homeDir string, opts mcpAgentOptions, 
 	if clientTimeout <= 0 {
 		clientTimeout = 30 * time.Second
 	}
-	client, err := newMCPClient(homeDir, clientTimeout+5*time.Second)
+	client, err := newMCPClient(homeDir, clientTimeout+mcpClientJoinTimeoutSlop)
 	if err != nil {
 		return err
 	}
@@ -161,7 +169,7 @@ func runMCPAgentDone(ctx context.Context, homeDir string, opts mcpAgentOptions, 
 	if _, err := contract.NewParticipantName(opts.As); err != nil {
 		return err
 	}
-	client, err := newMCPClient(homeDir, 30*time.Second)
+	client, err := newMCPClient(homeDir, mcpClientDefaultTimeout)
 	if err != nil {
 		return err
 	}
@@ -189,7 +197,7 @@ func runMCPAgentStatus(ctx context.Context, homeDir string, opts mcpAgentOptions
 	if _, err := contract.NewSessionID(opts.SessionID); err != nil {
 		return err
 	}
-	client, err := newMCPClient(homeDir, 30*time.Second)
+	client, err := newMCPClient(homeDir, mcpClientDefaultTimeout)
 	if err != nil {
 		return err
 	}
@@ -201,6 +209,29 @@ func runMCPAgentStatus(ctx context.Context, homeDir string, opts mcpAgentOptions
 
 	args := contract.RallyStatusToolArgs{SessionID: opts.SessionID}
 	text, err := client.callTool(ctx, "rally_status", args)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintln(out, text)
+	return nil
+}
+
+func runMCPAgentInterrupt(ctx context.Context, homeDir string, opts mcpAgentOptions, out io.Writer) error {
+	if _, err := contract.NewSessionID(opts.SessionID); err != nil {
+		return err
+	}
+	client, err := newMCPClient(homeDir, mcpClientDefaultTimeout)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = client.close() }()
+
+	if err := client.handshake(ctx); err != nil {
+		return err
+	}
+
+	args := contract.RallyInterruptToolArgs{SessionID: opts.SessionID}
+	text, err := client.callTool(ctx, "rally_interrupt", args)
 	if err != nil {
 		return err
 	}
@@ -323,11 +354,15 @@ func (c *mcpClient) call(ctx context.Context, method string, params any) (map[st
 	c.nextID++
 	id := c.nextID
 
+	raw, err := marshalRaw(params)
+	if err != nil {
+		return nil, err
+	}
 	body, err := json.Marshal(contract.MCPJSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      id,
 		Method:  method,
-		Params:  mustMarshalRaw(params),
+		Params:  raw,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal jsonrpc request: %w", err)
@@ -390,10 +425,10 @@ func (c *mcpClient) readMessage() (*contract.MCPJSONRPCResponse, error) {
 	return nil, errors.New("mcp sse stream closed before response")
 }
 
-func mustMarshalRaw(v any) json.RawMessage {
+func marshalRaw(v any) (json.RawMessage, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("marshal params: %w", err)
 	}
-	return b
+	return b, nil
 }
