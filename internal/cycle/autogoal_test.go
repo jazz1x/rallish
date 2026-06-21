@@ -3,6 +3,8 @@ package cycle
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os/exec"
 	"testing"
 )
 
@@ -74,6 +76,36 @@ func TestDiscoverNextGoalWithRunner(t *testing.T) {
 	}
 	if goal != "" {
 		t.Fatalf("expected empty goal, got %q", goal)
+	}
+}
+
+func TestIsExitError(t *testing.T) {
+	if !isExitError(&exec.ExitError{}) {
+		t.Error("an *exec.ExitError must be recognized")
+	}
+	if !isExitError(fmt.Errorf("wrap: %w", &exec.ExitError{})) {
+		t.Error("a wrapped *exec.ExitError must be recognized")
+	}
+	if isExitError(errors.New("boom")) {
+		t.Error("a plain error must not be classified as an ExitError")
+	}
+	if isExitError(nil) {
+		t.Error("nil must not be classified as an ExitError")
+	}
+}
+
+// TestDiscoverNextGoal_AllStrategiesFail guards the false-HaltSuccess bug: when
+// every discovery strategy fails to run (e.g. a broken toolchain), discovery
+// must return an error, not ("", nil). The empty-goal value is read by the
+// driver as HaltSuccess, which would falsely report a clean, completed codebase.
+func TestDiscoverNextGoal_AllStrategiesFail(t *testing.T) {
+	r := mockRunner{err: errors.New("toolchain missing")}
+	goal, err := discoverNextGoalWithRunner(context.Background(), r)
+	if err == nil {
+		t.Fatalf("expected an error when every strategy fails to run, got goal=%q nil err", goal)
+	}
+	if goal != "" {
+		t.Fatalf("goal must be empty on failure, got %q", goal)
 	}
 }
 
