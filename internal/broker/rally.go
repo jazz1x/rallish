@@ -161,45 +161,30 @@ func writeRallyError(w http.ResponseWriter, err error) {
 		errors.Is(err, contract.ErrDuplicateName),
 		errors.Is(err, contract.ErrTooFewParticipants),
 		errors.Is(err, contract.ErrSelfHandoff),
-		errors.Is(err, contract.ErrHandoffToNotMember):
+		errors.Is(err, contract.ErrHandoffToNotMember),
+		errors.Is(err, contract.ErrFirstHolderNotMember):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	default:
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 
-// handleRallyCreate handles POST /rally/sessions.
-func (s *Server) handleRallyCreate(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	logger := slog.With("handler", "rally_create")
-
-	if !requireJSON(w, r) {
-		return
-	}
-
-	var req contract.NewRallyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logger.ErrorContext(ctx, "decode request", "error", err)
-		http.Error(w, fmt.Sprintf("bad request: %v", err), http.StatusBadRequest)
-		return
-	}
-
+// createRallySession validates and creates a new rally session, returning the
+// public snapshot. It is used by both the HTTP handler and the MCP tool handler.
+func createRallySession(req contract.NewRallyRequest) (contract.RallySession, error) {
 	// Validate participants — must be ≥2, all valid names, no duplicates.
 	if len(req.Participants) < 2 {
-		writeRallyError(w, fmt.Errorf("need at least 2 participants: %w", contract.ErrTooFewParticipants))
-		return
+		return contract.RallySession{}, fmt.Errorf("need at least 2 participants: %w", contract.ErrTooFewParticipants)
 	}
 	seen := make(map[contract.ParticipantName]struct{})
 	names := make([]contract.ParticipantName, 0, len(req.Participants))
 	for _, raw := range req.Participants {
 		pn, err := contract.NewParticipantName(raw)
 		if err != nil {
-			writeRallyError(w, err)
-			return
+			return contract.RallySession{}, err
 		}
 		if _, dup := seen[pn]; dup {
-			writeRallyError(w, fmt.Errorf("participant %q: %w", raw, contract.ErrDuplicateName))
-			return
+			return contract.RallySession{}, fmt.Errorf("participant %q: %w", raw, contract.ErrDuplicateName)
 		}
 		seen[pn] = struct{}{}
 		names = append(names, pn)
@@ -210,12 +195,10 @@ func (s *Server) handleRallyCreate(w http.ResponseWriter, r *http.Request) {
 	if req.FirstHolder != "" {
 		fh, err := contract.NewParticipantName(req.FirstHolder)
 		if err != nil {
-			writeRallyError(w, err)
-			return
+			return contract.RallySession{}, err
 		}
 		if _, ok := seen[fh]; !ok {
-			http.Error(w, fmt.Sprintf("first_holder %q is not in participants", req.FirstHolder), http.StatusBadRequest)
-			return
+			return contract.RallySession{}, fmt.Errorf("first_holder %q: %w", req.FirstHolder, contract.ErrFirstHolderNotMember)
 		}
 		firstHolder = fh
 	}
@@ -225,9 +208,7 @@ func (s *Server) handleRallyCreate(w http.ResponseWriter, r *http.Request) {
 
 	id, err := generateRallyID()
 	if err != nil {
-		logger.ErrorContext(ctx, "generate id", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+		return contract.RallySession{}, fmt.Errorf("generate id: %w", err)
 	}
 
 	nowMS := time.Now().UnixMilli()
@@ -257,9 +238,33 @@ func (s *Server) handleRallyCreate(w http.ResponseWriter, r *http.Request) {
 	rallies.sessions[id] = sess
 	rallies.mu.Unlock()
 
-	logger.InfoContext(ctx, "rally_created", "session_id", id, "participants", req.Participants)
+	return sess.toPublic(nowMS), nil
+}
 
-	pub := sess.toPublic(nowMS)
+// handleRallyCreate handles POST /rally/sessions.
+func (s *Server) handleRallyCreate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	logger := slog.With("handler", "rally_create")
+
+	if !requireJSON(w, r) {
+		return
+	}
+
+	var req contract.NewRallyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.ErrorContext(ctx, "decode request", "error", err)
+		http.Error(w, fmt.Sprintf("bad request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	pub, err := createRallySession(req)
+	if err != nil {
+		writeRallyError(w, err)
+		return
+	}
+
+	logger.InfoContext(ctx, "rally_created", "session_id", pub.ID, "participants", req.Participants)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(pub); err != nil {
@@ -471,49 +476,21 @@ func cleanupStream(sessionID contract.SessionID, participant contract.Participan
 	}
 }
 
-// handleRallyDone handles POST /rally/sessions/{id}/done?as=<name>.
-func (s *Server) handleRallyDone(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	logger := slog.With("handler", "rally_done")
-
-	if !requireJSON(w, r) {
-		return
-	}
-
-	rawID := r.PathValue("id")
-	id, err := contract.NewSessionID(rawID)
-	if err != nil {
-		writeRallyError(w, err)
-		return
-	}
-
-	asRaw := r.URL.Query().Get("as")
-	as, err := contract.NewParticipantName(asRaw)
-	if err != nil {
-		writeRallyError(w, err)
-		return
-	}
-
-	var req contract.DoneRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logger.ErrorContext(ctx, "decode request", "error", err)
-		http.Error(w, fmt.Sprintf("bad request: %v", err), http.StatusBadRequest)
-		return
-	}
-
+// advanceRallyBaton validates and performs a baton handoff, returning the
+// updated public snapshot. It is used by both the HTTP handler and the MCP tool
+// handler.
+func advanceRallyBaton(id contract.SessionID, as contract.ParticipantName, req contract.DoneRequest) (contract.RallySession, error) {
 	// Validate optional handoff_to name.
 	var handoffTo contract.ParticipantName
 	if req.HandoffTo != "" {
 		ht, herr := contract.NewParticipantName(req.HandoffTo)
 		if herr != nil {
-			writeRallyError(w, herr)
-			return
+			return contract.RallySession{}, herr
 		}
 		// Reject self-handoff: passing the baton to yourself is a no-op and
 		// almost certainly a client bug.
 		if ht == as {
-			writeRallyError(w, fmt.Errorf("participant %q: %w", as, contract.ErrSelfHandoff))
-			return
+			return contract.RallySession{}, fmt.Errorf("participant %q: %w", as, contract.ErrSelfHandoff)
 		}
 		handoffTo = ht
 	}
@@ -522,23 +499,20 @@ func (s *Server) handleRallyDone(w http.ResponseWriter, r *http.Request) {
 	sess, ok := rallies.sessions[id]
 	if !ok {
 		rallies.mu.Unlock()
-		writeRallyError(w, fmt.Errorf("session %q: %w", rawID, contract.ErrSessionNotFound))
-		return
+		return contract.RallySession{}, fmt.Errorf("session %q: %w", id, contract.ErrSessionNotFound)
 	}
 
 	// Reject operations on an already-interrupted session.
 	if sess.status == contract.RallyStateInterrupted {
 		rallies.mu.Unlock()
-		writeRallyError(w, fmt.Errorf("session %q: %w", rawID, contract.ErrSessionInterrupted))
-		return
+		return contract.RallySession{}, fmt.Errorf("session %q: %w", id, contract.ErrSessionInterrupted)
 	}
 
 	// Only the current holder may call done.
 	if sess.holder != as {
 		rallies.mu.Unlock()
-		writeRallyError(w, fmt.Errorf("participant %q is not the current baton holder (holder: %q): %w",
-			as, sess.holder, contract.ErrNotHolder))
-		return
+		return contract.RallySession{}, fmt.Errorf("participant %q is not the current baton holder (holder: %q): %w",
+			as, sess.holder, contract.ErrNotHolder)
 	}
 
 	// Validate handoff_to membership if provided.
@@ -552,8 +526,7 @@ func (s *Server) handleRallyDone(w http.ResponseWriter, r *http.Request) {
 		}
 		if !member {
 			rallies.mu.Unlock()
-			writeRallyError(w, fmt.Errorf("handoff_to %q: %w", handoffTo, contract.ErrHandoffToNotMember))
-			return
+			return contract.RallySession{}, fmt.Errorf("handoff_to %q: %w", handoffTo, contract.ErrHandoffToNotMember)
 		}
 	}
 
@@ -586,25 +559,77 @@ func (s *Server) handleRallyDone(w http.ResponseWriter, r *http.Request) {
 		select {
 		case nextCh <- evt:
 		default:
-			logger.WarnContext(ctx, "rally_baton_channel_full", "session_id", id, "next", next)
 		}
 	}
 
-	logger.InfoContext(ctx, "rally_done",
-		"session_id", id,
-		"from", as,
-		"to", next,
-		"turn_n", sess.turnN,
-	)
-
 	pub := sess.toPublic(nowMS)
 	rallies.mu.Unlock()
+	return pub, nil
+}
+
+// handleRallyDone handles POST /rally/sessions/{id}/done?as=<name>.
+func (s *Server) handleRallyDone(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	logger := slog.With("handler", "rally_done")
+
+	if !requireJSON(w, r) {
+		return
+	}
+
+	rawID := r.PathValue("id")
+	id, err := contract.NewSessionID(rawID)
+	if err != nil {
+		writeRallyError(w, err)
+		return
+	}
+
+	asRaw := r.URL.Query().Get("as")
+	as, err := contract.NewParticipantName(asRaw)
+	if err != nil {
+		writeRallyError(w, err)
+		return
+	}
+
+	var req contract.DoneRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.ErrorContext(ctx, "decode request", "error", err)
+		http.Error(w, fmt.Sprintf("bad request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	pub, err := advanceRallyBaton(id, as, req)
+	if err != nil {
+		writeRallyError(w, err)
+		return
+	}
+
+	logger.InfoContext(ctx, "rally_done",
+		"session_id", pub.ID,
+		"from", as,
+		"to", pub.Holder,
+		"turn_n", pub.TurnN,
+	)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(pub); err != nil {
 		logger.ErrorContext(ctx, "encode response", "error", err)
 	}
+}
+
+// getRallySession returns the public snapshot for a rally session. It is used
+// by both the HTTP handler and the MCP tool handler.
+func getRallySession(id contract.SessionID) (contract.RallySession, error) {
+	rallies.mu.Lock()
+	sess, ok := rallies.sessions[id]
+	if !ok {
+		rallies.mu.Unlock()
+		return contract.RallySession{}, fmt.Errorf("session %q: %w", id, contract.ErrSessionNotFound)
+	}
+	nowMS := time.Now().UnixMilli()
+	pub := sess.toPublic(nowMS)
+	rallies.mu.Unlock()
+	return pub, nil
 }
 
 // handleRallyStatus handles GET /rally/sessions/{id}.
@@ -619,16 +644,11 @@ func (s *Server) handleRallyStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rallies.mu.Lock()
-	sess, ok := rallies.sessions[id]
-	if !ok {
-		rallies.mu.Unlock()
-		writeRallyError(w, fmt.Errorf("session %q: %w", rawID, contract.ErrSessionNotFound))
+	pub, err := getRallySession(id)
+	if err != nil {
+		writeRallyError(w, err)
 		return
 	}
-	nowMS := time.Now().UnixMilli()
-	pub := sess.toPublic(nowMS)
-	rallies.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(pub); err != nil {
@@ -660,6 +680,45 @@ func setRallyStaleThreshold(sessionID contract.SessionID, thresholdMS int64) {
 	if sess, ok := rallies.sessions[sessionID]; ok {
 		sess.staleThreshold = thresholdMS
 	}
+}
+
+// interruptRallySession marks a single rally session as interrupted and sends
+// a final {"closed":true} event to every connected stream, then closes those
+// streams. It returns the public snapshot of the interrupted session.
+func interruptRallySession(id contract.SessionID) (contract.RallySession, error) {
+	rallies.mu.Lock()
+	sess, ok := rallies.sessions[id]
+	if !ok {
+		rallies.mu.Unlock()
+		return contract.RallySession{}, fmt.Errorf("session %q: %w", id, contract.ErrSessionNotFound)
+	}
+
+	var toClose []chan contract.BatonEvent
+	if sess.status != contract.RallyStateInterrupted {
+		sess.status = contract.RallyStateInterrupted
+		sess.holder = ""
+		for name, ch := range sess.streams {
+			if ch == nil {
+				continue
+			}
+			// Non-blocking send of the sentinel event; if the buffer is full we
+			// still close the channel so the reader unblocks.
+			select {
+			case ch <- contract.BatonEvent{Closed: true}:
+			default:
+			}
+			delete(sess.streams, name)
+			toClose = append(toClose, ch)
+		}
+	}
+	nowMS := time.Now().UnixMilli()
+	pub := sess.toPublic(nowMS)
+	rallies.mu.Unlock()
+
+	for _, ch := range toClose {
+		close(ch)
+	}
+	return pub, nil
 }
 
 // CloseAllRallies marks every active rally as interrupted and sends a final
