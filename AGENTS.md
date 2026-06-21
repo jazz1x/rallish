@@ -70,7 +70,7 @@ Plain `fmt.Fprintln` / `fmt.Fprintf` for cases that need no theming
 (e.g. `config get` printing a raw value) must use `_, _ = fmt.Fprintln(...)`
 or capture the return; errcheck is enforced.
 
-## A2A Protocol
+## A2A / MCP Protocol
 
 When modifying A2A-related code:
 
@@ -78,6 +78,16 @@ When modifying A2A-related code:
 2. Update `internal/broker/a2a.go` for handler changes.
 3. Update `docs/a2a-compatibility.md` for mapping changes.
 4. Update tests in `internal/broker/a2a_test.go` (if it exists) or add them.
+
+When modifying MCP-related code:
+
+1. Update `pkg/contract/mcp.go` for type changes.
+2. Update `internal/broker/mcp.go` for handler changes.
+3. Update `docs/mcp-compatibility.md` for mapping changes.
+4. Update tests in `internal/broker/mcp_test.go` or add them.
+
+Keep the MCP rally surface additive: changes must not break the existing
+HTTP/SSE rally endpoints or the `rallish rally` CLI.
 
 ## Testing
 

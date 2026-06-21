@@ -85,6 +85,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Guardrails as invariants.** A CI import-guard test forbids the core from
   importing a loop/scheduler/graph-DB package; `go mod verify` is wired into the
   push gate; AGENTS.md / CLAUDE.md are ingested as a structured convention source.
+- **MCP server surface for rally.** The broker exposes rally baton-passing as
+  MCP 2025-03-26 tools (`rally_create`, `rally_join`, `rally_done`,
+  `rally_status`, `rally_interrupt`) over an SSE transport at `/mcp/sse`.
+  HTTP/SSE rally endpoints and the `rallish rally` CLI remain unchanged.
 
 ## [0.3.0] - 2026-05-20
 

@@ -82,6 +82,11 @@
 - **不変条件としてのガードレール.** CI import-guard テストがコアの
   loop/scheduler/graph-DB パッケージの import を禁止; `go mod verify` を push
   ゲートに連結; AGENTS.md/CLAUDE.md を構造化された convention ソースとして取り込み.
+- **rally 用 MCP サーバー表面.** ブローカーが rally のバトン受け渡しを MCP
+  2025-03-26 ツール (`rally_create`, `rally_join`, `rally_done`,
+  `rally_status`, `rally_interrupt`) として `/mcp/sse` SSE トランスポート経由で
+  公開します。既存の HTTP/SSE rally エンドポイントと `rallish rally` CLI は
+  変更されていません.
 
 ## [0.3.0] - 2026-05-20
 

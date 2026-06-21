@@ -76,6 +76,10 @@
 - **불변식으로서의 가드레일.** CI import-guard 테스트가 코어의
   loop/scheduler/graph-DB 패키지 import를 금지; `go mod verify`를 push 게이트에
   연결; AGENTS.md/CLAUDE.md를 구조화된 convention 소스로 수용.
+- **rally용 MCP 서버 표면.** 브로커가 rally baton-passing을 MCP 2025-03-26
+  도구(`rally_create`, `rally_join`, `rally_done`, `rally_status`,
+  `rally_interrupt`)로 `/mcp/sse` SSE 전송을 통해 노출합니다. 기존 HTTP/SSE
+  rally 엔드포인트와 `rallish rally` CLI는 그대로 유지됩니다.
 
 ## [0.3.0] - 2026-05-20
 
