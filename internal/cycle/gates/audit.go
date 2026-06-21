@@ -3,8 +3,6 @@ package gates
 
 import (
 	"context"
-	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/jazz1x/rallish/internal/cycle"
@@ -53,19 +51,7 @@ func (g AuditGate) Run(ctx context.Context, state cycle.State) (contract.GateRes
 	}
 
 	parts := strings.Fields(rawCmd)
-	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...) //nolint:gosec // audit_cmd is an explicit cycle-owner configuration surface
-	out, err := cmd.CombinedOutput()
-	report.Stdout = truncateOutput(string(out), 4000)
-	report.DurationMS = elapsed(start)
-
-	if err != nil {
-		report.Passed = false
-		report.Stderr = fmt.Sprintf("%s failed: %v", rawCmd, err)
-		return contract.GateFailure{R: report, Reason: contract.HaltGateFailure}, state
-	}
-
-	report.Passed = true
-	return contract.GateSuccess{R: report}, state
+	return runShellGate(ctx, parts, rawCmd, report, start, state)
 }
 
 // truncateOutput caps output to maxRunes to prevent state bloat in long loops.
@@ -88,17 +74,5 @@ func (LocalAuditGate) Run(ctx context.Context, state cycle.State) (contract.Gate
 	start := timeNow()
 	report := contract.GateReport{Gate: "local-audit"}
 
-	cmd := exec.CommandContext(ctx, "make", "check")
-	out, err := cmd.CombinedOutput()
-	report.Stdout = truncateOutput(string(out), 4000)
-	report.DurationMS = elapsed(start)
-
-	if err != nil {
-		report.Passed = false
-		report.Stderr = fmt.Sprintf("make check failed: %v", err)
-		return contract.GateFailure{R: report, Reason: contract.HaltGateFailure}, state
-	}
-
-	report.Passed = true
-	return contract.GateSuccess{R: report}, state
+	return runShellGate(ctx, []string{"make", "check"}, "make check", report, start, state)
 }

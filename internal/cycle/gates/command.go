@@ -36,14 +36,24 @@ func (g CommandGate) Run(ctx context.Context, state cycle.State) (contract.GateR
 		return contract.GateFailure{R: report, Reason: contract.HaltGateFailure}, state
 	}
 
-	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...) //nolint:gosec // local gate commands are an explicit cycle-owner configuration surface
+	return runShellGate(ctx, parts, fmt.Sprintf("command %q", g.RawCmd), report, start, state)
+}
+
+// runShellGate executes argv (argv[0] is the executable) for a command-style
+// gate, folding combined output, duration, and pass/fail into report. label is
+// the command description used in the "<label> failed: <err>" Stderr message on
+// non-zero exit. It returns GateSuccess on exit 0 and GateFailure
+// (HaltGateFailure) otherwise. The caller supplies report (with Gate set) and
+// start so each gate keeps its own name and timing window.
+func runShellGate(ctx context.Context, argv []string, label string, report contract.GateReport, start int64, state cycle.State) (contract.GateResult, cycle.State) {
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // gate commands are an explicit cycle-owner configuration surface
 	out, err := cmd.CombinedOutput()
 	report.Stdout = truncateOutput(string(out), 4000)
 	report.DurationMS = elapsed(start)
 
 	if err != nil {
 		report.Passed = false
-		report.Stderr = fmt.Sprintf("command %q failed: %v", g.RawCmd, err)
+		report.Stderr = fmt.Sprintf("%s failed: %v", label, err)
 		return contract.GateFailure{R: report, Reason: contract.HaltGateFailure}, state
 	}
 
