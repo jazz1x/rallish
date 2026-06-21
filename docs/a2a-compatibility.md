@@ -14,6 +14,11 @@ are implemented; **mutual auth is the one remaining deferred gap** (see Limitati
 | Agent Card (legacy alias) | `GET /.well-known/agent.json` |
 | JSON-RPC 2.0 | `POST /a2a` |
 
+> **Note:** rallish also exposes a separate MCP 2025-03-26 server surface for
+> rally baton-passing at `/mcp/sse` and `/mcp/message`. See
+> [`docs/mcp-compatibility.md`](mcp-compatibility.md); the two protocol surfaces
+> are independent.
+
 The card carries `protocolVersion` (currently `"1.0"`) so a client can negotiate
 the wire shape (versioned public surface).
 
