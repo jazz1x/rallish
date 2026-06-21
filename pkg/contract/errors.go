@@ -42,6 +42,10 @@ var ErrAlreadyConnected = errors.New("rally: participant already connected")
 // not part of the session.
 var ErrHandoffToNotMember = errors.New("rally: handoff_to is not a session participant")
 
+// ErrFirstHolderNotMember is returned when first_holder names a participant that
+// is not part of the session.
+var ErrFirstHolderNotMember = errors.New("rally: first_holder is not a session participant")
+
 // Cycle errors.
 var (
 	// ErrInvalidCyclePhase is returned when a cycle phase string is not recognised.
