@@ -6,7 +6,7 @@
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![go](https://img.shields.io/badge/go-1.25+-blue)
 
-**rallish** is a small local broker process that sits between N agent runtimes — any coding CLI with an adapter (Claude, Kimi, Cursor, Codex, etc., or even the same kind running in different contexts). The broker owns the conversation state, decides whose turn it is, and shuttles compact turn payloads between them.
+**rallish** is a small local broker process that sits between N agent runtimes — Claude and Kimi adapters ship today; other CLIs (Cursor, Codex, …) can be added via the minimal two-method adapter port, and even the same kind running in different contexts is supported. The broker owns the conversation state, decides whose turn it is, and shuttles compact turn payloads between them.
 
 Everything runs locally. No cloud broker, no external coordination service. The wire format follows the **A2A (Agent2Agent) protocol** where reasonable, so any A2A-compliant agent can be plugged in via an adapter.
 
@@ -20,7 +20,7 @@ Everything runs locally. No cloud broker, no external coordination service. The 
 | **Rally (interactive)** | `rallish rally` provides live baton-passing between two coding-CLI sessions; agents self-loop the ping-pong (no per-turn user trigger needed); exclusive holder enforcement via SSE |
 | **A2A Protocol** | A2A v1.0 wire shape: `/.well-known/agent-card.json`, `protocolVersion`, PascalCase JSON-RPC tasks, SSE streaming. Signed cards and mutual auth are deferred. |
 | **Token Budgets** | Hard caps on tokens, turns, and wall-clock time per session |
-| **Scratchpad** | Rolling shared scratch with automatic compaction |
+| **Scratchpad** _(planned)_ | Rolling shared scratch with automatic compaction; preset config is parsed but not yet wired into the turn loop |
 | **Presets** | YAML templates for roles, routing, and exit conditions |
 | **Unix socket IPC** | CLI↔Daemon over `~/.rallish/rallish.sock` (mode `0600`); TCP loopback retained for A2A clients and Windows fallback |
 | **Auto-daemon** | `rallish squash` spawns the broker if none is running; `rallish doctor` reports socket reachability |
