@@ -25,12 +25,11 @@ import (
 
 // SquashOptions holds flags for the squash command.
 type SquashOptions struct {
-	PresetName     string
-	Task           string
-	SessionID      string
-	AllowShellExit bool
-	HomeDir        string
-	Repo           string
+	PresetName string
+	Task       string
+	SessionID  string
+	HomeDir    string
+	Repo       string
 }
 
 // RunSquash loads a preset, ensures the daemon is running, creates a session, and starts runners.
