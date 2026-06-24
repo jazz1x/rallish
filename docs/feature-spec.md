@@ -36,7 +36,7 @@ Every feature row cites the authoritative source file. Where a claim was spot-ve
 | F10 | Anti-spin stuck breaker + lifetime ceiling | ✅ | `internal/cycle/stuck.go`, `internal/budget` |
 | F11 | Hash-chained append-only ledger (G4 audit) | ✅ | `pkg/contract/harness_ledger.go`, `internal/cycle/ledger.go` |
 | F12 | Merkle (RFC 9162) inclusion/consistency proofs | ○ | `pkg/contract/merkle.go` |
-| F13 | Action-gate (G6) decision + recording | ◑ | `pkg/contract/action_gate.go`, `internal/cli/gate.go` |
+| F13 | Action-gate (G6) decision + recording + PreToolUse hook | ✅ | `pkg/contract/action_gate.go`, `internal/cli/gate.go`, `internal/skills/rallish/scripts/gate-pretooluse.sh` |
 | F14 | Secret containment classifier | ◑ | `pkg/contract/tooluse_gate.go` |
 | F15 | Unix-socket IPC + TCP loopback fallback | ✅ | `internal/ipc/socket.go`, `internal/cli/broker_client.go` |
 | F16 | A2A v1.0 wire shape (agent-card, JSON-RPC, SSE) | ◑ | `internal/broker/a2a.go` |
@@ -340,7 +340,7 @@ Called from `orchestrator.RunOnce`; on match it records `cycle_halted` and persi
 
 ---
 
-### F13 — Action-gate (G6) ◑ / F14 — Secret containment ◑
+### F13 — Action-gate (G6) ✅ / F14 — Secret containment ◑
 
 **What it is.** A pre-execution policy classifier for a runtime PreToolUse hook. `rallish gate tooluse --command "<cmd>"` decides and records; **the hook enforces** via the exit code.
 
@@ -359,14 +359,20 @@ Called from `orchestrator.RunOnce`; on match it records `cycle_halted` and persi
 
 **Recording.** A blocking decision (deny/needs-hitl) with `--cycle-id` is appended to that cycle's ledger as `tooluse_decision`; **safe (allow) decisions are never recorded** (false-positive guard).
 
-**Why ◑.** The policy classifier and recording are wired and tested, but rallish **declares + records only** — it does not execute, intercept, or block anything. Without a user-wired PreToolUse hook calling `gate tooluse` and honoring the exit code, `rm -rf /` runs unblocked. This is a deliberate boundary (rallish never becomes the executor), but the README presents G6 as a live safety feature.
-
-**To make it true (audit Tier 2, item 9):** ship the hook wiring + a runbook, or downgrade the claim to "policy declaration; enforcement requires hook X."
+**Enforcement (✅, audit Tier 2 item 9 — done).** A ready-to-wire Claude Code
+PreToolUse hook ships in the skill bundle: `internal/skills/rallish/scripts/gate-pretooluse.sh`
+(installed to `~/.claude/skills/rallish/scripts/`). It reads the PreToolUse JSON,
+runs `gate tooluse` over the Bash command, and maps the verdict onto Claude Code's
+`permissionDecision` contract — `deny` → refuse, `needs-hitl` → `ask`, `allow` →
+proceed. It **fails safe** (escalates to `ask`) when `jq`/`rallish` are missing or
+the gate errors. Wiring + verification: `docs/runbook-action-gate.md`. The boundary
+is preserved — rallish still only decides + records; the *hook* enforces — but the
+enforcement path now exists and is documented, so G6 is no longer declaration-only.
 
 **Acceptance criteria.**
 - AC-F13.1: `gate tooluse --command "rm -rf /"` prints a deny decision and exits 13.
 - AC-F13.2: A safe command exits 0 and writes nothing to the ledger.
-- AC-F13.3: With a wired hook, a denied command is actually refused (requires hook — see gap).
+- AC-F13.3 ✅: With the bundled hook wired, a denied command is actually refused — verified end-to-end: `rm -rf /` → `permissionDecision: deny`, `git reset --hard origin/main` → `ask`, `ls -la` → proceed.
 
 ---
 
@@ -439,6 +445,6 @@ These apply to *every* feature and double as design-review gates:
 Ordered by the audit's tiering (`docs/reports/2026-06-23-production-readiness-gaps.md`):
 
 1. **Tier 1 (first-run UX):** ✅ adapter auth preflight (G-F4 — done); ✅ `fake-demo` preset (G-F1 — done); ✅ `rally new` auto-spawn + typo-join fail-fast (G-F2 — done); ✅ honest install lead (README now leads with the verified curl / `go install` paths; `npx skills add` demoted to a caveated skills.sh alternative — done). **Tier 1 complete.**
-2. **Tier 2 (make harness claims true):** G6 hook wiring (F13); wire Merkle (F12); implement `logx` redaction (F21); A2A SSE named events + `sessionId` (F16).
+2. **Tier 2 (make harness claims true):** ✅ G6 hook wiring (F13 — done); wire Merkle (F12); implement `logx` redaction (F21); A2A SSE named events + `sessionId` (F16).
 3. **Tier 3 (trust):** real-adapter integration tests + gate/autogoal coverage (see `test-plan.md`); Homebrew tap.
 4. **Feature work:** cross-check ping-pong (F22); scratchpad wiring (F20); `strict_round_robin` / `last_writer_wins` routing (F6).

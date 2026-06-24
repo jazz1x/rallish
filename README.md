@@ -35,7 +35,7 @@ rallish is a vendor-neutral, repo-local **work harness**: it makes any agent run
 - **Interop** — A2A v1.0 wire shape (Agent Card at `/.well-known/agent-card.json`, real `protocolVersion`, strict typed intake). Signed cards and mutual auth are deferred.
 - **Audit** — `schema_version`-stamped, hash-chained, replayable ledger with RFC 9162 Merkle inclusion/consistency proofs.
 - **Anti-spin** — stuck/budget circuit-breakers + a sticky-halt reviver guard (a cron-revived spinning run self-halts and is not resurrected).
-- **Action-gate** — pre-execution destructive-command deny-list + secret containment; rallish declares + records the decision, the runtime hook enforces.
+- **Action-gate** — pre-execution destructive-command deny-list + secret containment; rallish declares + records the decision, the runtime hook enforces. A ready-to-wire Claude Code PreToolUse hook ships in the skill bundle — see [docs/runbook-action-gate.md](docs/runbook-action-gate.md).
 
 Full direction + rationale: `docs/north-star.md`.
 
@@ -186,7 +186,7 @@ SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-u
 rallish cycle run --once --cycle-id <id>
 # Pre-execution policy gate a runtime PreToolUse hook calls (declare + record; the hook enforces)
 rallish gate tooluse --command 'rm -rf /'    # -> {"verdict":"deny",...}  exit 13
-# Gate exit codes: 0=allow, 13=deny, 14=error; use --cycle-id to record the verdict.
+# Gate exit codes: 0=allow, 13=deny, 14=needs-human; use --cycle-id to record the verdict.
 
 # Rally via MCP (one-shot client over the daemon's MCP 2025-03-26 surface)
 rallish rally mcp-agent --mode create --participants alice,bob --task "refactor auth"

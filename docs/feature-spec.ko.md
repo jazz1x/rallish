@@ -36,7 +36,7 @@
 | F10 | 안티스핀 stuck 브레이커 + 수명 한도 | ✅ | `internal/cycle/stuck.go`, `internal/budget` |
 | F11 | 해시체인 append-only 레저 (G4 감사) | ✅ | `pkg/contract/harness_ledger.go`, `internal/cycle/ledger.go` |
 | F12 | Merkle(RFC 9162) 포함/일관성 증명 | ○ | `pkg/contract/merkle.go` |
-| F13 | 액션게이트(G6) 결정 + 기록 | ◑ | `pkg/contract/action_gate.go`, `internal/cli/gate.go` |
+| F13 | 액션게이트(G6) 결정 + 기록 + PreToolUse 훅 | ✅ | `pkg/contract/action_gate.go`, `internal/cli/gate.go`, `internal/skills/rallish/scripts/gate-pretooluse.sh` |
 | F14 | 시크릿 격리 분류기 | ◑ | `pkg/contract/tooluse_gate.go` |
 | F15 | Unix 소켓 IPC + TCP 루프백 폴백 | ✅ | `internal/ipc/socket.go`, `internal/cli/broker_client.go` |
 | F16 | A2A v1.0 와이어 형태 (agent-card, JSON-RPC, SSE) | ◑ | `internal/broker/a2a.go` |
@@ -340,7 +340,7 @@ scratch:
 
 ---
 
-### F13 — 액션게이트(G6) ◑ / F14 — 시크릿 격리 ◑
+### F13 — 액션게이트(G6) ✅ / F14 — 시크릿 격리 ◑
 
 **정의.** 런타임 PreToolUse 훅을 위한 사전 실행 정책 분류기. `rallish gate tooluse --command "<cmd>"`가 결정하고 기록한다; **훅이 종료코드로 강제**한다.
 
@@ -359,14 +359,19 @@ scratch:
 
 **기록.** `--cycle-id`와 함께한 차단 결정(deny/needs-hitl)은 그 사이클 레저에 `tooluse_decision`으로 추가; **안전(allow) 결정은 결코 기록 안 함**(오탐 가드).
 
-**왜 ◑인가.** 정책 분류기와 기록은 연결·테스트됐으나, rallish는 **선언+기록만** 한다 — 실행·가로채기·차단을 하지 않는다. `gate tooluse`를 호출하고 종료코드를 존중하는 사용자 배선 PreToolUse 훅이 없으면 `rm -rf /`는 차단 없이 실행된다. 이는 의도된 경계(rallish는 결코 실행자가 안 됨)지만 README는 G6를 라이브 안전 기능처럼 제시한다.
-
-**참으로 만들려면(감사 Tier 2, 9번):** 훅 배선 + 런북을 출시하거나, 주장을 "정책 선언; 강제는 훅 X 필요"로 낮출 것.
+**강제(✅, 감사 Tier 2 9번 — 완료).** 바로 연결 가능한 Claude Code PreToolUse 훅을
+스킬 번들에 출시: `internal/skills/rallish/scripts/gate-pretooluse.sh`
+(`~/.claude/skills/rallish/scripts/`에 설치). PreToolUse JSON을 읽어 Bash 명령에
+`gate tooluse`를 돌리고 판결을 Claude Code의 `permissionDecision` 계약으로 매핑한다 —
+`deny` → 거부, `needs-hitl` → `ask`, `allow` → 진행. `jq`/`rallish`가 없거나 게이트가
+에러를 내면 **안전 우선**(`ask`로 에스컬레이션). 배선 + 검증: `docs/runbook-action-gate.ko.md`.
+경계는 유지된다 — rallish는 여전히 결정+기록만, 강제는 *훅*이 — 그러나 강제 경로가
+이제 존재하고 문서화되어 G6는 더 이상 선언-전용이 아니다.
 
 **수용 기준.**
 - AC-F13.1: `gate tooluse --command "rm -rf /"`는 deny 결정을 출력하고 13 종료.
 - AC-F13.2: 안전 명령은 0 종료, 레저에 아무것도 안 씀.
-- AC-F13.3: 배선된 훅으로 거부된 명령이 실제로 거부됨(훅 필요 — 갭 참조).
+- AC-F13.3 ✅: 번들 훅을 배선하면 거부된 명령이 실제로 거부됨 — 엔드투엔드 검증: `rm -rf /` → `permissionDecision: deny`, `git reset --hard origin/main` → `ask`, `ls -la` → 진행.
 
 ---
 
@@ -439,6 +444,6 @@ scratch:
 감사 티어링 순서(`docs/reports/2026-06-23-production-readiness-gaps.md`):
 
 1. **Tier 1(첫 실행 UX):** ✅ 어댑터 인증 사전점검(G-F4 — 완료); ✅ `fake-demo` 프리셋(G-F1 — 완료); ✅ `rally new` 자동 기동 + 오타 조인 즉시 실패(G-F2 — 완료); ✅ 정직한 설치 안내(README가 검증된 curl / `go install` 경로를 앞세우고, `npx skills add`는 주의를 단 skills.sh 대안으로 강등 — 완료). **Tier 1 완료.**
-2. **Tier 2(하네스 주장을 참으로):** G6 훅 배선(F13); Merkle 연결(F12); `logx` 마스킹 구현(F21); A2A SSE 명명 이벤트 + `sessionId`(F16).
+2. **Tier 2(하네스 주장을 참으로):** ✅ G6 훅 배선(F13 — 완료); Merkle 연결(F12); `logx` 마스킹 구현(F21); A2A SSE 명명 이벤트 + `sessionId`(F16).
 3. **Tier 3(신뢰):** 실제 어댑터 통합 테스트 + 게이트/autogoal 커버리지(`test-plan.ko.md` 참조); Homebrew tap.
 4. **기능 작업:** cross-check ping-pong(F22); 스크래치패드 연결(F20); `strict_round_robin` / `last_writer_wins` 라우팅(F6).

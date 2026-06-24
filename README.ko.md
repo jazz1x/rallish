@@ -38,7 +38,7 @@ rallish는 벤더 중립, 리포 로컬 **작업 하네스**입니다. 에이전
 - **Interop** — A2A v1.0 와이어 형상 (`/.well-known/agent-card.json`의 Agent Card, 실제 `protocolVersion`, 엄격한 타입 인테이크). 서명된 카드와 상호 인증은 미구현(연기).
 - **Audit** — `schema_version` 스탬프, 해시 체인, 재생 가능한 원장 + RFC 9162 Merkle 포함/일관성 증명.
 - **Anti-spin** — 스턱/예산 회로 차단기 + 고착 중단 부활 방지 가드 (cron이 재가동한 스피닝 실행은 스스로 중단되며 재부활하지 않음).
-- **Action-gate** — 실행 전 파괴적 명령 거부 목록 + 시크릿 격리; rallish가 결정을 선언·기록하고, 런타임 훅이 강제합니다.
+- **Action-gate** — 실행 전 파괴적 명령 거부 목록 + 시크릿 격리; rallish가 결정을 선언·기록하고, 런타임 훅이 강제합니다. 바로 연결 가능한 Claude Code PreToolUse 훅이 스킬 번들에 포함됩니다 — [docs/runbook-action-gate.ko.md](docs/runbook-action-gate.ko.md) 참조.
 
 전체 방향 및 근거: `docs/north-star.md`.
 
@@ -188,7 +188,7 @@ SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-u
 rallish cycle run --once --cycle-id <id>
 # 런타임 PreToolUse 훅이 호출하는 실행 전 정책 게이트 (선언 + 기록; 훅이 강제)
 rallish gate tooluse --command 'rm -rf /'    # -> {"verdict":"deny",...}  exit 13
-# 게이트 종료 코드: 0=허용, 13=거부, 14=오류; --cycle-id 로 판결을 기록할 수 있습니다.
+# 게이트 종료 코드: 0=허용, 13=거부, 14=사람-검토-필요; --cycle-id 로 판결을 기록할 수 있습니다.
 
 # MCP를 통한 rally (데몬의 MCP 2025-03-26 표면을 사용하는 원샷 클라이언트)
 rallish rally mcp-agent --mode create --participants alice,bob --task "refactor auth"

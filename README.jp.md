@@ -38,7 +38,7 @@ rallish はベンダー中立・リポローカルの**作業ハーネス**で�
 - **Interop** — A2A v1.0 ワイヤ形状 (`/.well-known/agent-card.json` の Agent Card、実際の `protocolVersion`、厳格な型付きインテーク). 署名済みカードと相互認証は未実装（先送り）.
 - **Audit** — `schema_version` スタンプ、ハッシュチェーン、再生可能な台帳 + RFC 9162 Merkle 包含/一貫性証明。
 - **Anti-spin** — スタック/予算サーキットブレーカー + スティッキーホルト復活防止ガード (cron が再起動したスピニング実行は自己停止し、復活しない)。
-- **Action-gate** — 実行前の破壊的コマンド拒否リスト + シークレット封じ込め; rallish が決定を宣言・記録し、ランタイムフックが強制します。
+- **Action-gate** — 実行前の破壊的コマンド拒否リスト + シークレット封じ込め; rallish が決定を宣言・記録し、ランタイムフックが強制します。すぐ接続できる Claude Code PreToolUse フックがスキルバンドルに同梱されています — [docs/runbook-action-gate.md](docs/runbook-action-gate.md) を参照。
 
 全体の方針と根拠: `docs/north-star.md`.
 
@@ -190,7 +190,7 @@ SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-u
 rallish cycle run --once --cycle-id <id>
 # ランタイム PreToolUse フックが呼び出す実行前ポリシーゲート (宣言 + 記録; フックが強制)
 rallish gate tooluse --command 'rm -rf /'    # -> {"verdict":"deny",...}  exit 13
-# ゲート終了コード: 0=許可, 13=拒否, 14=エラー; --cycle-id で判決を記録できます。
+# ゲート終了コード: 0=許可, 13=拒否, 14=要人間確認; --cycle-id で判決を記録できます。
 
 # MCP 経由の rally (デーモンの MCP 2025-03-26 表面を使うワンショットクライアント)
 rallish rally mcp-agent --mode create --participants alice,bob --task "refactor auth"
