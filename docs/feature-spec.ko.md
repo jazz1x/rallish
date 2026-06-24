@@ -180,10 +180,10 @@ type Adapter interface {
 
 **수용 기준.**
 - AC-F4.1: 형식이 올바른 펜스 JSON `TurnResponse`는 `Run`을 통해 변형 없이 왕복.
-- AC-F4.2: 미인증 `claude` CLI는 실행 가능한 에러를 표면화(갭 참조).
+- AC-F4.2 ✅: 미인증/레이트리밋 런타임 CLI는 실행 가능한 에러를 표면화. 공유 분류기(`internal/adapter/diagnose.go`, `DiagnoseOutput`)가 서브프로세스 stdout/stderr에서 인증·레이트리밋 시그니처를 검사하고, `claude`·`kimi` `Run`은 일치 시 `no JSON TurnResponse found in output` 대신 명확한 메시지("…runtime is not authenticated — run `claude` once interactively to log in…")로 매핑.
 
 **알려진 갭.**
-- G-F4: 미인증/레이트리밋 `claude`는 난해한 `parsing response: no JSON TurnResponse found in output`를 냄. `doctor`는 PATH 존재만 확인하고 인증은 안 함. *권고:* 인증/헬스 사전점검과 명확한 메시지 추가(감사 Tier 1, 5번).
+- ✅ G-F4 (해결): 인증/레이트리밋 실패가 어댑터 경계에서 실행 가능한 메시지로 분류되고, `doctor --probe`가 어댑터당 최소 라이브 턴 1회로 인증을 검증(PATH 존재만이 아님). 프로브는 턴을 소비하므로 옵트인이며, 멈춘 로그인 프롬프트가 진단을 막지 못하도록 시간 제한(`probeTimeout`).
 - 참고: 어댑터 코드는 `claude`·`kimi`만 출시. Cursor/Codex는 *2-메서드 포트로 추가 가능*하나 미출시.
 
 ---
@@ -398,7 +398,7 @@ scratch:
 ### F18 — 데몬 자동 기동 ◑ / F19 — doctor ◑
 
 - **F18:** `squash`는 브로커를 자동 기동; `rally`/`cycle` 명령은 실행 중 데몬이 필요. 이를 정렬(`rally new`에서 자동 기동)하거나 선행조건을 문서화. **알려진 코드 버그:** `rallish bootstrap`이 "daemon not running — will auto-spawn on `rally new`"를 출력(`internal/cli/bootstrap.go`)하나 이는 거짓 — `squash`만 자동 기동함. 이 작업을 배선할 때 그 문자열을 수정하라.
-- **F19:** `doctor`는 데몬 도달성, PATH의 어댑터 존재, config/skill 경로를 보고. 어댑터 **인증은 검증 안 함**(G-F4 참조). PATH에 없는 어댑터는 실패가 아닌 정보로 보고.
+- **F19:** `doctor`는 데몬 도달성, PATH의 어댑터 존재, config/skill 경로를 보고. `--probe` 사용 시 어댑터당 시간 제한된 라이브 턴 1회로 **인증**도 검증(G-F4 해결). PATH에 없는 어댑터는 실패가 아닌 정보로 보고.
 
 ---
 
@@ -438,7 +438,7 @@ scratch:
 
 감사 티어링 순서(`docs/reports/2026-06-23-production-readiness-gaps.md`):
 
-1. **Tier 1(첫 실행 UX):** 어댑터 인증 사전점검(G-F4); `fake-demo` 프리셋(G-F1); `rally` 자동 기동 + 기본 타임아웃(G-F2); 오늘 동작하는 설치 경로.
+1. **Tier 1(첫 실행 UX):** ✅ 어댑터 인증 사전점검(G-F4 — 완료); `fake-demo` 프리셋(G-F1); `rally` 자동 기동 + 기본 타임아웃(G-F2); 오늘 동작하는 설치 경로.
 2. **Tier 2(하네스 주장을 참으로):** G6 훅 배선(F13); Merkle 연결(F12); `logx` 마스킹 구현(F21); A2A SSE 명명 이벤트 + `sessionId`(F16).
 3. **Tier 3(신뢰):** 실제 어댑터 통합 테스트 + 게이트/autogoal 커버리지(`test-plan.ko.md` 참조); Homebrew tap.
 4. **기능 작업:** cross-check ping-pong(F22); 스크래치패드 연결(F20); `strict_round_robin` / `last_writer_wins` 라우팅(F6).

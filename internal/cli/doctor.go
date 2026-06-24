@@ -15,12 +15,13 @@ import (
 // DoctorOptions controls the human-facing `rallish doctor` view.
 type DoctorOptions struct {
 	stdout io.Writer
+	probe  bool
 }
 
 // DoctorCmd returns the `doctor` cobra command.
 func DoctorCmd() *cobra.Command {
 	var opts DoctorOptions
-	return &cobra.Command{
+	c := &cobra.Command{
 		Use:   "doctor",
 		Short: "Diagnose adapters, daemon, and config",
 		Long: `Run health checks and print a status table:
@@ -28,11 +29,16 @@ func DoctorCmd() *cobra.Command {
   - adapter availability (claude, kimi, ...)
   - config file path
 
-A non-running daemon is fine — it auto-spawns on the first rally.`,
+A non-running daemon is fine — it auto-spawns on the first rally.
+
+With --probe, each adapter on PATH is asked to answer one minimal real turn so
+auth is verified (not just install). This spends one cheap turn per adapter.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return RunDoctor(cmd.Context(), opts)
 		},
 	}
+	c.Flags().BoolVar(&opts.probe, "probe", false, "verify adapter auth with a live minimal turn (spends one turn per adapter)")
+	return c
 }
 
 // RunDoctor is the exported entry point used by both the cobra command
@@ -50,7 +56,11 @@ func RunDoctor(ctx context.Context, opts DoctorOptions) error {
 	}
 
 	home, _ := os.UserHomeDir()
-	rep, err := doctor.Inspect(ctx, home)
+	var inspectOpts []doctor.Option
+	if opts.probe {
+		inspectOpts = append(inspectOpts, doctor.WithProbe())
+	}
+	rep, err := doctor.Inspect(ctx, home, inspectOpts...)
 	if err != nil {
 		t.Err("%v", err)
 		return err

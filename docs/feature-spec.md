@@ -180,10 +180,10 @@ type Adapter interface {
 
 **Acceptance criteria.**
 - AC-F4.1: A well-formed fenced-JSON `TurnResponse` round-trips through `Run` unchanged.
-- AC-F4.2: An unauthenticated `claude` CLI surfaces an actionable error (see gap).
+- AC-F4.2 ✅: An unauthenticated/rate-limited runtime CLI surfaces an actionable error. A shared classifier (`internal/adapter/diagnose.go`, `DiagnoseOutput`) inspects subprocess stdout/stderr for auth and rate-limit signatures; both `claude` and `kimi` `Run` map a match to a clear message ("…runtime is not authenticated — run `claude` once interactively to log in…") instead of `no JSON TurnResponse found in output`.
 
 **Known gaps.**
-- G-F4: An unauthenticated/rate-limited `claude` yields the cryptic `parsing response: no JSON TurnResponse found in output`. `doctor` only checks PATH presence, not auth. *Recommendation:* add an auth/health preflight and a clear message (audit Tier 1, item 5).
+- ✅ G-F4 (resolved): auth/rate-limit failures now classify into actionable messages at the adapter boundary, and `doctor --probe` runs one minimal live turn per adapter to verify auth (not just PATH presence). The probe is opt-in because it spends a turn; it is bounded (`probeTimeout`) so a hung login prompt cannot stall the diagnostic.
 - Note: Only `claude` and `kimi` ship adapter code. Cursor/Codex are *addable via the 2-method port*, not shipped.
 
 ---
@@ -398,7 +398,7 @@ Unix domain socket at `~/.rallish/rallish.sock` (mode `0600`), preferred. The CL
 ### F18 — Auto-daemon ◑ / F19 — doctor ◑
 
 - **F18:** `squash` auto-spawns the broker; `rally`/`cycle` commands require a running daemon. Align this (auto-spawn on `rally new`) or document the prerequisite. **Known code bug:** `rallish bootstrap` prints "daemon not running — will auto-spawn on `rally new`" (`internal/cli/bootstrap.go`), which is false — only `squash` auto-spawns. Fix that string when wiring this up.
-- **F19:** `doctor` reports daemon reachability, adapter presence on PATH, and config/skill paths. It does **not** verify adapter auth (see G-F4). Adapters absent from PATH are reported as info, not failure.
+- **F19:** `doctor` reports daemon reachability, adapter presence on PATH, and config/skill paths. With `--probe` it also verifies adapter **auth** via one bounded live turn per adapter (G-F4 resolved). Adapters absent from PATH are reported as info, not failure.
 
 ---
 
@@ -438,7 +438,7 @@ These apply to *every* feature and double as design-review gates:
 
 Ordered by the audit's tiering (`docs/reports/2026-06-23-production-readiness-gaps.md`):
 
-1. **Tier 1 (first-run UX):** adapter auth preflight (G-F4); `fake-demo` preset (G-F1); `rally` auto-spawn + default timeout (G-F2); an install path that works today.
+1. **Tier 1 (first-run UX):** ✅ adapter auth preflight (G-F4 — done); `fake-demo` preset (G-F1); `rally` auto-spawn + default timeout (G-F2); an install path that works today.
 2. **Tier 2 (make harness claims true):** G6 hook wiring (F13); wire Merkle (F12); implement `logx` redaction (F21); A2A SSE named events + `sessionId` (F16).
 3. **Tier 3 (trust):** real-adapter integration tests + gate/autogoal coverage (see `test-plan.md`); Homebrew tap.
 4. **Feature work:** cross-check ping-pong (F22); scratchpad wiring (F20); `strict_round_robin` / `last_writer_wins` routing (F6).

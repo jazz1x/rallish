@@ -62,12 +62,15 @@ rallish bootstrap
 ### 4.1 환경 점검
 
 ```bash
-rallish doctor
+rallish doctor            # 존재 점검 (빠름, 턴 소비 없음)
+rallish doctor --probe    # 각 어댑터 로그인 여부까지 검증 (어댑터당 턴 1회 소비)
 ```
 
 `doctor`는 데몬 도달성, PATH의 어댑터, config/skill 경로를 보고한다.
 
-> **주의:** `doctor`는 어댑터 바이너리가 *존재·실행 가능*한지만 확인한다 — CLI가 **로그인됐는지는 검증하지 않는다**. 세션이 `parsing response: no JSON TurnResponse found in output`로 실패하면, 어댑터 CLI가 미인증이거나 레이트리밋일 가능성이 거의 확실하다. CLI를 손으로 한 번 실행(예: `claude -p "hello"`)해 로그인 여부를 확인하라.
+기본 `doctor`는 어댑터 바이너리가 *존재·실행 가능*한지만 확인하고 로그인은 하지 않는다. `--probe`를 붙이면 인증을 검증한다: PATH의 각 어댑터가 최소 라이브 턴 1회에 응답하므로, 미인증/레이트리밋 CLI가 나중에 난해한 세션 에러로 터지는 대신 실패한 `adapter:*:auth` 점검으로 드러난다. (프로브는 시간 제한이 있어 멈춘 로그인 프롬프트가 명령을 막지 않는다.)
+
+> `--probe` 없이도, 미인증 CLI로 세션이 실패하면 이제 옛 `parsing response: no JSON TurnResponse found in output` 대신 실행 가능한 메시지("…runtime is not authenticated — run `claude` once interactively to log in…")를 보고한다.
 
 ### 4.2 헤드리스 세션 실행(squash)
 

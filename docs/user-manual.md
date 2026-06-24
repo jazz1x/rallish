@@ -62,12 +62,15 @@ Idempotent. It installs the bundled skill to `~/.claude/skills/rallish/`, collec
 ### 4.1 Check your environment
 
 ```bash
-rallish doctor
+rallish doctor            # presence checks (fast, no turns spent)
+rallish doctor --probe    # also verify each adapter is logged in (spends one turn each)
 ```
 
 `doctor` reports daemon reachability, which adapters are on your `PATH`, and your config/skill paths.
 
-> **Caveat:** `doctor` checks that an adapter binary is *present and executable* — it does **not** verify that the CLI is logged in. If a session fails with `parsing response: no JSON TurnResponse found in output`, your adapter CLI is almost certainly unauthenticated or rate-limited. Run the CLI by hand once (e.g. `claude -p "hello"`) to confirm it's logged in.
+By default `doctor` checks that an adapter binary is *present and executable* — it does not log in. Add `--probe` to verify auth: each adapter on `PATH` answers one minimal real turn, so an unauthenticated or rate-limited CLI shows up as a failed `adapter:*:auth` check instead of surfacing later as a cryptic session error. (The probe is bounded, so a stuck login prompt won't hang the command.)
+
+> Even without `--probe`, a session that fails on an unauthenticated CLI now reports an actionable message ("…runtime is not authenticated — run `claude` once interactively to log in…") rather than the old `parsing response: no JSON TurnResponse found in output`.
 
 ### 4.2 Run a headless session (squash)
 
