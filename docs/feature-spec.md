@@ -79,10 +79,10 @@ The rest of the document specifies each in detail.
 **Acceptance criteria.**
 - AC-F1.1: `rallish squash --preset solo-ralph` with the `claude` adapter on PATH completes a session and exits 0.
 - AC-F1.2: With no daemon running, `squash` starts one and reaches it over the Unix socket.
-- AC-F1.3: A zero-credential smoke path exists via the `fake` adapter (see gap G-F1 below).
+- AC-F1.3 ✅: A zero-credential smoke path ships as the bundled `fake-demo` preset (`internal/preset/presets/fake-demo.yaml`): one role on the in-process `fake` runtime, `turns_exhausted` after 5 turns. `rallish squash --preset fake-demo` auto-spawns the daemon, runs to completion, and writes a ledger — verified end-to-end with no agent CLI or API key present.
 
 **Known gaps.**
-- G-F1: No bundled preset uses `runtime: fake`, so verifying an install without live credentials requires hand-writing a YAML. *Recommendation:* ship a `fake-demo` preset or a `--fake` flag (audit Tier 1, item 6).
+- ✅ G-F1 (resolved): the bundled `fake-demo` preset gives a credential-free install check; no hand-written YAML needed.
 
 ---
 
@@ -438,7 +438,7 @@ These apply to *every* feature and double as design-review gates:
 
 Ordered by the audit's tiering (`docs/reports/2026-06-23-production-readiness-gaps.md`):
 
-1. **Tier 1 (first-run UX):** ✅ adapter auth preflight (G-F4 — done); `fake-demo` preset (G-F1); `rally` auto-spawn + default timeout (G-F2); an install path that works today.
+1. **Tier 1 (first-run UX):** ✅ adapter auth preflight (G-F4 — done); ✅ `fake-demo` preset (G-F1 — done); `rally` auto-spawn + default timeout (G-F2); an install path that works today.
 2. **Tier 2 (make harness claims true):** G6 hook wiring (F13); wire Merkle (F12); implement `logx` redaction (F21); A2A SSE named events + `sessionId` (F16).
 3. **Tier 3 (trust):** real-adapter integration tests + gate/autogoal coverage (see `test-plan.md`); Homebrew tap.
 4. **Feature work:** cross-check ping-pong (F22); scratchpad wiring (F20); `strict_round_robin` / `last_writer_wins` routing (F6).

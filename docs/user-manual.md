@@ -72,7 +72,20 @@ By default `doctor` checks that an adapter binary is *present and executable* �
 
 > Even without `--probe`, a session that fails on an unauthenticated CLI now reports an actionable message ("…runtime is not authenticated — run `claude` once interactively to log in…") rather than the old `parsing response: no JSON TurnResponse found in output`.
 
-### 4.2 Run a headless session (squash)
+### 4.2 Verify the install with zero credentials
+
+Before wiring up a real agent CLI, confirm rallish itself works end-to-end:
+
+```bash
+rallish squash --preset fake-demo --task "smoke test"
+```
+
+`fake-demo` is a bundled preset whose single role runs the in-process `fake`
+runtime — no `claude`/`kimi` CLI, no API key. It auto-spawns the daemon, runs a
+handful of turns, and exits `turns_exhausted`. If you see
+`Session … completed successfully`, your install and daemon path are healthy.
+
+### 4.3 Run a headless session (squash)
 
 ```bash
 rallish squash --preset solo-ralph --task "add a --version flag"
@@ -86,7 +99,7 @@ To use the three-role planner→executor→reviewer flow:
 rallish squash --preset pair-review --task "add a --version flag"   # needs both `claude` and `kimi` on PATH
 ```
 
-> **Zero-credential check.** If you want to verify the install without burning credentials, you can point a preset at `runtime: fake` (an in-process test adapter). There is no bundled `fake` preset yet, so today this requires a small hand-written YAML in `~/.rallish/presets/`. See §6.
+> **Zero-credential check.** To verify the install without burning credentials, use the bundled `fake-demo` preset (§4.2) — it runs the in-process `fake` runtime, no CLI or API key required.
 
 ---
 
@@ -191,23 +204,25 @@ scratch:
 
 **Exit conditions.** `turns_exhausted`, `tokens_exhausted`, `deadline_passed`, and `reviewer_approved` work on the squash/broker path. **`tests_pass` / `all_artifacts_compile` do NOT terminate a broker-driven squash** — the broker deliberately skips shell predicates (it would run them in the daemon's directory, not your repo). Those shell checks *do* run inside the autonomous cycle's gate pipeline. Plan your `exit_when` accordingly: for `squash`, rely on `reviewer_approved` / `turns_exhausted` / `deadline_passed`.
 
-**A minimal zero-credential preset** (drop in `~/.rallish/presets/fake-demo.yaml`):
-
-```yaml
-name: fake-demo
-description: Credential-free smoke test using the in-process fake adapter.
-roles:
-  - id: ralph
-    runtime: fake
-    model: none
-routing: round_robin
-budget: { max_turns: 3, max_tokens: 1000, deadline_minutes: 5 }
-exit_when: [turns_exhausted]
-scratch: { max_kb: 8, summarize_with: none }
-```
+**The zero-credential preset ships built in** as `fake-demo` — no file to write:
 
 ```bash
 rallish squash --preset fake-demo --task "smoke test"     # completes without any API credentials
+```
+
+Its definition (a single role on the in-process `fake` runtime) is a good
+template if you want to build your own credential-free preset:
+
+```yaml
+name: fake-demo
+description: Zero-credential smoke test using the in-process fake runtime.
+roles:
+  - id: demo
+    runtime: fake
+    model: none
+routing: round_robin
+budget: { max_turns: 5, max_tokens: 100000, deadline_minutes: 5 }
+exit_when: [turns_exhausted, reviewer_approved, deadline_passed]
 ```
 
 ### 6.3 Adding components

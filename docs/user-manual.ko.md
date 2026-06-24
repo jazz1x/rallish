@@ -72,7 +72,19 @@ rallish doctor --probe    # 각 어댑터 로그인 여부까지 검증 (어댑�
 
 > `--probe` 없이도, 미인증 CLI로 세션이 실패하면 이제 옛 `parsing response: no JSON TurnResponse found in output` 대신 실행 가능한 메시지("…runtime is not authenticated — run `claude` once interactively to log in…")를 보고한다.
 
-### 4.2 헤드리스 세션 실행(squash)
+### 4.2 무자격증명으로 설치 검증
+
+실제 에이전트 CLI를 연결하기 전에, rallish 자체가 엔드투엔드로 동작하는지 먼저 확인하라:
+
+```bash
+rallish squash --preset fake-demo --task "스모크 테스트"
+```
+
+`fake-demo`는 단일 역할이 인프로세스 `fake` 런타임을 돌리는 번들 프리셋이다 — `claude`/`kimi`
+CLI도, API 키도 필요 없다. 데몬을 자동 기동하고 몇 턴 돌린 뒤 `turns_exhausted`로 종료한다.
+`Session … completed successfully`가 보이면 설치와 데몬 경로가 건강한 것이다.
+
+### 4.3 헤드리스 세션 실행(squash)
 
 ```bash
 rallish squash --preset solo-ralph --task "--version 플래그 추가"
@@ -86,7 +98,7 @@ rallish squash --preset solo-ralph --task "--version 플래그 추가"
 rallish squash --preset pair-review --task "--version 플래그 추가"   # PATH에 `claude`와 `kimi` 둘 다 필요
 ```
 
-> **무자격증명 점검.** 자격증명을 소모하지 않고 설치를 검증하려면 프리셋이 `runtime: fake`(인프로세스 테스트 어댑터)를 가리키게 할 수 있다. 아직 번들 `fake` 프리셋이 없으므로, 오늘은 `~/.rallish/presets/`에 작은 YAML을 직접 써야 한다. §6 참조.
+> **무자격증명 점검.** 자격증명 소모 없이 설치를 검증하려면 번들 `fake-demo` 프리셋(§4.2)을 쓰라 — 인프로세스 `fake` 런타임을 돌리며 CLI나 API 키가 필요 없다.
 
 ---
 
@@ -191,23 +203,24 @@ scratch:
 
 **종료 조건.** `turns_exhausted`·`tokens_exhausted`·`deadline_passed`·`reviewer_approved`는 squash/브로커 경로에서 동작. **`tests_pass` / `all_artifacts_compile`은 브로커 구동 squash를 종료시키지 않음** — 브로커가 셸 술어를 의도적으로 건너뜀(세션 repo가 아닌 데몬 디렉터리에서 실행될 것이므로). 그 셸 검사는 자율 사이클 게이트 파이프라인 안에서는 *실행됨*. `exit_when`을 그에 맞게 계획하라: `squash`에선 `reviewer_approved`/`turns_exhausted`/`deadline_passed`에 의존.
 
-**최소 무자격증명 프리셋** (`~/.rallish/presets/fake-demo.yaml`에 투입):
-
-```yaml
-name: fake-demo
-description: 인프로세스 fake 어댑터를 쓰는 무자격증명 스모크 테스트.
-roles:
-  - id: ralph
-    runtime: fake
-    model: none
-routing: round_robin
-budget: { max_turns: 3, max_tokens: 1000, deadline_minutes: 5 }
-exit_when: [turns_exhausted]
-scratch: { max_kb: 8, summarize_with: none }
-```
+**무자격증명 프리셋은 `fake-demo`로 빌트인 제공** — 직접 쓸 파일 없음:
 
 ```bash
 rallish squash --preset fake-demo --task "스모크 테스트"     # API 자격증명 없이 완료
+```
+
+정의(인프로세스 `fake` 런타임 단일 역할)는 자체 무자격증명 프리셋을 만들 때 좋은 템플릿이다:
+
+```yaml
+name: fake-demo
+description: 인프로세스 fake 런타임을 쓰는 무자격증명 스모크 테스트.
+roles:
+  - id: demo
+    runtime: fake
+    model: none
+routing: round_robin
+budget: { max_turns: 5, max_tokens: 100000, deadline_minutes: 5 }
+exit_when: [turns_exhausted, reviewer_approved, deadline_passed]
 ```
 
 ### 6.3 컴포넌트 추가

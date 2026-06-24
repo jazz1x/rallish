@@ -79,10 +79,10 @@
 **수용 기준.**
 - AC-F1.1: PATH에 `claude` 어댑터가 있을 때 `rallish squash --preset solo-ralph`가 세션을 완료하고 0으로 종료.
 - AC-F1.2: 데몬이 없을 때 `squash`가 데몬을 기동하고 Unix 소켓으로 접속.
-- AC-F1.3: `fake` 어댑터를 통한 무자격증명 스모크 경로 존재(아래 G-F1).
+- AC-F1.3 ✅: 무자격증명 스모크 경로를 빌트인 `fake-demo` 프리셋(`internal/preset/presets/fake-demo.yaml`)으로 제공: 인프로세스 `fake` 런타임 단일 역할, 5턴 후 `turns_exhausted`. `rallish squash --preset fake-demo`는 데몬을 자동 기동하고 완료까지 실행하며 원장을 기록 — 어댑터 CLI/API 키 없이 엔드투엔드 검증됨.
 
 **알려진 갭.**
-- G-F1: `runtime: fake`를 쓰는 빌트인 프리셋이 없어, 라이브 자격증명 없이 설치 검증하려면 YAML을 직접 써야 함. *권고:* `fake-demo` 프리셋이나 `--fake` 플래그 제공(감사 Tier 1, 6번).
+- ✅ G-F1 (해결): 빌트인 `fake-demo` 프리셋이 무자격증명 설치 점검을 제공; YAML 직접 작성 불필요.
 
 ---
 
@@ -438,7 +438,7 @@ scratch:
 
 감사 티어링 순서(`docs/reports/2026-06-23-production-readiness-gaps.md`):
 
-1. **Tier 1(첫 실행 UX):** ✅ 어댑터 인증 사전점검(G-F4 — 완료); `fake-demo` 프리셋(G-F1); `rally` 자동 기동 + 기본 타임아웃(G-F2); 오늘 동작하는 설치 경로.
+1. **Tier 1(첫 실행 UX):** ✅ 어댑터 인증 사전점검(G-F4 — 완료); ✅ `fake-demo` 프리셋(G-F1 — 완료); `rally` 자동 기동 + 기본 타임아웃(G-F2); 오늘 동작하는 설치 경로.
 2. **Tier 2(하네스 주장을 참으로):** G6 훅 배선(F13); Merkle 연결(F12); `logx` 마스킹 구현(F21); A2A SSE 명명 이벤트 + `sessionId`(F16).
 3. **Tier 3(신뢰):** 실제 어댑터 통합 테스트 + 게이트/autogoal 커버리지(`test-plan.ko.md` 참조); Homebrew tap.
 4. **기능 작업:** cross-check ping-pong(F22); 스크래치패드 연결(F20); `strict_round_robin` / `last_writer_wins` 라우팅(F6).
