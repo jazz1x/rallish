@@ -35,7 +35,7 @@ Every feature row cites the authoritative source file. Where a claim was spot-ve
 | F9 | Gate pipeline (preflight→audit→philosophy→polish→commit) | ✅ | `internal/cycle/gates/pipeline.go` |
 | F10 | Anti-spin stuck breaker + lifetime ceiling | ✅ | `internal/cycle/stuck.go`, `internal/budget` |
 | F11 | Hash-chained append-only ledger (G4 audit) | ✅ | `pkg/contract/harness_ledger.go`, `internal/cycle/ledger.go` |
-| F12 | Merkle (RFC 9162) inclusion/consistency proofs | ○ | `pkg/contract/merkle.go` |
+| F12 | Merkle (RFC 9162) inclusion/consistency proofs | ✅ | `pkg/contract/merkle.go`, `internal/cli/cycle_verify.go` |
 | F13 | Action-gate (G6) decision + recording + PreToolUse hook | ✅ | `pkg/contract/action_gate.go`, `internal/cli/gate.go`, `internal/skills/rallish/scripts/gate-pretooluse.sh` |
 | F14 | Secret containment classifier | ◑ | `pkg/contract/tooluse_gate.go` |
 | F15 | Unix-socket IPC + TCP loopback fallback | ✅ | `internal/ipc/socket.go`, `internal/cli/broker_client.go` |
@@ -332,11 +332,14 @@ Called from `orchestrator.RunOnce`; on match it records `cycle_halted` and persi
 
 ---
 
-### F12 — Merkle proofs (RFC 9162) ○
+### F12 — Merkle proofs (RFC 9162) ✅
 
-**Status: declared-only.** `MerkleRoot`, `InclusionProof`, `VerifyInclusion`, `ConsistencyProof`, `VerifyConsistency` are implemented and unit-tested in `pkg/contract/merkle.go` (RFC 6962/9162-conformant, with leaf/node domain separation), but there are **zero production call sites**. The library is complete and dead.
+**Status: wired.** `MerkleRoot`, `InclusionProof`, `VerifyInclusion`, `ConsistencyProof`, `VerifyConsistency` (RFC 6962/9162-conformant, leaf/node domain separation) in `pkg/contract/merkle.go` now have a real production caller: **`rallish cycle verify --cycle-id <id>`** (`internal/cli/cycle_verify.go`). It reports the hash-chain integrity (`VerifyChain`) and the Merkle tree head over a cycle's ledger, and with `--inclusion <i>` / `--consistency <N>` produces and verifies an inclusion or consistency proof. The verdict is computed client-side over the entries the daemon returns (the math does not trust the daemon to self-attest), and the command exits non-zero (15) on a tampered chain or an unverifiable proof so a cron/CI auditor can gate on it.
 
-**To make it true (audit Tier 2, item 10):** wire it into a real path — e.g. a `rallish gate verify` / ledger-audit command that produces inclusion/consistency proofs — or stop tagging RFC 9162 proofs as ✅ in user-facing docs until then.
+**Acceptance criteria.**
+- AC-F12.1: `cycle verify` over an intact ledger reports a chain-intact result and a stable Merkle root.
+- AC-F12.2: A content-tampered entry makes `cycle verify` report the broken index and exit 15.
+- AC-F12.3: `--inclusion i` and `--consistency N` produce proofs that `VerifyInclusion`/`VerifyConsistency` accept against the computed roots.
 
 ---
 
@@ -445,6 +448,6 @@ These apply to *every* feature and double as design-review gates:
 Ordered by the audit's tiering (`docs/reports/2026-06-23-production-readiness-gaps.md`):
 
 1. **Tier 1 (first-run UX):** ✅ adapter auth preflight (G-F4 — done); ✅ `fake-demo` preset (G-F1 — done); ✅ `rally new` auto-spawn + typo-join fail-fast (G-F2 — done); ✅ honest install lead (README now leads with the verified curl / `go install` paths; `npx skills add` demoted to a caveated skills.sh alternative — done). **Tier 1 complete.**
-2. **Tier 2 (make harness claims true):** ✅ G6 hook wiring (F13 — done); wire Merkle (F12); implement `logx` redaction (F21); A2A SSE named events + `sessionId` (F16).
+2. **Tier 2 (make harness claims true):** ✅ G6 hook wiring (F13 — done); ✅ wire Merkle via `cycle verify` (F12 — done); implement `logx` redaction (F21); A2A SSE named events + `sessionId` (F16).
 3. **Tier 3 (trust):** real-adapter integration tests + gate/autogoal coverage (see `test-plan.md`); Homebrew tap.
 4. **Feature work:** cross-check ping-pong (F22); scratchpad wiring (F20); `strict_round_robin` / `last_writer_wins` routing (F6).

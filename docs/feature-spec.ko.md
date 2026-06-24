@@ -35,7 +35,7 @@
 | F9 | 게이트 파이프라인 (preflight→audit→philosophy→polish→commit) | ✅ | `internal/cycle/gates/pipeline.go` |
 | F10 | 안티스핀 stuck 브레이커 + 수명 한도 | ✅ | `internal/cycle/stuck.go`, `internal/budget` |
 | F11 | 해시체인 append-only 레저 (G4 감사) | ✅ | `pkg/contract/harness_ledger.go`, `internal/cycle/ledger.go` |
-| F12 | Merkle(RFC 9162) 포함/일관성 증명 | ○ | `pkg/contract/merkle.go` |
+| F12 | Merkle(RFC 9162) 포함/일관성 증명 | ✅ | `pkg/contract/merkle.go`, `internal/cli/cycle_verify.go` |
 | F13 | 액션게이트(G6) 결정 + 기록 + PreToolUse 훅 | ✅ | `pkg/contract/action_gate.go`, `internal/cli/gate.go`, `internal/skills/rallish/scripts/gate-pretooluse.sh` |
 | F14 | 시크릿 격리 분류기 | ◑ | `pkg/contract/tooluse_gate.go` |
 | F15 | Unix 소켓 IPC + TCP 루프백 폴백 | ✅ | `internal/ipc/socket.go`, `internal/cli/broker_client.go` |
@@ -332,11 +332,14 @@ scratch:
 
 ---
 
-### F12 — Merkle 증명(RFC 9162) ○
+### F12 — Merkle 증명(RFC 9162) ✅
 
-**상태: 선언만.** `MerkleRoot`, `InclusionProof`, `VerifyInclusion`, `ConsistencyProof`, `VerifyConsistency`가 `pkg/contract/merkle.go`에 구현·단위테스트됨(RFC 6962/9162 준수, leaf/node 도메인 분리 포함). 그러나 **프로덕션 호출 지점 0**. 라이브러리는 완성됐으나 죽어 있다.
+**상태: 연결됨.** `MerkleRoot`, `InclusionProof`, `VerifyInclusion`, `ConsistencyProof`, `VerifyConsistency`(RFC 6962/9162 준수, leaf/node 도메인 분리)가 이제 실제 프로덕션 호출자를 가진다: **`rallish cycle verify --cycle-id <id>`**(`internal/cli/cycle_verify.go`). 사이클 레저에 대해 해시체인 무결성(`VerifyChain`)과 Merkle 트리 헤드를 보고하고, `--inclusion <i>` / `--consistency <N>`로 포함/일관성 증명을 생성·검증한다. 판결은 데몬이 반환한 엔트리에 대해 클라이언트 측에서 계산되며(데몬의 자기증명을 신뢰하지 않음), 변조된 체인이나 검증 불가 증명에서 비제로(15) 종료해 cron/CI 감사가 게이트할 수 있다.
 
-**참으로 만들려면(감사 Tier 2, 10번):** 실제 경로에 연결 — 예: 포함/일관성 증명을 생성하는 `rallish gate verify` / 레저 감사 명령 — 하거나, 그때까지 사용자 문서에서 RFC 9162 증명을 ✅로 표기하지 말 것.
+**수용 기준.**
+- AC-F12.1: 정상 레저에 대한 `cycle verify`는 체인 정상과 안정적 Merkle 루트를 보고.
+- AC-F12.2: 내용 변조된 엔트리는 `cycle verify`가 깨진 인덱스를 보고하고 15로 종료하게 함.
+- AC-F12.3: `--inclusion i`와 `--consistency N`은 계산된 루트에 대해 `VerifyInclusion`/`VerifyConsistency`가 수용하는 증명을 생성.
 
 ---
 
@@ -444,6 +447,6 @@ scratch:
 감사 티어링 순서(`docs/reports/2026-06-23-production-readiness-gaps.md`):
 
 1. **Tier 1(첫 실행 UX):** ✅ 어댑터 인증 사전점검(G-F4 — 완료); ✅ `fake-demo` 프리셋(G-F1 — 완료); ✅ `rally new` 자동 기동 + 오타 조인 즉시 실패(G-F2 — 완료); ✅ 정직한 설치 안내(README가 검증된 curl / `go install` 경로를 앞세우고, `npx skills add`는 주의를 단 skills.sh 대안으로 강등 — 완료). **Tier 1 완료.**
-2. **Tier 2(하네스 주장을 참으로):** ✅ G6 훅 배선(F13 — 완료); Merkle 연결(F12); `logx` 마스킹 구현(F21); A2A SSE 명명 이벤트 + `sessionId`(F16).
+2. **Tier 2(하네스 주장을 참으로):** ✅ G6 훅 배선(F13 — 완료); ✅ `cycle verify`로 Merkle 연결(F12 — 완료); `logx` 마스킹 구현(F21); A2A SSE 명명 이벤트 + `sessionId`(F16).
 3. **Tier 3(신뢰):** 실제 어댑터 통합 테스트 + 게이트/autogoal 커버리지(`test-plan.ko.md` 참조); Homebrew tap.
 4. **기능 작업:** cross-check ping-pong(F22); 스크래치패드 연결(F20); `strict_round_robin` / `last_writer_wins` 라우팅(F6).

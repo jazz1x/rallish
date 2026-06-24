@@ -273,6 +273,9 @@ Each pass runs the **gate pipeline**: `Preflight → Audit → [your local gates
 ```bash
 rallish cycle status  --cycle-id <ID>     # phase, counts, branch, goal, halted?, violations
 rallish cycle ledger  --cycle-id <ID>     # the append-only hash-chained audit trail (JSON)
+rallish cycle verify  --cycle-id <ID>     # audit the ledger: hash chain + RFC 9162 Merkle root (exit 15 if tampered)
+                                          #   --inclusion <i>     prove entry i is committed
+                                          #   --consistency <N>   prove the first N entries are an append-only prefix
 rallish cycle watch   --cycle-id <ID>     # live SSE event stream (exits when halted)
 rallish cycle next    --cycle-id <ID>     # advance one step (manual debug)
 rallish cycle halt    --cycle-id <ID> --reason "stopping"
@@ -323,7 +326,7 @@ The daemon writes its port to `~/.rallish/port` and a socket pointer to `~/.rall
 
 **Where things live:** config `~/.rallish/config.yaml`; daemon port/socket `~/.rallish/port`, `~/.rallish/socket`, `~/.rallish/rallish.sock`; sessions `~/.rallish/sessions/`; cycles `~/.rallish/cycles/`; skills `~/.claude/skills/rallish/`.
 
-**Getting more detail:** `rallish doctor` for a health snapshot; `rallish cycle ledger --cycle-id <ID>` for the full audit trail of an autonomous run; `rallish <command> --help` for the authoritative flag list.
+**Getting more detail:** `rallish doctor` for a health snapshot; `rallish cycle ledger --cycle-id <ID>` for the full audit trail of an autonomous run, and `rallish cycle verify --cycle-id <ID>` to check that trail's hash chain + RFC 9162 Merkle proofs; `rallish <command> --help` for the authoritative flag list.
 
 ---
 

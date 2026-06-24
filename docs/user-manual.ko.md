@@ -269,6 +269,9 @@ rallish cycle run --once --cycle-id <ID> --agents claude,kimi
 ```bash
 rallish cycle status  --cycle-id <ID>     # 단계, 카운트, 브랜치, 목표, 정지?, 위반
 rallish cycle ledger  --cycle-id <ID>     # append-only 해시체인 감사 추적(JSON)
+rallish cycle verify  --cycle-id <ID>     # 레저 감사: 해시체인 + RFC 9162 Merkle 루트(변조 시 종료 15)
+                                          #   --inclusion <i>     엔트리 i가 커밋됐음을 증명
+                                          #   --consistency <N>   첫 N개 엔트리가 추가-전용 접두임을 증명
 rallish cycle watch   --cycle-id <ID>     # 라이브 SSE 이벤트 스트림(정지 시 종료)
 rallish cycle next    --cycle-id <ID>     # 한 스텝 전진(수동 디버그)
 rallish cycle halt    --cycle-id <ID> --reason "중단"
@@ -319,7 +322,7 @@ rallish daemon          # 포그라운드; 127.0.0.1:<동적> 바인딩, Unix �
 
 **파일 위치:** config `~/.rallish/config.yaml`; 데몬 포트/소켓 `~/.rallish/port`, `~/.rallish/socket`, `~/.rallish/rallish.sock`; 세션 `~/.rallish/sessions/`; 사이클 `~/.rallish/cycles/`; 스킬 `~/.claude/skills/rallish/`.
 
-**더 자세히:** 헬스 스냅샷은 `rallish doctor`; 자율 런의 전체 감사 추적은 `rallish cycle ledger --cycle-id <ID>`; 권위 있는 플래그 목록은 `rallish <command> --help`.
+**더 자세히:** 헬스 스냅샷은 `rallish doctor`; 자율 런의 전체 감사 추적은 `rallish cycle ledger --cycle-id <ID>`, 그 추적의 해시체인 + RFC 9162 Merkle 증명 검증은 `rallish cycle verify --cycle-id <ID>`; 권위 있는 플래그 목록은 `rallish <command> --help`.
 
 ---
 
