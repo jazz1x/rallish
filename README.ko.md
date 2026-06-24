@@ -80,32 +80,41 @@ which claude      # $PATH에 있는 지원 어댑터 바이너리
 
 ## 설치
 
-명령 하나:
+`rallish` 바이너리가 유일한 의존성입니다. 머신에 맞는 방법을 고르세요 —
+모두 같은 서명된 GitHub Release에서 같은 바이너리를 설치합니다:
+
+| 방법 | 명령 |
+|---|---|
+| **curl** (Unix 전반, 툴체인 불필요) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
+| **`go install`** (Go ≥ 1.25) | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
+| **소스 빌드** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
+| **Homebrew tap** (macOS) | _준비 중_ — 아직 제공되지 않음 |
+
+curl 스크립트는 최신 크로스플랫폼 릴리스(cosign 서명 + SBOM)를
+`/usr/local/bin`(쓰기 불가 시 `~/.local/bin`)에 받습니다.
+
+그다음 스킬 번들과 데몬을 한 번 연결:
+
+```bash
+rallish bootstrap   # 멱등: 스킬을 ~/.claude/skills/rallish/에 설치하고 데몬을 점검
+```
+
+어떤 프로젝트든 Claude Code (또는 다른 스킬 인식 코딩 CLI)를 열고
+`랠리보낼 준비해` / `let's serve`.
+
+<details>
+<summary><b>스킬 레지스트리 설치 (skills.sh)</b></summary>
+
+[skills.sh](https://www.skills.sh) 레지스트리를 쓴다면 스킬 번들을 바로 받을 수 있습니다:
 
 ```bash
 npx skills add jazz1x/rallish
 ```
 
-스킬 번들(SKILL.md + 바이너리 인스톨러)을 `~/.claude/skills/rallish/`
-에 깔아둡니다. [skills.sh](https://www.skills.sh) 경유로 해석.
-
-어떤 프로젝트든 Claude Code (또는 다른 스킬 인식 코딩 CLI) 열고
-`랠리보낼 준비해` / `let's serve`. 첫 사용 시 스킬이 번들된 플랫폼 감지
-스크립트(`scripts/install-binary.sh`)로 `rallish` 바이너리를 자동 설치
-(최신 GitHub Release → `/usr/local/bin` 또는 `~/.local/bin`).
-
-<details>
-<summary><b>파워 유저용 (번들 우회)</b></summary>
-
-| 방법 | 명령 |
-|---|---|
-| **curl** (Unix 전반) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
-| **Homebrew tap** (macOS) | _준비 중_ — 저장소 이슈에서 추적 중; 아직 제공되지 않음 |
-| **소스 빌드** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
-| **`go install`** | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
-
-바이너리가 `$PATH`에 있으면 `rallish bootstrap` (멱등)이 스킬 번들 설치 +
-데몬 검증을 수행.
+이는 커뮤니티 레지스트리 경유로 해석되어 최신 GitHub Release보다 뒤처질 수
+있습니다; 위의 curl / `go install` 경로가 저장소가 제어하는 정식 설치입니다.
+스킬이 깔리면 번들된 `install-binary.sh`가 첫 사용 시 맞는 `rallish` 바이너리를
+자동 설치합니다.
 </details>
 
 > ✓ rallish는 프로젝트별이 아닌 사용자별로 한 번만 실행됩니다. 최초 설치 후

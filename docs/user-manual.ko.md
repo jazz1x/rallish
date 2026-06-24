@@ -45,7 +45,7 @@ go install github.com/jazz1x/rallish/cmd/rallish@latest
 curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh | sh
 ```
 
-> **설치 경로 주의.** GitHub Releases(cosign 서명, SBOM 포함)가 신뢰할 만한 아티팩트 출처다. Homebrew tap은 계획됐으나 아직 미구성. 다른 곳에 skills 레지스트리 원라이너가 참조되더라도, 그 레지스트리가 라이브임이 확인되기 전엔 위 경로를 선호하라.
+> **설치 경로 주의.** 위 경로들은 GitHub Releases(cosign 서명, SBOM 포함)에서 받으며 저장소가 제어하는 정식 설치다. Homebrew tap은 계획됐으나 아직 미구성. `npx skills add jazz1x/rallish` 원라이너는 skills.sh 커뮤니티 레지스트리 경유로 해석되긴 하나 최신 릴리스보다 뒤처질 수 있으니, 현재 바이너리는 위 curl / `go install`을 선호하라.
 
 ### Bootstrap (권장 첫 실행)
 

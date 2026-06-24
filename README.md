@@ -77,33 +77,42 @@ which claude      # any supported adapter binary on $PATH
 
 ## Install
 
-One command:
+The `rallish` binary is the only dependency. Pick whichever fits your machine —
+each installs the same binary from the same signed GitHub Release:
+
+| Method | Command |
+|---|---|
+| **curl** (any Unix, no toolchain) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
+| **`go install`** (Go ≥ 1.25) | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
+| **From source** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
+| **Homebrew tap** (macOS) | _coming soon_ — not yet provisioned |
+
+The curl script fetches the latest cross-platform release (cosign-signed, with
+SBOM) into `/usr/local/bin` (or `~/.local/bin` if that is not writable).
+
+Then wire up the skill bundle and daemon once:
+
+```bash
+rallish bootstrap   # idempotent: installs the skill to ~/.claude/skills/rallish/ and checks the daemon
+```
+
+Open any project in Claude Code (or another skill-aware coding CLI) and say
+`랠리보낼 준비해` / `let's serve`.
+
+<details>
+<summary><b>Skill-registry install (skills.sh)</b></summary>
+
+If you use the [skills.sh](https://www.skills.sh) registry, you can pull the skill
+bundle directly:
 
 ```bash
 npx skills add jazz1x/rallish
 ```
 
-That delivers the skill bundle (SKILL.md + bundled binary installer) to
-`~/.claude/skills/rallish/`. Resolves via [skills.sh](https://www.skills.sh).
-
-Open any project in Claude Code (or another skill-aware coding CLI) and say
-`랠리보낼 준비해` / `let's serve`. On first use the skill self-installs the
-`rallish` binary via the bundled platform-detecting script
-(`scripts/install-binary.sh` → fetches the latest GitHub Release into
-`/usr/local/bin` or `~/.local/bin`).
-
-<details>
-<summary><b>Power-user alternatives (skip the bundle)</b></summary>
-
-| Method | Command |
-|---|---|
-| **curl** (any Unix) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
-| **Homebrew tap** (macOS) | _coming soon_ — tracked in repo issues; not yet provisioned |
-| **From source** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
-| **`go install`** | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
-
-After the binary is on `$PATH`, `rallish bootstrap` (idempotent) installs the
-skill bundle and verifies the daemon.
+This resolves through the community registry and can lag the latest GitHub
+Release; the curl / `go install` paths above are the canonical, repo-controlled
+installs. After the skill lands, its bundled `install-binary.sh` self-installs the
+matching `rallish` binary on first use.
 </details>
 
 > ✓ rallish runs once per user (not per project). After the one-time

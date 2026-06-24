@@ -80,34 +80,42 @@ which claude      # $PATH 上のサポート対象アダプターバイナリ
 
 ## インストール
 
-コマンド 1 つ:
+`rallish` バイナリが唯一の依存です。マシンに合う方法を選んでください —
+いずれも同じ署名済み GitHub Release から同じバイナリをインストールします:
+
+| 方法 | コマンド |
+|---|---|
+| **curl** (Unix 全般, ツールチェーン不要) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
+| **`go install`** (Go ≥ 1.25) | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
+| **ソースビルド** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
+| **Homebrew tap** (macOS) | _準備中_ — まだ提供されていません |
+
+curl スクリプトは最新のクロスプラットフォームリリース (cosign 署名 + SBOM) を
+`/usr/local/bin` (書き込み不可なら `~/.local/bin`) に取得します。
+
+続いてスキルバンドルとデーモンを一度だけ接続:
+
+```bash
+rallish bootstrap   # 冪等: スキルを ~/.claude/skills/rallish/ に設置しデーモンを点検
+```
+
+任意のプロジェクトで Claude Code (またはスキル対応の他のコーディング CLI)
+を開き、`랠리보낼 준비해` / `let's serve` と入力。
+
+<details>
+<summary><b>スキルレジストリ経由 (skills.sh)</b></summary>
+
+[skills.sh](https://www.skills.sh) レジストリを使うなら、スキルバンドルを直接取得できます:
 
 ```bash
 npx skills add jazz1x/rallish
 ```
 
-スキルバンドル (SKILL.md + バイナリインストーラ) を
-`~/.claude/skills/rallish/` に配置します。
-[skills.sh](https://www.skills.sh) 経由で解決。
-
-任意のプロジェクトで Claude Code (またはスキル対応の他のコーディング CLI)
-を開き、`랠리보낼 준비해` / `let's serve` と入力。初回使用時にバンドル済み
-のプラットフォーム検出スクリプト (`scripts/install-binary.sh`) で `rallish`
-バイナリを自動インストール (最新 GitHub Release → `/usr/local/bin` または
-`~/.local/bin`)。
-
-<details>
-<summary><b>パワーユーザー向け (バンドルをバイパス)</b></summary>
-
-| 方法 | コマンド |
-|---|---|
-| **curl** (Unix 全般) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
-| **Homebrew tap** (macOS) | _準備中_ — リポジトリ issue で追跡中; まだ提供されていません |
-| **ソースビルド** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
-| **`go install`** | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
-
-バイナリが `$PATH` にあれば `rallish bootstrap` (冪等) がスキルバンドル
-インストールとデーモン検証を行います。
+これはコミュニティレジストリ経由で解決され、最新 GitHub Release より遅れることが
+あります; 上の curl / `go install` がリポジトリ管理下の正式インストールです。
+スキル設置後、バンドルの `install-binary.sh` が初回使用時に対応する `rallish`
+バイナリを自動インストールします。
+</details>
 </details>
 
 > ✓ rallish はプロジェクトごとではなくユーザーごとに一度だけ実行されます。

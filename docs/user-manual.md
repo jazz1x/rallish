@@ -45,7 +45,7 @@ go install github.com/jazz1x/rallish/cmd/rallish@latest
 curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh | sh
 ```
 
-> **Note on install paths.** GitHub Releases (cosign-signed, with SBOM) are the reliable artifact source. A Homebrew tap is planned but not yet provisioned. If a skills-registry one-liner is referenced elsewhere, prefer the paths above unless that registry is confirmed live.
+> **Note on install paths.** The paths above pull from GitHub Releases (cosign-signed, with SBOM) and are the canonical, repo-controlled installs. A Homebrew tap is planned but not yet provisioned. The `npx skills add jazz1x/rallish` one-liner does resolve via the skills.sh community registry, but it can lag the latest release — prefer curl / `go install` above for the current binary.
 
 ### Bootstrap (recommended first run)
 

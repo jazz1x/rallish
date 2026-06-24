@@ -438,7 +438,7 @@ scratch:
 
 감사 티어링 순서(`docs/reports/2026-06-23-production-readiness-gaps.md`):
 
-1. **Tier 1(첫 실행 UX):** ✅ 어댑터 인증 사전점검(G-F4 — 완료); ✅ `fake-demo` 프리셋(G-F1 — 완료); ✅ `rally new` 자동 기동 + 오타 조인 즉시 실패(G-F2 — 완료); 오늘 동작하는 설치 경로.
+1. **Tier 1(첫 실행 UX):** ✅ 어댑터 인증 사전점검(G-F4 — 완료); ✅ `fake-demo` 프리셋(G-F1 — 완료); ✅ `rally new` 자동 기동 + 오타 조인 즉시 실패(G-F2 — 완료); ✅ 정직한 설치 안내(README가 검증된 curl / `go install` 경로를 앞세우고, `npx skills add`는 주의를 단 skills.sh 대안으로 강등 — 완료). **Tier 1 완료.**
 2. **Tier 2(하네스 주장을 참으로):** G6 훅 배선(F13); Merkle 연결(F12); `logx` 마스킹 구현(F21); A2A SSE 명명 이벤트 + `sessionId`(F16).
 3. **Tier 3(신뢰):** 실제 어댑터 통합 테스트 + 게이트/autogoal 커버리지(`test-plan.ko.md` 참조); Homebrew tap.
 4. **기능 작업:** cross-check ping-pong(F22); 스크래치패드 연결(F20); `strict_round_robin` / `last_writer_wins` 라우팅(F6).

@@ -438,7 +438,7 @@ These apply to *every* feature and double as design-review gates:
 
 Ordered by the audit's tiering (`docs/reports/2026-06-23-production-readiness-gaps.md`):
 
-1. **Tier 1 (first-run UX):** ✅ adapter auth preflight (G-F4 — done); ✅ `fake-demo` preset (G-F1 — done); ✅ `rally new` auto-spawn + typo-join fail-fast (G-F2 — done); an install path that works today.
+1. **Tier 1 (first-run UX):** ✅ adapter auth preflight (G-F4 — done); ✅ `fake-demo` preset (G-F1 — done); ✅ `rally new` auto-spawn + typo-join fail-fast (G-F2 — done); ✅ honest install lead (README now leads with the verified curl / `go install` paths; `npx skills add` demoted to a caveated skills.sh alternative — done). **Tier 1 complete.**
 2. **Tier 2 (make harness claims true):** G6 hook wiring (F13); wire Merkle (F12); implement `logx` redaction (F21); A2A SSE named events + `sessionId` (F16).
 3. **Tier 3 (trust):** real-adapter integration tests + gate/autogoal coverage (see `test-plan.md`); Homebrew tap.
 4. **Feature work:** cross-check ping-pong (F22); scratchpad wiring (F20); `strict_round_robin` / `last_writer_wins` routing (F6).
