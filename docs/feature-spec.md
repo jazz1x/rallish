@@ -44,7 +44,7 @@ Every feature row cites the authoritative source file. Where a claim was spot-ve
 | F18 | Auto-daemon spawn | ✅ | `internal/cli/broker_client.go` (`ensureBrokerClient`: squash + `rally new`) |
 | F19 | `doctor` diagnostics | ◑ | `internal/doctor/doctor.go` |
 | F20 | Shared scratchpad with compaction | ○ | `internal/scratch` |
-| F21 | Log-time secret redaction | ○ | `internal/logx` (stub) |
+| F21 | Log-time secret redaction | ✅ | `internal/logx` (`Redact` + `RedactingHandler`) |
 | F22 | Cross-check ping-pong (intent-aware handoff, dry-round breaker, claim oracle) | ▷ | `docs/prd-cross-check-ping-pong.md` |
 
 The rest of the document specifies each in detail.
@@ -411,10 +411,15 @@ Unix domain socket at `~/.rallish/rallish.sock` (mode `0600`), preferred. The CL
 
 ---
 
-### F20 — Scratchpad ○ / F21 — Log redaction ○
+### F20 — Scratchpad ○ / F21 — Log redaction ✅
 
 - **F20 (declared-only):** `internal/scratch` (`Manager`, `Append`, compaction at 80% of `max_kb`) is imported by **zero** production code. Preset `scratch:` parses into `ScratchConfig` and `TurnRequest.ScratchPath` exists, but nothing populates or consumes them. Wiring it (manager per session + path injection + adapter consumption) is the work to make the feature real.
-- **F21 (declared-only):** `internal/logx` is a 2-line stub; there is no log-time secret redaction. Redaction exists only in the pre-exec command classifier (F14), not on log output.
+- **F21 (✅ wired):** `internal/logx` now ships `Redact(string)` — a high-precision, value-shaped secret matcher (provider key prefixes `sk-ant-`/`sk-`/`ghp_`/`xox*`/`AKIA`/`AIza`, `Bearer <token>`, sensitive `KEY=value` assignments, and PEM private-key blocks) — and `RedactingHandler`, a `slog.Handler` middleware that runs every record's message and string/error attributes (recursing into groups and `With`-bound attrs) through `Redact`. `cmd/rallish/main.go` wraps the base handler once, so redaction is a single log-time boundary, not per-call-site scrubbing. The matchers are deliberately prefix/structure-anchored so ordinary prose ("the token bucket", "secret sauce") is never altered — a false negative is preferred over corrupting diagnostics. The prime leak vector (`"error", err` carrying adapter stderr) is covered.
+
+**Acceptance criteria.**
+- AC-F21.1: A provider key, bearer token, sensitive `KEY=value`, or PEM block in a log message or attribute is replaced with `[REDACTED]`.
+- AC-F21.2: Benign prose containing words like "token"/"secret"/"password" is left byte-for-byte unchanged.
+- AC-F21.3: A secret inside an `error` value logged as `"error", err` is redacted.
 
 ---
 
@@ -448,6 +453,6 @@ These apply to *every* feature and double as design-review gates:
 Ordered by the audit's tiering (`docs/reports/2026-06-23-production-readiness-gaps.md`):
 
 1. **Tier 1 (first-run UX):** ✅ adapter auth preflight (G-F4 — done); ✅ `fake-demo` preset (G-F1 — done); ✅ `rally new` auto-spawn + typo-join fail-fast (G-F2 — done); ✅ honest install lead (README now leads with the verified curl / `go install` paths; `npx skills add` demoted to a caveated skills.sh alternative — done). **Tier 1 complete.**
-2. **Tier 2 (make harness claims true):** ✅ G6 hook wiring (F13 — done); ✅ wire Merkle via `cycle verify` (F12 — done); implement `logx` redaction (F21); A2A SSE named events + `sessionId` (F16).
+2. **Tier 2 (make harness claims true):** ✅ G6 hook wiring (F13 — done); ✅ wire Merkle via `cycle verify` (F12 — done); ✅ `logx` redaction (F21 — done); A2A SSE named events + `sessionId` (F16).
 3. **Tier 3 (trust):** real-adapter integration tests + gate/autogoal coverage (see `test-plan.md`); Homebrew tap.
 4. **Feature work:** cross-check ping-pong (F22); scratchpad wiring (F20); `strict_round_robin` / `last_writer_wins` routing (F6).

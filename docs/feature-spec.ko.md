@@ -44,7 +44,7 @@
 | F18 | 데몬 자동 기동 | ✅ | `internal/cli/broker_client.go` (`ensureBrokerClient`: squash + `rally new`) |
 | F19 | `doctor` 진단 | ◑ | `internal/doctor/doctor.go` |
 | F20 | 공유 스크래치패드 + 압축 | ○ | `internal/scratch` |
-| F21 | 로그 시점 시크릿 마스킹 | ○ | `internal/logx` (스텁) |
+| F21 | 로그 시점 시크릿 마스킹 | ✅ | `internal/logx` (`Redact` + `RedactingHandler`) |
 | F22 | Cross-check ping-pong (의도 인지 핸드오프, dry-round 브레이커, claim 오라클) | ▷ | `docs/prd-cross-check-ping-pong.md` |
 
 이하 각 기능을 상세히 명세한다.
@@ -410,10 +410,15 @@ scratch:
 
 ---
 
-### F20 — 스크래치패드 ○ / F21 — 로그 마스킹 ○
+### F20 — 스크래치패드 ○ / F21 — 로그 마스킹 ✅
 
 - **F20(선언만):** `internal/scratch`(`Manager`, `Append`, `max_kb`의 80%에서 압축)는 프로덕션 코드에서 **0회** 임포트됨. 프리셋 `scratch:`는 `ScratchConfig`로 파싱되고 `TurnRequest.ScratchPath`도 존재하나, 아무것도 채우거나 소비하지 않음. 연결(세션당 매니저 + 경로 주입 + 어댑터 소비)이 기능을 실제로 만드는 작업.
-- **F21(선언만):** `internal/logx`는 2줄 스텁; 로그 시점 시크릿 마스킹이 없음. 마스킹은 사전 실행 명령 분류기(F14)에만 존재하고 로그 출력에는 없음.
+- **F21(✅ 연결됨):** `internal/logx`가 이제 `Redact(string)`(고정밀 값-형태 시크릿 매처 — 프로바이더 키 접두사 `sk-ant-`/`sk-`/`ghp_`/`xox*`/`AKIA`/`AIza`, `Bearer <token>`, 민감 `KEY=value` 할당, PEM 개인키 블록)와 `RedactingHandler`(모든 레코드의 메시지와 문자열/에러 속성을 — 그룹과 `With` 바인딩 속성까지 재귀 — `Redact`에 통과시키는 `slog.Handler` 미들웨어)를 제공. `cmd/rallish/main.go`가 베이스 핸들러를 한 번 감싸므로, 마스킹은 호출 지점마다가 아니라 단일 로그 시점 경계다. 매처는 접두사/구조 앵커링이라 평범한 산문("the token bucket", "secret sauce")은 절대 바뀌지 않음 — 진단을 망치느니 미탐을 택함. 주요 누출 경로(`"error", err`가 어댑터 stderr를 품는 경우)를 커버.
+
+**수용 기준.**
+- AC-F21.1: 로그 메시지/속성의 프로바이더 키, bearer 토큰, 민감 `KEY=value`, PEM 블록은 `[REDACTED]`로 치환됨.
+- AC-F21.2: "token"/"secret"/"password" 같은 단어를 포함한 평범한 산문은 바이트 그대로 보존됨.
+- AC-F21.3: `"error", err`로 로깅된 에러 값 안의 시크릿이 마스킹됨.
 
 ---
 
