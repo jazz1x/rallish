@@ -41,7 +41,7 @@ Every feature row cites the authoritative source file. Where a claim was spot-ve
 | F15 | Unix-socket IPC + TCP loopback fallback | ✅ | `internal/ipc/socket.go`, `internal/cli/broker_client.go` |
 | F16 | A2A v1.0 wire shape (agent-card, JSON-RPC, SSE) | ◑ | `internal/broker/a2a.go` |
 | F17 | MCP server (rally tools over SSE) | ✅ | `internal/broker/mcp.go` |
-| F18 | Auto-daemon spawn | ◑ | `internal/cli/squash.go` (squash only) |
+| F18 | Auto-daemon spawn | ✅ | `internal/cli/broker_client.go` (`ensureBrokerClient`: squash + `rally new`) |
 | F19 | `doctor` diagnostics | ◑ | `internal/doctor/doctor.go` |
 | F20 | Shared scratchpad with compaction | ○ | `internal/scratch` |
 | F21 | Log-time secret redaction | ○ | `internal/logx` (stub) |
@@ -73,7 +73,7 @@ The rest of the document specifies each in detail.
 
 **Behavior.**
 - Resolves a preset by name: built-in first, then `~/.rallish/presets/<name>.yaml`. `squash` does **not** read a project-local `./.rallish/presets/` (squash.go:174 uses the user home dir only). Default preset from config `default_preset` (ships as `solo-ralph`).
-- Auto-spawns the broker daemon if none is running (this is the **only** command that auto-spawns — see F18).
+- Auto-spawns the broker daemon if none is running (via the shared `ensureBrokerClient`; `rally new` does the same — see F18).
 - Drives turns until an exit condition fires.
 
 **Acceptance criteria.**
@@ -111,8 +111,8 @@ The rest of the document specifies each in detail.
 - AC-F2.3: `rally join --timeout 5s` against a session with no incoming baton exits with code 2.
 
 **Known gaps.**
-- G-F2.1: `rally new` does **not** auto-spawn the daemon (only `squash` does); it errors if no daemon is running. *Recommendation:* auto-spawn on `rally new`, or document the `daemon` prerequisite prominently (audit Tier 1, item 7).
-- G-F2.2: `rally join` with a typo'd participant name historically blocks forever absent `--timeout`. A sensible default timeout is recommended.
+- ✅ G-F2.1 (resolved): `rally new` now auto-spawns the daemon via the shared `ensureBrokerClient` helper (`internal/cli/broker_client.go`), mirroring `squash`. A stranger no longer has to run `rallish daemon` first. (`join`/`done`/`status`/`cycle` still use `resolveBrokerClient` directly — they act on an existing session, so a missing daemon stays a clear up-front error rather than a surprise mid-flow spawn.)
+- ✅ G-F2.2 (resolved at the root): a typo'd `--as` does **not** block — the broker validates participant membership on the baton stream and returns **403 "participant … is not in this session"** immediately (`internal/broker/rally.go`), which the CLI surfaces as a clear error. `--timeout` remains opt-in for the legitimate case (waiting on a peer who has not yet passed the baton); a blunt default timeout is deliberately *not* added, as it would cut short valid long waits.
 
 ---
 
@@ -395,9 +395,9 @@ Unix domain socket at `~/.rallish/rallish.sock` (mode `0600`), preferred. The CL
 
 ---
 
-### F18 — Auto-daemon ◑ / F19 — doctor ◑
+### F18 — Auto-daemon ✅ / F19 — doctor ◑
 
-- **F18:** `squash` auto-spawns the broker; `rally`/`cycle` commands require a running daemon. Align this (auto-spawn on `rally new`) or document the prerequisite. **Known code bug:** `rallish bootstrap` prints "daemon not running — will auto-spawn on `rally new`" (`internal/cli/bootstrap.go`), which is false — only `squash` auto-spawns. Fix that string when wiring this up.
+- **F18:** `squash` **and `rally new`** auto-spawn the broker (via the shared `ensureBrokerClient`); `rally join`/`done`/`status` and `cycle` require an already-running daemon (they operate on an existing session). The `doctor`/`bootstrap` "daemon not running — will auto-spawn on `rally new`" message is now **accurate** (it was false when only `squash` auto-spawned).
 - **F19:** `doctor` reports daemon reachability, adapter presence on PATH, and config/skill paths. With `--probe` it also verifies adapter **auth** via one bounded live turn per adapter (G-F4 resolved). Adapters absent from PATH are reported as info, not failure.
 
 ---
@@ -438,7 +438,7 @@ These apply to *every* feature and double as design-review gates:
 
 Ordered by the audit's tiering (`docs/reports/2026-06-23-production-readiness-gaps.md`):
 
-1. **Tier 1 (first-run UX):** ✅ adapter auth preflight (G-F4 — done); ✅ `fake-demo` preset (G-F1 — done); `rally` auto-spawn + default timeout (G-F2); an install path that works today.
+1. **Tier 1 (first-run UX):** ✅ adapter auth preflight (G-F4 — done); ✅ `fake-demo` preset (G-F1 — done); ✅ `rally new` auto-spawn + typo-join fail-fast (G-F2 — done); an install path that works today.
 2. **Tier 2 (make harness claims true):** G6 hook wiring (F13); wire Merkle (F12); implement `logx` redaction (F21); A2A SSE named events + `sessionId` (F16).
 3. **Tier 3 (trust):** real-adapter integration tests + gate/autogoal coverage (see `test-plan.md`); Homebrew tap.
 4. **Feature work:** cross-check ping-pong (F22); scratchpad wiring (F20); `strict_round_robin` / `last_writer_wins` routing (F6).

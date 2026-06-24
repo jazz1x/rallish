@@ -41,7 +41,7 @@
 | F15 | Unix 소켓 IPC + TCP 루프백 폴백 | ✅ | `internal/ipc/socket.go`, `internal/cli/broker_client.go` |
 | F16 | A2A v1.0 와이어 형태 (agent-card, JSON-RPC, SSE) | ◑ | `internal/broker/a2a.go` |
 | F17 | MCP 서버 (rally 도구를 SSE로) | ✅ | `internal/broker/mcp.go` |
-| F18 | 데몬 자동 기동 | ◑ | `internal/cli/squash.go` (squash 한정) |
+| F18 | 데몬 자동 기동 | ✅ | `internal/cli/broker_client.go` (`ensureBrokerClient`: squash + `rally new`) |
 | F19 | `doctor` 진단 | ◑ | `internal/doctor/doctor.go` |
 | F20 | 공유 스크래치패드 + 압축 | ○ | `internal/scratch` |
 | F21 | 로그 시점 시크릿 마스킹 | ○ | `internal/logx` (스텁) |
@@ -73,7 +73,7 @@
 
 **동작.**
 - 프리셋을 이름으로 해석한다: 빌트인 먼저, 그다음 `~/.rallish/presets/<name>.yaml`. `squash`는 프로젝트 로컬 `./.rallish/presets/`를 읽지 **않음**(squash.go:174는 사용자 홈 디렉터리만 사용). 기본 프리셋은 config `default_preset`(출시 기본값 `solo-ralph`).
-- 데몬이 없으면 자동 기동한다(자동 기동하는 **유일한** 명령 — F18 참조).
+- 데몬이 없으면 자동 기동한다(공유 `ensureBrokerClient` 경유; `rally new`도 동일 — F18 참조).
 - 종료 조건이 발화할 때까지 턴을 구동한다.
 
 **수용 기준.**
@@ -111,8 +111,8 @@
 - AC-F2.3: 들어오는 바톤이 없는 세션에 대한 `rally join --timeout 5s`는 코드 2로 종료.
 
 **알려진 갭.**
-- G-F2.1: `rally new`는 데몬을 자동 기동하지 **않음**(squash만). 데몬이 없으면 에러. *권고:* `rally new`에서 자동 기동하거나 데몬 선행조건을 명확히 문서화(감사 Tier 1, 7번).
-- G-F2.2: 참가자 이름 오타 시 `--timeout` 없이는 영구 블록. 합리적 기본 타임아웃 권고.
+- ✅ G-F2.1 (해결): `rally new`가 이제 공유 `ensureBrokerClient` 헬퍼(`internal/cli/broker_client.go`)로 데몬을 자동 기동 — `squash`와 동일. 처음 쓰는 사람이 `rallish daemon`을 먼저 돌릴 필요 없음. (`join`/`done`/`status`/`cycle`은 기존 세션을 다루므로 계속 `resolveBrokerClient`를 직접 사용 — 데몬 부재는 도중 깜짝 기동이 아니라 명확한 선행 에러로 남음.)
+- ✅ G-F2.2 (근본 해결): 오타난 `--as`는 블록하지 않음 — 브로커가 바톤 스트림에서 참가자 멤버십을 검증해 즉시 **403 "participant … is not in this session"**을 반환(`internal/broker/rally.go`)하고, CLI가 이를 명확한 에러로 표면화. `--timeout`은 정당한 경우(아직 바톤을 넘기지 않은 피어를 기다림)를 위해 옵트인으로 유지; 정당한 긴 대기를 잘라버리므로 무딘 기본 타임아웃은 의도적으로 추가하지 않음.
 
 ---
 
@@ -395,9 +395,9 @@ scratch:
 
 ---
 
-### F18 — 데몬 자동 기동 ◑ / F19 — doctor ◑
+### F18 — 데몬 자동 기동 ✅ / F19 — doctor ◑
 
-- **F18:** `squash`는 브로커를 자동 기동; `rally`/`cycle` 명령은 실행 중 데몬이 필요. 이를 정렬(`rally new`에서 자동 기동)하거나 선행조건을 문서화. **알려진 코드 버그:** `rallish bootstrap`이 "daemon not running — will auto-spawn on `rally new`"를 출력(`internal/cli/bootstrap.go`)하나 이는 거짓 — `squash`만 자동 기동함. 이 작업을 배선할 때 그 문자열을 수정하라.
+- **F18:** `squash` **와 `rally new`** 가 브로커를 자동 기동(공유 `ensureBrokerClient` 경유); `rally join`/`done`/`status`와 `cycle`은 실행 중 데몬이 필요(기존 세션을 다룸). `doctor`/`bootstrap`의 "daemon not running — will auto-spawn on `rally new`" 메시지는 이제 **정확함**(`squash`만 자동 기동하던 시절엔 거짓이었음).
 - **F19:** `doctor`는 데몬 도달성, PATH의 어댑터 존재, config/skill 경로를 보고. `--probe` 사용 시 어댑터당 시간 제한된 라이브 턴 1회로 **인증**도 검증(G-F4 해결). PATH에 없는 어댑터는 실패가 아닌 정보로 보고.
 
 ---
@@ -438,7 +438,7 @@ scratch:
 
 감사 티어링 순서(`docs/reports/2026-06-23-production-readiness-gaps.md`):
 
-1. **Tier 1(첫 실행 UX):** ✅ 어댑터 인증 사전점검(G-F4 — 완료); ✅ `fake-demo` 프리셋(G-F1 — 완료); `rally` 자동 기동 + 기본 타임아웃(G-F2); 오늘 동작하는 설치 경로.
+1. **Tier 1(첫 실행 UX):** ✅ 어댑터 인증 사전점검(G-F4 — 완료); ✅ `fake-demo` 프리셋(G-F1 — 완료); ✅ `rally new` 자동 기동 + 오타 조인 즉시 실패(G-F2 — 완료); 오늘 동작하는 설치 경로.
 2. **Tier 2(하네스 주장을 참으로):** G6 훅 배선(F13); Merkle 연결(F12); `logx` 마스킹 구현(F21); A2A SSE 명명 이벤트 + `sessionId`(F16).
 3. **Tier 3(신뢰):** 실제 어댑터 통합 테스트 + 게이트/autogoal 커버리지(`test-plan.ko.md` 참조); Homebrew tap.
 4. **기능 작업:** cross-check ping-pong(F22); 스크래치패드 연결(F20); `strict_round_robin` / `last_writer_wins` 라우팅(F6).

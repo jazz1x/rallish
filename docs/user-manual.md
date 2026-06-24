@@ -91,7 +91,7 @@ handful of turns, and exits `turns_exhausted`. If you see
 rallish squash --preset solo-ralph --task "add a --version flag"
 ```
 
-`--task` is **required** when starting a new session. This auto-spawns the broker (squash is the one command that does), runs the `solo-ralph` preset — a single `claude`/sonnet agent under a 30-turn / 600k-token / 90-minute budget — and exits when an exit condition fires.
+`--task` is **required** when starting a new session. This auto-spawns the broker (as does `rally new`), runs the `solo-ralph` preset — a single `claude`/sonnet agent under a 30-turn / 600k-token / 90-minute budget — and exits when an exit condition fires.
 
 To use the three-role planner→executor→reviewer flow:
 
@@ -107,10 +107,11 @@ rallish squash --preset pair-review --task "add a --version flag"   # needs both
 
 Use `rally` when you want two or more live sessions to hand work back and forth, each driven by its own coding CLI.
 
-> **Prerequisite:** unlike `squash`, the `rally` commands do **not** auto-spawn the broker. Start it first:
-> ```bash
-> rallish daemon &     # or run it in its own terminal
-> ```
+> **Daemon:** `rally new` auto-spawns the broker for you (like `squash`), so a
+> cold start just works. The follow-up commands — `join`, `done`, `status` — act
+> on the session that `new` created, so they expect the daemon to already be up;
+> if you ever run one in a fresh environment without a daemon, start it with
+> `rallish daemon &` (or just run `rally new` first).
 
 **1. Create a session:**
 
@@ -311,7 +312,7 @@ The daemon writes its port to `~/.rallish/port` and a socket pointer to `~/.rall
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | `parsing response: no JSON TurnResponse found in output` | adapter CLI not authenticated / rate-limited | run the CLI by hand (`claude -p hi`); log in; retry |
-| `rally new` errors about no daemon | `rally`/`cycle` don't auto-spawn | start `rallish daemon &` first |
+| `rally join`/`status` errors about no daemon | run before any `rally new`/`squash` in a fresh env | run `rally new` (auto-spawns) or `rallish daemon &` first |
 | `rally join` hangs forever | wrong participant name + no timeout | always pass `--timeout`; check `rally status` for valid names |
 | `rally done` → "not your turn" (409) | you don't hold the baton | check `rally status`; wait for your turn |
 | `squash` exit conditions never fire on `tests_pass` | broker skips shell predicates by design | use `reviewer_approved` / `turns_exhausted` / `deadline_passed` for squash; shell checks run in cycle gates |
@@ -335,7 +336,7 @@ rallish version                   build version / commit / date
 
 rallish squash --preset <name> --task <desc>   headless preset session (--task required; auto-spawns daemon)
 
-rallish daemon                    run the broker (required for rally/cycle)
+rallish daemon                    run the broker (rally new & squash auto-spawn it; needed up-front for cycle)
 rallish rally new|join|done|status|mcp-agent     interactive baton-passing
 
 rallish cycle new|start|run --once|status|ledger|watch|next|halt   autonomous work

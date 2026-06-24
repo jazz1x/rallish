@@ -20,6 +20,11 @@ type brokerClient struct {
 	Client *http.Client
 }
 
+// errBrokerNotRunning is the sentinel resolveBrokerClient wraps when no live
+// daemon is reachable. ensureBrokerClient matches on it (errors.Is) to decide
+// whether an auto-spawn is warranted, rather than string-matching the message.
+var errBrokerNotRunning = errors.New("broker not running")
+
 // resolveBrokerClient resolves the broker URL and HTTP client for the given
 // home directory. It prefers a Unix socket (if ~/.rallish/socket exists and
 // points within sockDir), and falls back to TCP via ~/.rallish/port.
@@ -54,7 +59,7 @@ func resolveBrokerClient(homeDir string, connectTimeout time.Duration) (brokerCl
 	portFile := filepath.Join(sockDir, "port")
 	port, err := readPortFile(portFile)
 	if err != nil {
-		return brokerClient{}, fmt.Errorf("broker not running — start it first with: rallish daemon (no socket or port file): %w", err)
+		return brokerClient{}, fmt.Errorf("%w — start it first with: rallish daemon (no socket or port file): %w", errBrokerNotRunning, err)
 	}
 	// The port file survives a non-graceful daemon death (kill -9, OOM, reboot):
 	// daemon.go only removes it after a graceful httpSrv.Serve return. Probe the
@@ -63,10 +68,42 @@ func resolveBrokerClient(homeDir string, connectTimeout time.Duration) (brokerCl
 	// port, remove the stale file so the next invocation auto-spawns cleanly.
 	if derr := dialPort(port); derr != nil {
 		_ = os.Remove(portFile)
-		return brokerClient{}, fmt.Errorf("broker not running — start it first with: rallish daemon (stale port file removed): %w", derr)
+		return brokerClient{}, fmt.Errorf("%w — start it first with: rallish daemon (stale port file removed): %w", errBrokerNotRunning, derr)
 	}
 	url := "http://127.0.0.1:" + port
 	return brokerClient{URL: url, Client: &http.Client{Timeout: connectTimeout}}, nil
+}
+
+// ensureBrokerClient resolves a broker client, auto-spawning the daemon when none
+// is running. This is the shared auto-spawn path for commands that should "just
+// work" from a cold start (squash, `rally new`). Commands that act on an already
+// existing session (`rally join`/`done`/`status`, `cycle`) deliberately use
+// resolveBrokerClient directly, so a missing daemon is a clear up-front error
+// rather than a surprise spawn mid-flow.
+func ensureBrokerClient(homeDir string, connectTimeout time.Duration) (brokerClient, error) {
+	bc, err := resolveBrokerClient(homeDir, connectTimeout)
+	if err == nil || !errors.Is(err, errBrokerNotRunning) {
+		return bc, err
+	}
+
+	slog.Info("broker not running, starting daemon")
+	if serr := startDaemon(homeDir); serr != nil {
+		return brokerClient{}, fmt.Errorf("start daemon: %w", serr)
+	}
+
+	// The daemon writes its port/socket asynchronously after fork; poll the same
+	// resolver (which dial-probes for liveness) until it answers or we give up.
+	for i := 0; i < 20; i++ {
+		time.Sleep(250 * time.Millisecond)
+		bc, err = resolveBrokerClient(homeDir, connectTimeout)
+		if err == nil {
+			return bc, nil
+		}
+		if !errors.Is(err, errBrokerNotRunning) {
+			return brokerClient{}, err
+		}
+	}
+	return brokerClient{}, fmt.Errorf("daemon did not become reachable after spawn: %w", err)
 }
 
 // dialPort dials 127.0.0.1:port with a short timeout and returns the dial error

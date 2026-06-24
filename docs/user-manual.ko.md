@@ -90,7 +90,7 @@ CLI도, API 키도 필요 없다. 데몬을 자동 기동하고 몇 턴 돌린 �
 rallish squash --preset solo-ralph --task "--version 플래그 추가"
 ```
 
-`--task`는 새 세션 시작 시 **필수**다. 브로커를 자동 기동(squash가 자동 기동하는 유일한 명령)하고, `solo-ralph` 프리셋 — 30턴/600k토큰/90분 예산의 단일 `claude`/sonnet 에이전트 — 을 돌려 종료 조건 발화 시 종료한다.
+`--task`는 새 세션 시작 시 **필수**다. 브로커를 자동 기동(`rally new`도 동일)하고, `solo-ralph` 프리셋 — 30턴/600k토큰/90분 예산의 단일 `claude`/sonnet 에이전트 — 을 돌려 종료 조건 발화 시 종료한다.
 
 세 역할 planner→executor→reviewer 흐름을 쓰려면:
 
@@ -106,10 +106,9 @@ rallish squash --preset pair-review --task "--version 플래그 추가"   # PATH
 
 둘 이상의 라이브 세션이 각자의 코딩 CLI로 구동되며 작업을 주고받게 하고 싶을 때 `rally`를 쓴다.
 
-> **선행조건:** `squash`와 달리 `rally` 명령은 브로커를 자동 기동하지 **않는다**. 먼저 시작하라:
-> ```bash
-> rallish daemon &     # 또는 별도 터미널에서 실행
-> ```
+> **데몬:** `rally new`는 (`squash`처럼) 브로커를 자동 기동하므로 콜드 스타트가 바로 동작한다.
+> 후속 명령 `join`·`done`·`status`는 `new`가 만든 세션을 다루므로 데몬이 이미 떠 있다고 가정한다.
+> 데몬 없는 새 환경에서 이들 중 하나를 먼저 돌릴 일이 있으면 `rallish daemon &`로 시작하라(또는 그냥 `rally new`를 먼저 실행).
 
 **1. 세션 생성:**
 
@@ -309,7 +308,7 @@ rallish daemon          # 포그라운드; 127.0.0.1:<동적> 바인딩, Unix �
 | 증상 | 유력 원인 | 해결 |
 |------|-----------|------|
 | `parsing response: no JSON TurnResponse found in output` | 어댑터 CLI 미인증/레이트리밋 | CLI 손으로 실행(`claude -p hi`); 로그인; 재시도 |
-| `rally new`가 데몬 없음 에러 | `rally`/`cycle`은 자동 기동 안 함 | `rallish daemon &` 먼저 시작 |
+| `rally join`/`status`가 데몬 없음 에러 | 새 환경에서 `rally new`/`squash`보다 먼저 실행 | `rally new`(자동 기동) 또는 `rallish daemon &`를 먼저 실행 |
 | `rally join`이 영구 블록 | 잘못된 참가자 이름 + 타임아웃 없음 | 항상 `--timeout` 전달; `rally status`로 유효 이름 확인 |
 | `rally done` → "당신 차례 아님"(409) | 바톤 미보유 | `rally status` 확인; 차례 대기 |
 | squash 종료 조건이 `tests_pass`로 발화 안 함 | 브로커가 설계상 셸 술어 건너뜀 | squash엔 `reviewer_approved`/`turns_exhausted`/`deadline_passed` 사용; 셸 검사는 사이클 게이트에서 실행 |
@@ -333,7 +332,7 @@ rallish version                   빌드 버전 / 커밋 / 날짜
 
 rallish squash --preset <name> --task <설명>   헤드리스 프리셋 세션 (--task 필수; 데몬 자동 기동)
 
-rallish daemon                    브로커 실행 (rally/cycle에 필요)
+rallish daemon                    브로커 실행 (rally new·squash는 자동 기동; cycle은 선행 필요)
 rallish rally new|join|done|status|mcp-agent     대화형 바톤 패싱
 
 rallish cycle new|start|run --once|status|ledger|watch|next|halt   자율 작업

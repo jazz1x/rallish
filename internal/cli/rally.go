@@ -175,7 +175,9 @@ func runRallyNew(ctx context.Context, homeDir, participants, repo, task, firstHo
 		repo = cleanedRepo
 	}
 
-	bc, err := resolveBrokerClient(homeDir, 30*time.Second)
+	// `rally new` is a cold-start entry point, so it auto-spawns the daemon just
+	// like `squash` — a stranger should not have to run `rallish daemon` first.
+	bc, err := ensureBrokerClient(homeDir, 30*time.Second)
 	if err != nil {
 		return err
 	}
