@@ -29,10 +29,10 @@
 | F3 | 자율 사이클 + 참조 드라이버(`cycle run --once`) | ✅ | `internal/cli/cycle_run.go`, `internal/cycle` |
 | F4 | 어댑터 포트 (claude / kimi / fake) | ✅ | `internal/adapter` |
 | F5 | 프리셋 시스템 (YAML 템플릿) | ✅ | `internal/preset` |
-| F6 | 턴 라우팅 | ◑ | `internal/router/router.go` |
+| F6 | 턴 라우팅 | ✅ | `internal/router/router.go` |
 | F7 | 토큰 / 턴 / 벽시계 예산 | ✅ | `internal/budget`, `internal/exit` |
 | F8 | 종료 조건 | ◑ | `internal/exit/exit.go` |
-| F9 | 게이트 파이프라인 (preflight→audit→philosophy→polish→commit) | ✅ | `internal/cycle/gates/pipeline.go` |
+| F9 | 게이트 파이프라인 (preflight→audit→claim→philosophy→polish→commit) | ✅ | `internal/cycle/gates/pipeline.go` |
 | F10 | 안티스핀 stuck 브레이커 + 수명 한도 | ✅ | `internal/cycle/stuck.go`, `internal/budget` |
 | F11 | 해시체인 append-only 레저 (G4 감사) | ✅ | `pkg/contract/harness_ledger.go`, `internal/cycle/ledger.go` |
 | F12 | Merkle(RFC 9162) 포함/일관성 증명 | ✅ | `pkg/contract/merkle.go`, `internal/cli/cycle_verify.go` |
@@ -43,9 +43,9 @@
 | F17 | MCP 서버 (rally 도구를 SSE로) | ✅ | `internal/broker/mcp.go` |
 | F18 | 데몬 자동 기동 | ✅ | `internal/cli/broker_client.go` (`ensureBrokerClient`: squash + `rally new`) |
 | F19 | `doctor` 진단 | ◑ | `internal/doctor/doctor.go` |
-| F20 | 공유 스크래치패드 + 압축 | ○ | `internal/scratch` |
+| F20 | 공유 스크래치패드 + 압축 | ✅ | `internal/scratch`, `internal/broker/broker.go`, `internal/adapter/prompt.go` |
 | F21 | 로그 시점 시크릿 마스킹 | ✅ | `internal/logx` (`Redact` + `RedactingHandler`) |
-| F22 | Cross-check ping-pong (의도 인지 핸드오프, dry-round 브레이커, claim 오라클) | ▷ | `docs/prd-cross-check-ping-pong.md` |
+| F22 | Cross-check ping-pong (의도 인지 핸드오프, dry-round 브레이커, claim 오라클) | ✅ | `docs/prd-cross-check-ping-pong.md`, `internal/broker/broker.go`, `internal/session/stuck.go`, `internal/cycle/gates/claim.go`, `internal/adapter/prompt.go` |
 
 이하 각 기능을 상세히 명세한다.
 
@@ -227,19 +227,22 @@ scratch:
 
 ---
 
-### F6 — 턴 라우팅 ◑
+### F6 — 턴 라우팅 ✅
 
 **결정 우선순위** (`internal/router/router.go`, `Next`):
-1. **명시적 핸드오프** — 직전 `TurnResponse.HandoffTo`가 유효 역할이면 그리로.
-2. **블록 에스컬레이션** — `prev.SelfEval == "blocked"`이면 `reviewer` 역할이 있으면 그리로; 없으면 에러.
-3. **라우팅 규칙** — 프리셋 전략 적용.
+1. **블록 에스컬레이션** — `prev.SelfEval == "blocked"`이면 `reviewer` 역할이 있으면 그리로; 없으면 에러. 이 안전 오버라이드는 라우팅 전략과 무관하게 적용.
+2. **전략별 라우팅:**
+   - `round_robin` — `(turn-1) mod len(roles)`로 순환. 유효한 `handoff_to`가 있으면 순환을 덮어씀.
+   - `handoff_then_round_robin` — 코드상 `round_robin`과 동일; 명시적 핸드오프를 따름.
+   - `strict_round_robin` — `(turn-1) mod len(roles)`로 순환하고 **명시적 `handoff_to`를 무시**하여 한 역할이 영원히 배턴을 붙잡지 못함.
+   - `last_writer_wins` — 유효한 `handoff_to`가 요청할 때까지 동일한 작가를 유지(`(turn-1) mod len(roles)`). "마지막으로 작업한 에이전트가 핸드오프를 받기 전까지 계속 작업"을 모델링.
 
-**왜 ◑인가.** `round_robin`과 `handoff_then_round_robin`만 구현됨. `strict_round_robin`·`last_writer_wins`는 스키마 검증기는 *통과*시키지만 런타임에 `routing rule %q not supported in phase 1`을 반환. 구현하든지, 존재할 때까지 검증기가 거부하든지 해야 함.
+**왜 ✅인가.** 스키마에서 허용하는 네 가지 라우팅 전략 모두 구현되었으며 `internal/router/router_test.go`로 커버됨.
 
 **수용 기준.**
-- AC-F6.1: `round_robin`에서 역할 배정은 `(turn-1) mod len(roles)`로 순환.
-- AC-F6.2: 유효 역할을 가리키는 `handoff_to`는 라운드로빈을 덮어씀.
-- AC-F6.3(갭): `strict_round_robin` 선택이 검증통과-후-런타임실패해서는 안 됨.
+- AC-F6.1 ✅: `round_robin`에서 역할 배정은 `(turn-1) mod len(roles)`로 순환.
+- AC-F6.2 ✅: 유효 역할을 가리키는 `handoff_to`는 라운드로빈을 덮어씀.
+- AC-F6.3 ✅: `strict_round_robin`은 핸드오프를 무시하고 런타임 실패 없음; `last_writer_wins`는 핸드오프 요청 전까지 작가를 유지.
 
 ---
 
@@ -410,29 +413,60 @@ scratch:
 
 ---
 
-### F20 — 스크래치패드 ○ / F21 — 로그 마스킹 ✅
+### F20 — 공유 스크래치패드 ✅
 
-- **F20(선언만):** `internal/scratch`(`Manager`, `Append`, `max_kb`의 80%에서 압축)는 프로덕션 코드에서 **0회** 임포트됨. 프리셋 `scratch:`는 `ScratchConfig`로 파싱되고 `TurnRequest.ScratchPath`도 존재하나, 아무것도 채우거나 소비하지 않음. 연결(세션당 매니저 + 경로 주입 + 어댑터 소비)이 기능을 실제로 만드는 작업.
-- **F21(✅ 연결됨):** `internal/logx`가 이제 `Redact(string)`(고정밀 값-형태 시크릿 매처 — 프로바이더 키 접두사 `sk-ant-`/`sk-`/`ghp_`/`xox*`/`AKIA`/`AIza`, `Bearer <token>`, 민감 `KEY=value` 할당, PEM 개인키 블록)와 `RedactingHandler`(모든 레코드의 메시지와 문자열/에러 속성을 — 그룹과 `With` 바인딩 속성까지 재귀 — `Redact`에 통과시키는 `slog.Handler` 미들웨어)를 제공. `cmd/rallish/main.go`가 베이스 핸들러를 한 번 감싸므로, 마스킹은 호출 지점마다가 아니라 단일 로그 시점 경계다. 매처는 접두사/구조 앵커링이라 평범한 산문("the token bucket", "secret sauce")은 절대 바뀌지 않음 — 진단을 망치느니 미탐을 택함. 주요 누출 경로(`"error", err`가 어댑터 stderr를 품는 경우)를 커버.
+**무엇인가.** 턴을 넘어 세션 전체에서 문맥을 운송하는 롤링 스크래치패드. 브로커가 파일을 소유하고, 어댑터는 프롬프트로 현재 내용을 받는다.
+
+**배선.** `internal/broker/broker.go`가 세션마다 하나의 `scratch.Manager`를 생성한다(`<sessionDir>/scratch.md`, 프리셋의 `scratch.max_kb` 사용). 모든 `/sessions/{id}/next`에서 파일을 읽어 `TurnRequest`의 `ScratchPath`와 `Scratch`를 주입하고, 모든 `/sessions/{id}/turn`에서 `TurnResponse.Compact()`를 파일에 추가한다. `internal/adapter/prompt.go`는 스크래치 내용을 TurnRequest JSON 앞의 읽기 전용 "Shared scratchpad" 섹션으로 렌더링하고, 모델이 볼 수 있도록 슬림 `promptRequest`에도 포함한다.
+
+**압축.** `scratch.Manager.compactIfNeeded`는 파일 크기가 `max_kb`의 80%에 도달하면 절반으로 줄이며 최신 내용을 보존한다. `scratch.summarize_with` 필드는 파싱되지만 **아직 소비되지 않는다** — LLM 기반 요약은 미래 작업이고, 현재 압축 전략은 반으로 자르는 것이다.
+
+**왜 ✅인가.** 읽기 → 프롬프트 → 응답 → 추가 루프가 배선되었고 테스트로 커버된다. `internal/scratch`는 더 이상 선언만 한 패키지가 아니다.
 
 **수용 기준.**
-- AC-F21.1: 로그 메시지/속성의 프로바이더 키, bearer 토큰, 민감 `KEY=value`, PEM 블록은 `[REDACTED]`로 치환됨.
-- AC-F21.2: "token"/"secret"/"password" 같은 단어를 포함한 평범한 산문은 바이트 그대로 보존됨.
-- AC-F21.3: `"error", err`로 로깅된 에러 값 안의 시크릿이 마스킹됨.
+- AC-F20.1 ✅: `scratch.max_kb`를 가진 세션은 첫 `/next`에서 `scratch.md`로 끝나는 `ScratchPath`를 알린다.
+- AC-F20.2 ✅: 턴을 POST하면 스크래치패드 파일에 요약이 추가된다.
+- AC-F20.3 ✅: 다음 턴의 `TurnRequest.Scratch`에 이전에 추가된 내용이 담긴다.
+- AC-F20.4 ✅: `BuildPrompt`는 스크래치 내용이 비어있지 않을 때 생성된 프롬프트에 포함한다.
+
+**남은 갭.**
+- `scratch.summarize_with`는 파싱되지만 LLM 압축에는 사용되지 않는다.
 
 ---
 
-### F22 — Cross-check ping-pong ▷ (계획됨)
+### F21 — 로그 마스킹 ✅
 
-**상태: 명세됨, 미구현.** 전체 명세는 `docs/prd-cross-check-ping-pong.md`. `squash`/`pair-review` 경로에 추가:
-- **P0′ 의도 인지 carryover** — `TurnResponse`에 `HandoffIntent`(`continue` / `cross_check`); 브로커가 전달(운반자, 심판 아님), 어댑터 프롬프트 빌더가 프레이밍 선택 → 리뷰어가 실행자 요약을 메아리치지 않고 산출물을 적대적으로 검사.
-- **P1′ loop-until-dry + stuck-breaker** — 프리셋 `dry_rounds_threshold` + `exit_when: [dry_rounds]`; `TurnRecord`에 대한 순수 `SessionStuck` 헬퍼.
-- **P2′ 검증가능 발견** — 재현 가능한 `Check`를 가진 선택적 `Claims []Violation`; 브로커가 `claim_registered` 레저 이벤트 추가(검증 안 함).
-- **P3′ 외부 오라클 앵커** — `ClaimGate`가 `Check.Command`를 실행, `Check.Expected`와 비교, `claim_verified` / `claim_falsified` 방출.
+**무엇인가.** `internal/logx`가 이제 `Redact(string)`(고정밀 값-형태 시크릿 매처 — 프로바이더 키 접두사 `sk-ant-`/`sk-`/`ghp_`/`xox*`/`AKIA`/`AIza`, `Bearer <token>`, 민감 `KEY=value` 할당, PEM 개인키 블록)와 `RedactingHandler`(모든 레코드의 메시지와 문자열/에러 속성을 — 그룹과 `With` 바인딩 속성까지 재귀 — `Redact`에 통과시키는 `slog.Handler` 미들웨어)를 제공. `cmd/rallish/main.go`가 베이스 핸들러를 한 번 감싸므로, 마스킹은 호출 지점마다가 아니라 단일 로그 시점 경계다. 매처는 접두사/구조 앵커링이라 평범한 산문("the token bucket", "secret sauce")은 절대 바뀌지 않음 — 진단을 망치느니 미탐을 택함. 주요 누출 경로(`"error", err`가 어댑터 stderr를 품는 경우)를 커버.
 
-**수용 기준**(PRD에서): executor→reviewer 핸드오프가 `cross_check` 생성; 리뷰어 프롬프트가 실행자 요약을 신뢰하지 않음; 3 dry 라운드는 `dry_rounds`로 종료; 6턴 ping-pong은 `stuck`으로 종료; 통과 claim은 `claim_verified`, 실패 claim은 `claim_falsified` + 사이클 정지; `make check-all` 통과.
+**수용 기준.**
+- AC-F21.1 ✅: 로그 메시지/속성의 프로바이더 키, bearer 토큰, 민감 `KEY=value`, PEM 블록은 `[REDACTED]`로 치환됨.
+- AC-F21.2 ✅: "token"/"secret"/"password" 같은 단어를 포함한 평범한 산문은 바이트 그대로 보존듦.
+- AC-F21.3 ✅: `"error", err`로 로깅된 에러 값 안의 시크릿이 마스킹됨.
 
-**보존할 가드레일:** 브로커 무판단, LangGraph 침범 금지, 코드 정책 아닌 프리셋 정책, claim은 선택적+레저 바운드, `continue`가 기본. 이 기능은 사용성과 직교(감사는 Tier 0–1 이후로 배치).
+---
+
+### F22 — Cross-check ping-pong ✅
+
+**무엇인가.** 프리셋 세션/사이클 하네스 경로에 의도 인지 핸드오프, dry-round 종료, stuck 패턴 감지, 검증 가능한 claim을 추가한다. 브로커는 여전히 운송자이며 모든 정책은 프리셋에 선언된다.
+
+**P0′ 의도 인지 carryover.** `TurnResponse.HandoffIntent`(`continue` / `cross_check`)가 브로커를 거쳐 `TurnRequest.LastTurn.Intent`로 전달된다. `internal/adapter/prompt.go`는 프레이밍을 선택한다: `continue`는 이전 `Summary`를 작업 상태로 사용하고, `cross_check`는 다음 역할에게 산출물과 원래 `Task`를 새로 읽고 요약을 맹신하지 말라고 지시한다.
+
+**P1′ loop-until-dry + stuck-breaker.** 프리셋이 `budget.dry_rounds_threshold`와 `exit_when: [dry_rounds]`를 선언할 수 있다. 브로커는 연속 dry 턴(새 산출물 없음, done 아님, 명시적 `handoff_to` 없음)을 세고 임계치 도달 시 종료한다. `exit_when: [stuck]`은 세션의 `TurnRecord`를 대상으로 `internal/session.Stuck`을 평가하여 6턴 무진보, 교대 역할 ping-pong, 또는 반복된 `(Summary, Artifacts)` 지문 ≥4회를 멈춘다.
+
+**P2′ 검증가능 발견.** `TurnResponse.Claims`는 `contract.Violation` 슬라이스다. 각 위반은 재현 가능한 셸 명령과 예상 부분 문자열을 담은 `Check`를 가질 수 있다. 브로커는 `LastTurn`으로 claim을 전달하고, 사이클 하네스에서는 `CycleState.ViolationsFound`에 누적한다.
+
+**P3′ 외부 오라클 앵커.** `ClaimGate`는 표준 파이프라인에서 audit(과 로컬 게이트) 직후 실행된다. `Check`가 있는 claim마다 명령을 실행하고 결합 출력을 `Check.Expected`와 비교한다. 통과한 claim은 `claim_verified` 레저 이벤트를, 실패한 claim은 `claim_falsified` 레저 이벤트를 방출하고 사이클을 정지한다.
+
+**프리셋 옵트인.** `pair-review.yaml`은 기존 조건 외에 `budget.dry_rounds_threshold: 3`과 `exit_when: [dry_rounds]`를 설정한다.
+
+**수용 기준.**
+- AC-F22.1 ✅: `handoff_intent: cross_check`를 가진 `TurnResponse`가 다음 `TurnRequest.LastTurn.Intent`로 전달된다.
+- AC-F22.2 ✅: `cross_check` 어댑터 프롬프트는 이전 요약을 신뢰하지 말고 산출물/태스크를 새로 검사하라고 안내한다.
+- AC-F22.3 ✅: 3회 연속 dry 라운드가 `dry rounds` 사유로 세션을 종료한다.
+- AC-F22.4 ✅: 6턴 교대 역할 dry ping-pong이 `ping-pong` 사유로 종료한다.
+- AC-F22.5 ✅: 통과하는 `Check`를 가진 claim은 `claim_verified` 레저 이벤트를, 실패는 `claim_falsified`를 방출하고 사이클을 정지한다.
+
+**보존한 가드레일.** 브로커는 품질을 판단하지 않는다; 라우팅은 역할 기반으로 유지된다; 임계치는 프리셋에 있다; claim은 선택적이고 레저 바운드다; 의도가 주어지지 않으면 `continue`가 기본이다.
 
 ---
 
@@ -452,6 +486,6 @@ scratch:
 감사 티어링 순서(`docs/reports/2026-06-23-production-readiness-gaps.md`):
 
 1. **Tier 1(첫 실행 UX):** ✅ 어댑터 인증 사전점검(G-F4 — 완료); ✅ `fake-demo` 프리셋(G-F1 — 완료); ✅ `rally new` 자동 기동 + 오타 조인 즉시 실패(G-F2 — 완료); ✅ 정직한 설치 안내(README가 검증된 curl / `go install` 경로를 앞세우고, `npx skills add`는 주의를 단 skills.sh 대안으로 강등 — 완료). **Tier 1 완료.**
-2. **Tier 2(하네스 주장을 참으로):** ✅ G6 훅 배선(F13 — 완료); ✅ `cycle verify`로 Merkle 연결(F12 — 완료); `logx` 마스킹 구현(F21); A2A SSE 명명 이벤트 + `sessionId`(F16).
-3. **Tier 3(신뢰):** 실제 어댑터 통합 테스트 + 게이트/autogoal 커버리지(`test-plan.ko.md` 참조); Homebrew tap.
-4. **기능 작업:** cross-check ping-pong(F22); 스크래치패드 연결(F20); `strict_round_robin` / `last_writer_wins` 라우팅(F6).
+2. **Tier 2(하네스 주장을 참으로):** ✅ G6 훅 배선(F13 — 완료); ✅ `cycle verify`로 Merkle 연결(F12 — 완료); ✅ `logx` 마스킹 구현(F21 — 완료); ✅ A2A SSE 명명 이벤트 + `sessionId`(F16 — 완료).
+3. **Tier 3(신뢰):** ✅ 실제 어댑터 통합 테스트 + 게이트/autogoal 커버리지; ✅ CI 커버리지 하한 강제; ✅ Homebrew tap; ✅ `lastHash` O(n) 성능 수정 + 스케일 벤치마크.
+4. **기능 작업:** ✅ 스크래치패드 연결(F20 — 완료); ✅ `strict_round_robin` / `last_writer_wins` 라우팅(F6 — 완료); ✅ cross-check ping-pong(F22 — 완료).

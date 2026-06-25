@@ -29,10 +29,10 @@ Every feature row cites the authoritative source file. Where a claim was spot-ve
 | F3 | Autonomous cycle + reference driver (`cycle run --once`) | ✅ | `internal/cli/cycle_run.go`, `internal/cycle` |
 | F4 | Adapter port (claude / kimi / fake) | ✅ | `internal/adapter` |
 | F5 | Preset system (YAML templates) | ✅ | `internal/preset` |
-| F6 | Turn routing | ◑ | `internal/router/router.go` |
+| F6 | Turn routing | ✅ | `internal/router/router.go` |
 | F7 | Token / turn / wall-clock budgets | ✅ | `internal/budget`, `internal/exit` |
 | F8 | Exit conditions | ◑ | `internal/exit/exit.go` |
-| F9 | Gate pipeline (preflight→audit→philosophy→polish→commit) | ✅ | `internal/cycle/gates/pipeline.go` |
+| F9 | Gate pipeline (preflight→audit→claim→philosophy→polish→commit) | ✅ | `internal/cycle/gates/pipeline.go` |
 | F10 | Anti-spin stuck breaker + lifetime ceiling | ✅ | `internal/cycle/stuck.go`, `internal/budget` |
 | F11 | Hash-chained append-only ledger (G4 audit) | ✅ | `pkg/contract/harness_ledger.go`, `internal/cycle/ledger.go` |
 | F12 | Merkle (RFC 9162) inclusion/consistency proofs | ✅ | `pkg/contract/merkle.go`, `internal/cli/cycle_verify.go` |
@@ -43,9 +43,9 @@ Every feature row cites the authoritative source file. Where a claim was spot-ve
 | F17 | MCP server (rally tools over SSE) | ✅ | `internal/broker/mcp.go` |
 | F18 | Auto-daemon spawn | ✅ | `internal/cli/broker_client.go` (`ensureBrokerClient`: squash + `rally new`) |
 | F19 | `doctor` diagnostics | ◑ | `internal/doctor/doctor.go` |
-| F20 | Shared scratchpad with compaction | ○ | `internal/scratch` |
+| F20 | Shared scratchpad with compaction | ✅ | `internal/scratch`, `internal/broker/broker.go`, `internal/adapter/prompt.go` |
 | F21 | Log-time secret redaction | ✅ | `internal/logx` (`Redact` + `RedactingHandler`) |
-| F22 | Cross-check ping-pong (intent-aware handoff, dry-round breaker, claim oracle) | ▷ | `docs/prd-cross-check-ping-pong.md` |
+| F22 | Cross-check ping-pong (intent-aware handoff, dry-round breaker, claim oracle) | ✅ | `docs/prd-cross-check-ping-pong.md`, `internal/broker/broker.go`, `internal/session/stuck.go`, `internal/cycle/gates/claim.go`, `internal/adapter/prompt.go` |
 
 The rest of the document specifies each in detail.
 
@@ -227,19 +227,22 @@ Both shipped presets also declare `scratch: { max_kb: 64, summarize_with: claude
 
 ---
 
-### F6 — Turn routing ◑
+### F6 — Turn routing ✅
 
 **Decision priority** (`internal/router/router.go`, `Next`):
-1. **Explicit handoff** — if the previous `TurnResponse.HandoffTo` names a valid role, route there.
-2. **Blocked escalation** — if `prev.SelfEval == "blocked"`, escalate to a `reviewer` role if one exists; else error.
-3. **Routing rule** — apply the preset strategy.
+1. **Blocked escalation** — if `prev.SelfEval == "blocked"`, escalate to a `reviewer` role if one exists; else error. This is a safety override and applies regardless of routing strategy.
+2. **Strategy-specific routing:**
+   - `round_robin` — cycles `(turn-1) mod len(roles)`. An explicit `handoff_to` naming a valid role overrides the cycle.
+   - `handoff_then_round_robin` — identical to `round_robin` in code; honors explicit handoffs.
+   - `strict_round_robin` — cycles `(turn-1) mod len(roles)` and **ignores** explicit `handoff_to`, so no single role can hold the baton indefinitely.
+   - `last_writer_wins` — keeps the same writer across consecutive turns (`(turn-1) mod len(roles)`) until a valid explicit `handoff_to` requests a change. This models "the last agent to touch the task keeps it until told otherwise."
 
-**Why ◑.** Only `round_robin` and `handoff_then_round_robin` are implemented. `strict_round_robin` and `last_writer_wins` are *accepted by the schema validator* but return `routing rule %q not supported in phase 1` at runtime. An implementer must either implement them or the validator should reject them until they exist.
+**Why ✅.** All four schema-valid routing strategies are implemented and covered by `internal/router/router_test.go`.
 
 **Acceptance criteria.**
-- AC-F6.1: With `round_robin`, role assignment cycles `(turn-1) mod len(roles)`.
-- AC-F6.2: A `handoff_to` naming a valid role overrides round-robin.
-- AC-F6.3 (gap): selecting `strict_round_robin` should not validate-then-fail-at-runtime.
+- AC-F6.1 ✅: With `round_robin`, role assignment cycles `(turn-1) mod len(roles)`.
+- AC-F6.2 ✅: A `handoff_to` naming a valid role overrides round-robin.
+- AC-F6.3 ✅: `strict_round_robin` ignores handoffs and never fails at runtime; `last_writer_wins` preserves the writer until a handoff is requested.
 
 ---
 
@@ -411,29 +414,60 @@ Unix domain socket at `~/.rallish/rallish.sock` (mode `0600`), preferred. The CL
 
 ---
 
-### F20 — Scratchpad ○ / F21 — Log redaction ✅
+### F20 — Shared scratchpad ✅
 
-- **F20 (declared-only):** `internal/scratch` (`Manager`, `Append`, compaction at 80% of `max_kb`) is imported by **zero** production code. Preset `scratch:` parses into `ScratchConfig` and `TurnRequest.ScratchPath` exists, but nothing populates or consumes them. Wiring it (manager per session + path injection + adapter consumption) is the work to make the feature real.
-- **F21 (✅ wired):** `internal/logx` now ships `Redact(string)` — a high-precision, value-shaped secret matcher (provider key prefixes `sk-ant-`/`sk-`/`ghp_`/`xox*`/`AKIA`/`AIza`, `Bearer <token>`, sensitive `KEY=value` assignments, and PEM private-key blocks) — and `RedactingHandler`, a `slog.Handler` middleware that runs every record's message and string/error attributes (recursing into groups and `With`-bound attrs) through `Redact`. `cmd/rallish/main.go` wraps the base handler once, so redaction is a single log-time boundary, not per-call-site scrubbing. The matchers are deliberately prefix/structure-anchored so ordinary prose ("the token bucket", "secret sauce") is never altered — a false negative is preferred over corrupting diagnostics. The prime leak vector (`"error", err` carrying adapter stderr) is covered.
+**What it is.** A per-session rolling scratchpad that carries context across turns. The broker owns the file; adapters receive the current contents in their prompt.
+
+**Wiring.** `internal/broker/broker.go` creates one `scratch.Manager` per session (`<sessionDir>/scratch.md`) using the preset's `scratch.max_kb`. On every `/sessions/{id}/next` it reads the file and injects both `ScratchPath` and `Scratch` into `TurnRequest`. On every `/sessions/{id}/turn` it appends `TurnResponse.Compact()` to the file. `internal/adapter/prompt.go` renders the scratch content as a read-only "Shared scratchpad" section before the TurnRequest JSON, and includes it in the slimmed `promptRequest` so the model can see it.
+
+**Compaction.** `scratch.Manager.compactIfNeeded` halves the file when it reaches 80% of `max_kb`, preserving newer content. The `scratch.summarize_with` field is parsed but **not yet consumed** — LLM-based summarization is deferred; halving is the current compaction strategy.
+
+**Why ✅.** The read → prompt → response → append loop is wired and covered by tests; `internal/scratch` is no longer a declared-only package.
 
 **Acceptance criteria.**
-- AC-F21.1: A provider key, bearer token, sensitive `KEY=value`, or PEM block in a log message or attribute is replaced with `[REDACTED]`.
-- AC-F21.2: Benign prose containing words like "token"/"secret"/"password" is left byte-for-byte unchanged.
-- AC-F21.3: A secret inside an `error` value logged as `"error", err` is redacted.
+- AC-F20.1 ✅: A session created with `scratch.max_kb` advertises a `ScratchPath` ending in `scratch.md` on the first `/next`.
+- AC-F20.2 ✅: Posting a turn appends a compact summary to the scratchpad file.
+- AC-F20.3 ✅: The next turn's `TurnRequest.Scratch` contains the previously appended content.
+- AC-F20.4 ✅: `BuildPrompt` includes scratch content in the generated prompt when non-empty.
+
+**Known gaps.**
+- `scratch.summarize_with` is parsed but not used for LLM compaction.
 
 ---
 
-### F22 — Cross-check ping-pong ▷ (planned)
+### F21 — Log redaction ✅
 
-**Status: specced, not built.** Full spec in `docs/prd-cross-check-ping-pong.md`. It adds, to the `squash`/`pair-review` path:
-- **P0′ intent-aware carryover** — `HandoffIntent` (`continue` / `cross_check`) on `TurnResponse`; the broker forwards it (carrier, not judge) and the adapter prompt builder selects framing so a reviewer inspects artifacts adversarially instead of echoing the executor's summary.
-- **P1′ loop-until-dry + stuck-breaker** — preset `dry_rounds_threshold` + `exit_when: [dry_rounds]`; a pure `SessionStuck` helper over `TurnRecord`s.
-- **P2′ verifiable discovery** — optional `Claims []Violation` with a reproducible `Check`; broker appends `claim_registered` ledger events (does not verify).
-- **P3′ external oracle anchor** — a `ClaimGate` runs `Check.Command`, compares to `Check.Expected`, and emits `claim_verified` / `claim_falsified`.
+**What it is.** `internal/logx` ships `Redact(string)` — a high-precision, value-shaped secret matcher (provider key prefixes `sk-ant-`/`sk-`/`ghp_`/`xox*`/`AKIA`/`AIza`, `Bearer <token>`, sensitive `KEY=value` assignments, and PEM private-key blocks) — and `RedactingHandler`, a `slog.Handler` middleware that runs every record's message and string/error attributes (recursing into groups and `With`-bound attrs) through `Redact`. `cmd/rallish/main.go` wraps the base handler once, so redaction is a single log-time boundary, not per-call-site scrubbing. The matchers are deliberately prefix/structure-anchored so ordinary prose ("the token bucket", "secret sauce") is never altered — a false negative is preferred over corrupting diagnostics. The prime leak vector (`"error", err` carrying adapter stderr) is covered.
 
-**Acceptance criteria** (from the PRD): executor→reviewer handoff produces `cross_check`; the reviewer prompt does not trust the executor summary; 3 dry rounds exit `dry_rounds`; a 6-turn ping-pong exits `stuck`; a passing claim emits `claim_verified`, a failing one `claim_falsified` and halts; `make check-all` passes.
+**Acceptance criteria.**
+- AC-F21.1 ✅: A provider key, bearer token, sensitive `KEY=value`, or PEM block in a log message or attribute is replaced with `[REDACTED]`.
+- AC-F21.2 ✅: Benign prose containing words like "token"/"secret"/"password" is left byte-for-byte unchanged.
+- AC-F21.3 ✅: A secret inside an `error` value logged as `"error", err` is redacted.
 
-**Guardrails to preserve:** no broker judgment, no LangGraph creep, preset policy not code policy, claims optional + ledger-bound, `continue` is the default. This feature is orthogonal to usability (audit places it after Tier 0–1).
+---
+
+### F22 — Cross-check ping-pong ✅
+
+**What it is.** Adds intent-aware handoff, dry-round termination, stuck-pattern detection, and verifiable claims to the preset session / cycle harness path. The broker remains a carrier; all policy is declared in presets.
+
+**P0′ intent-aware carryover.** `TurnResponse.HandoffIntent` (`continue` / `cross_check`) is forwarded by the broker into `TurnRequest.LastTurn.Intent`. `internal/adapter/prompt.go` selects prompt framing: `continue` treats the previous `Summary` as working state; `cross_check` tells the next role to read `Artifacts` and the original `Task` fresh and distrust the summary.
+
+**P1′ loop-until-dry + stuck-breaker.** Presets can declare `budget.dry_rounds_threshold` and `exit_when: [dry_rounds]`. The broker counts consecutive dry turns (no new artifacts, not done, no explicit `handoff_to`) and terminates when the threshold is reached. `exit_when: [stuck]` evaluates `internal/session.Stuck` over the session's `TurnRecord`s and halts on 6-turn no-progress, alternating-role ping-pong, or a repeated `(Summary, Artifacts)` fingerprint ≥4 times.
+
+**P2′ verifiable discovery.** `TurnResponse.Claims` is a slice of `contract.Violation`. Each violation may carry a `Check` with a reproducible shell command and expected substring. The broker forwards claims in `LastTurn`; in the cycle harness they accumulate in `CycleState.ViolationsFound`.
+
+**P3′ external oracle anchor.** `ClaimGate` runs after audit (and repo-local gates) in the canonical pipeline. For every claim with a `Check`, it executes the command and compares combined output against `Check.Expected`. Verified claims emit `claim_verified` ledger events; falsified claims emit `claim_falsified` and halt the cycle.
+
+**Preset opt-in.** `pair-review.yaml` now sets `budget.dry_rounds_threshold: 3` and `exit_when: [dry_rounds]` in addition to the previous conditions.
+
+**Acceptance criteria.**
+- AC-F22.1 ✅: A `TurnResponse` with `handoff_intent: cross_check` is forwarded into the next `TurnRequest.LastTurn.Intent`.
+- AC-F22.2 ✅: The adapter prompt for `cross_check` tells the role not to trust the previous summary and to inspect artifacts/task fresh.
+- AC-F22.3 ✅: Three consecutive dry rounds terminate the session with reason `dry rounds`.
+- AC-F22.4 ✅: A 6-turn alternating-role dry ping-pong terminates the session with a `ping-pong` reason.
+- AC-F22.5 ✅: A claim with a passing `Check` emits a `claim_verified` ledger event; a failing check emits `claim_falsified` and halts the cycle.
+
+**Guardrails preserved.** Broker does not judge quality; routing remains role-based; thresholds live in presets; claims are optional and ledger-bound; `continue` is the default when no intent is supplied.
 
 ---
 
@@ -453,6 +487,6 @@ These apply to *every* feature and double as design-review gates:
 Ordered by the audit's tiering (`docs/reports/2026-06-23-production-readiness-gaps.md`):
 
 1. **Tier 1 (first-run UX):** ✅ adapter auth preflight (G-F4 — done); ✅ `fake-demo` preset (G-F1 — done); ✅ `rally new` auto-spawn + typo-join fail-fast (G-F2 — done); ✅ honest install lead (README now leads with the verified curl / `go install` paths; `npx skills add` demoted to a caveated skills.sh alternative — done). **Tier 1 complete.**
-2. **Tier 2 (make harness claims true):** ✅ G6 hook wiring (F13 — done); ✅ wire Merkle via `cycle verify` (F12 — done); ✅ `logx` redaction (F21 — done); A2A SSE named events + `sessionId` (F16).
-3. **Tier 3 (trust):** real-adapter integration tests + gate/autogoal coverage (see `test-plan.md`); Homebrew tap.
-4. **Feature work:** cross-check ping-pong (F22); scratchpad wiring (F20); `strict_round_robin` / `last_writer_wins` routing (F6).
+2. **Tier 2 (make harness claims true):** ✅ G6 hook wiring (F13 — done); ✅ wire Merkle via `cycle verify` (F12 — done); ✅ `logx` redaction (F21 — done); ✅ A2A SSE named events + `sessionId` (F16 — done).
+3. **Tier 3 (trust):** ✅ real-adapter integration tests + gate/autogoal coverage; ✅ CI coverage-floor enforcement; ✅ Homebrew tap; ✅ `lastHash` O(n) perf fix + scaling benchmarks.
+4. **Feature work:** ✅ scratchpad wiring (F20 — done); ✅ `strict_round_robin` / `last_writer_wins` routing (F6 — done); ✅ cross-check ping-pong (F22 — done).
