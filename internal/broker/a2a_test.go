@@ -76,6 +76,7 @@ func TestA2A_TasksSend(t *testing.T) {
 	m, ok := result.Result["task"].(map[string]any)
 	require.True(t, ok)
 	require.NotEmpty(t, m["id"])
+	require.Equal(t, m["id"], m["sessionId"], "A2ATask.sessionId must equal task id")
 }
 
 func TestA2A_TasksSendMultipleParts(t *testing.T) {
@@ -382,8 +383,12 @@ func TestA2A_TasksSendSubscribeTerminal(t *testing.T) {
 
 	scanner := bufio.NewScanner(resp.Body)
 	var events []string
+	var eventTypes []string
 	for scanner.Scan() {
 		line := scanner.Text()
+		if strings.HasPrefix(line, "event: ") {
+			eventTypes = append(eventTypes, strings.TrimPrefix(line, "event: "))
+		}
 		if strings.HasPrefix(line, "data: ") {
 			events = append(events, strings.TrimPrefix(line, "data: "))
 		}
@@ -391,6 +396,8 @@ func TestA2A_TasksSendSubscribeTerminal(t *testing.T) {
 	_ = resp.Body.Close()
 	require.NoError(t, scanner.Err())
 	require.Len(t, events, 1)
+	require.Len(t, eventTypes, 1)
+	require.Equal(t, "TaskStatusUpdateEvent", eventTypes[0])
 
 	var evt contract.A2ATaskUpdateEvent
 	require.NoError(t, json.Unmarshal([]byte(events[0]), &evt))
@@ -574,4 +581,95 @@ func TestA2A_LegacyMethodAlias(t *testing.T) {
 	_ = resp.Body.Close()
 	require.Nil(t, result.Error, "legacy tasks/send alias must still dispatch")
 	require.NotNil(t, result.Result)
+}
+
+// TestA2A_TasksSendSubscribe_ArtifactEvent asserts that an A2A SSE update carrying
+// an artifact is emitted as a "TaskArtifactUpdateEvent" and that a status-only
+// update remains "TaskStatusUpdateEvent".
+func TestA2A_TasksSendSubscribe_ArtifactEvent(t *testing.T) {
+	dir := t.TempDir()
+	clock := &fakeClock{t: time.Now()}
+	store, err := session.NewStore(dir, clock)
+	require.NoError(t, err)
+	budgeter := budget.NewBudgeter(clock)
+	srv := NewServer(store, budgeter)
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	// Create a non-terminal task.
+	body := `{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"parts":[{"text":"hello"}]}}}`
+	resp, err := http.Post(ts.URL+"/a2a", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	var sendResult contract.JSONRPCResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&sendResult))
+	_ = resp.Body.Close()
+	taskID := sendResult.Result["task"].(map[string]any)["id"].(string)
+
+	// Subscribe with a long timeout so the handler stays alive until we close it.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	subBody := `{"jsonrpc":"2.0","id":2,"method":"SubscribeToTask","params":{"id":"` + taskID + `"}}`
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL+"/a2a", strings.NewReader(subBody))
+	require.NoError(t, err)
+
+	type sseResult struct {
+		eventTypes []string
+		events     []string
+		err        error
+	}
+	resCh := make(chan sseResult, 1)
+	go func() {
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			resCh <- sseResult{err: err}
+			return
+		}
+		defer func() { _ = resp.Body.Close() }()
+		scanner := bufio.NewScanner(resp.Body)
+		var eventTypes, events []string
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "event: ") {
+				eventTypes = append(eventTypes, strings.TrimPrefix(line, "event: "))
+			}
+			if strings.HasPrefix(line, "data: ") {
+				events = append(events, strings.TrimPrefix(line, "data: "))
+			}
+		}
+		resCh <- sseResult{eventTypes: eventTypes, events: events, err: scanner.Err()}
+	}()
+
+	// Give the handler time to register the subscriber.
+	time.Sleep(100 * time.Millisecond)
+	srv.mu.Lock()
+	state := srv.sessionStates[taskID]
+	require.NotEmpty(t, state.a2aSubs, "subscriber channel must be registered")
+	ch := state.a2aSubs[0]
+	srv.mu.Unlock()
+
+	// Push an artifact-bearing final event through the broker's private channel.
+	ch <- contract.A2ATaskUpdateEvent{
+		ID: taskID,
+		Artifact: &contract.A2AArtifact{
+			Name:  "test-artifact",
+			Parts: []contract.A2APart{{Kind: "text", Text: "artifact body"}},
+		},
+		Final: true,
+	}
+
+	res := <-resCh
+	require.NoError(t, res.err)
+	require.GreaterOrEqual(t, len(res.events), 2, "expected initial status event plus artifact event")
+	require.GreaterOrEqual(t, len(res.eventTypes), 2)
+	require.Equal(t, "TaskStatusUpdateEvent", res.eventTypes[0])
+	require.Equal(t, "TaskArtifactUpdateEvent", res.eventTypes[len(res.eventTypes)-1])
+
+	var last contract.A2ATaskUpdateEvent
+	require.NoError(t, json.Unmarshal([]byte(res.events[len(res.events)-1]), &last))
+	require.Equal(t, taskID, last.ID)
+	require.NotNil(t, last.Artifact)
+	require.Equal(t, "test-artifact", last.Artifact.Name)
+	require.True(t, last.Final)
 }

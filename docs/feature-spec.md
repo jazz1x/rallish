@@ -39,7 +39,7 @@ Every feature row cites the authoritative source file. Where a claim was spot-ve
 | F13 | Action-gate (G6) decision + recording + PreToolUse hook | ✅ | `pkg/contract/action_gate.go`, `internal/cli/gate.go`, `internal/skills/rallish/scripts/gate-pretooluse.sh` |
 | F14 | Secret containment classifier | ◑ | `pkg/contract/tooluse_gate.go` |
 | F15 | Unix-socket IPC + TCP loopback fallback | ✅ | `internal/ipc/socket.go`, `internal/cli/broker_client.go` |
-| F16 | A2A v1.0 wire shape (agent-card, JSON-RPC, SSE) | ◑ | `internal/broker/a2a.go` |
+| F16 | A2A v1.0 wire shape (agent-card, JSON-RPC, SSE) | ✅ | `internal/broker/a2a.go` |
 | F17 | MCP server (rally tools over SSE) | ✅ | `internal/broker/mcp.go` |
 | F18 | Auto-daemon spawn | ✅ | `internal/cli/broker_client.go` (`ensureBrokerClient`: squash + `rally new`) |
 | F19 | `doctor` diagnostics | ◑ | `internal/doctor/doctor.go` |
@@ -389,18 +389,18 @@ Unix domain socket at `~/.rallish/rallish.sock` (mode `0600`), preferred. The CL
 
 ---
 
-### F16 — A2A v1.0 wire shape ◑ / F17 — MCP server ✅
+### F16 — A2A v1.0 wire shape ✅ / F17 — MCP server ✅
 
 **A2A.** Serves `GET /.well-known/agent-card.json` (plus legacy `agent.json`) returning an `AgentCard` with `protocolVersion`, capabilities (`streaming: true`), and skills. JSON-RPC intake is strict (`DisallowUnknownFields`). Methods: send-message, subscribe-to-task, get-task, cancel-task (plus legacy `tasks/*` aliases).
 
-**Why ◑.** The A2A SSE path emits **only `data:` lines** (`internal/broker/a2a.go`), with no named `event:` type lines, and `A2ATask.sessionId` is not populated. A stock A2A v1.0 client that discriminates on event type fails today. The **MCP** path (`internal/broker/mcp.go`) already emits named `event:` lines (`endpoint`, `message`) — mirror that on the A2A path to reach conformance (audit Tier 2, item 12). Signed cards and mutual auth are deferred.
+**SSE events.** The A2A SSE path now emits named `event:` lines mirroring the MCP path: status-only updates are `event: TaskStatusUpdateEvent` and artifact-bearing updates are `event: TaskArtifactUpdateEvent` (`internal/broker/a2a.go`). `A2ATask.sessionId` is populated with the session id in `mapSessionToA2ATask`. Signed cards and mutual auth remain deferred.
 
 **MCP (F17, ✅).** `GET /mcp/sse` + `POST /mcp/message?session_id=…`, MCP 2025-03-26 handshake, rally tools (`rally_create/join/done/status/interrupt`). `rally mcp-agent` is a bundled one-shot client.
 
 **Acceptance criteria.**
 - AC-F16.1: `GET /.well-known/agent-card.json` returns a card with a real `protocolVersion`.
 - AC-F16.2: JSON-RPC with unknown fields is rejected.
-- AC-F16.3 (gap): A2A SSE emits named `event:` lines and populates `sessionId`.
+- AC-F16.3 ✅: A2A SSE emits named `event:` lines and populates `sessionId`.
 
 ---
 

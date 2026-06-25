@@ -39,7 +39,7 @@
 | F13 | 액션게이트(G6) 결정 + 기록 + PreToolUse 훅 | ✅ | `pkg/contract/action_gate.go`, `internal/cli/gate.go`, `internal/skills/rallish/scripts/gate-pretooluse.sh` |
 | F14 | 시크릿 격리 분류기 | ◑ | `pkg/contract/tooluse_gate.go` |
 | F15 | Unix 소켓 IPC + TCP 루프백 폴백 | ✅ | `internal/ipc/socket.go`, `internal/cli/broker_client.go` |
-| F16 | A2A v1.0 와이어 형태 (agent-card, JSON-RPC, SSE) | ◑ | `internal/broker/a2a.go` |
+| F16 | A2A v1.0 와이어 형태 (agent-card, JSON-RPC, SSE) | ✅ | `internal/broker/a2a.go` |
 | F17 | MCP 서버 (rally 도구를 SSE로) | ✅ | `internal/broker/mcp.go` |
 | F18 | 데몬 자동 기동 | ✅ | `internal/cli/broker_client.go` (`ensureBrokerClient`: squash + `rally new`) |
 | F19 | `doctor` 진단 | ◑ | `internal/doctor/doctor.go` |
@@ -388,18 +388,18 @@ scratch:
 
 ---
 
-### F16 — A2A v1.0 와이어 형태 ◑ / F17 — MCP 서버 ✅
+### F16 — A2A v1.0 와이어 형태 ✅ / F17 — MCP 서버 ✅
 
 **A2A.** `GET /.well-known/agent-card.json`(+ 레거시 `agent.json`) 제공, `protocolVersion`·역량(`streaming: true`)·스킬을 담은 `AgentCard` 반환. JSON-RPC 인테이크는 엄격(`DisallowUnknownFields`). 메서드: send-message, subscribe-to-task, get-task, cancel-task(+ 레거시 `tasks/*` 별칭).
 
-**왜 ◑인가.** A2A SSE 경로는 **`data:` 줄만** 방출하고(`internal/broker/a2a.go`) 명명된 `event:` 타입 줄이 없으며, `A2ATask.sessionId`가 채워지지 않는다. 이벤트 타입으로 분기하는 표준 A2A v1.0 클라이언트는 오늘 실패한다. **MCP** 경로(`internal/broker/mcp.go`)는 이미 명명된 `event:` 줄(`endpoint`, `message`)을 방출하므로 — A2A 경로에 그것을 미러하면 준수에 도달(감사 Tier 2, 12번). 서명 카드와 상호 인증은 보류.
+**SSE 이벤트.** A2A SSE 경로는 이제 MCP 경로를 미러링하는 명명된 `event:` 줄을 방출한다: 상태 업데이트는 `event: TaskStatusUpdateEvent`, 아티팩트를 포함한 업데이트는 `event: TaskArtifactUpdateEvent`(`internal/broker/a2a.go`). `mapSessionToA2ATask`에서 `A2ATask.sessionId`에 세션 id를 채운다. 서명 카드와 상호 인증은 계속 보류.
 
 **MCP (F17, ✅).** `GET /mcp/sse` + `POST /mcp/message?session_id=…`, MCP 2025-03-26 핸드셰이크, rally 도구(`rally_create/join/done/status/interrupt`). `rally mcp-agent`는 번들된 원샷 클라이언트.
 
 **수용 기준.**
 - AC-F16.1: `GET /.well-known/agent-card.json`은 실제 `protocolVersion`을 가진 카드 반환.
 - AC-F16.2: 미지 필드가 있는 JSON-RPC는 거부.
-- AC-F16.3(갭): A2A SSE가 명명된 `event:` 줄을 방출하고 `sessionId`를 채움.
+- AC-F16.3 ✅: A2A SSE가 명명된 `event:` 줄을 방출하고 `sessionId`를 채움.
 
 ---
 

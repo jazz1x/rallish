@@ -295,11 +295,7 @@ func (s *Server) handleA2ASendSubscribe(w http.ResponseWriter, r *http.Request, 
 			},
 			Final: true,
 		}
-		data, _ := json.Marshal(event)
-		_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
-		if ok {
-			flusher.Flush()
-		}
+		_ = writeA2ASSEEvent(w, flusher, event)
 		return
 	}
 
@@ -325,11 +321,7 @@ func (s *Server) handleA2ASendSubscribe(w http.ResponseWriter, r *http.Request, 
 		},
 		Final: state.terminal,
 	}
-	data, _ := json.Marshal(event)
-	_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
-	if ok {
-		flusher.Flush()
-	}
+	_ = writeA2ASSEEvent(w, flusher, event)
 
 	for {
 		select {
@@ -337,11 +329,7 @@ func (s *Server) handleA2ASendSubscribe(w http.ResponseWriter, r *http.Request, 
 			if !more {
 				return
 			}
-			data, _ := json.Marshal(evt)
-			_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
-			if ok {
-				flusher.Flush()
-			}
+			_ = writeA2ASSEEvent(w, flusher, evt)
 			if evt.Final {
 				return
 			}
@@ -395,9 +383,26 @@ func textFromParts(parts []contract.A2APart) (string, bool) {
 
 func mapSessionToA2ATask(sess session.Session) contract.A2ATask {
 	return contract.A2ATask{
-		ID:     sess.ID,
-		Status: contract.A2ATaskStatus{State: contract.TaskStateSubmitted},
+		ID:        sess.ID,
+		SessionID: sess.ID,
+		Status:    contract.A2ATaskStatus{State: contract.TaskStateSubmitted},
 	}
+}
+
+// writeA2ASSEEvent emits a named Server-Sent Event for an A2A task update.
+// Status-only updates use "TaskStatusUpdateEvent"; updates carrying an artifact
+// use "TaskArtifactUpdateEvent", matching the A2A v1.0 event-type contract.
+func writeA2ASSEEvent(w http.ResponseWriter, flusher http.Flusher, evt contract.A2ATaskUpdateEvent) error {
+	eventName := "TaskStatusUpdateEvent"
+	if evt.Artifact != nil {
+		eventName = "TaskArtifactUpdateEvent"
+	}
+	data, _ := json.Marshal(evt)
+	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventName, data); err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
 }
 
 func terminalReasonToTaskState(terminal bool, reason string) contract.TaskState {
