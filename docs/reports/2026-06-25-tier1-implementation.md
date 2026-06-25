@@ -34,8 +34,37 @@ kept true.
    which the repo can no longer refresh. Either re-publish/claim on skills.sh or
    keep leading with the repo-controlled curl/go paths (done).
 
-## Next (Tier 2 — make the harness claims true)
+## Tier 2 — make the harness claims true: 3/4 DONE
 
-Per handoff §work-plan, in order: G6 action-gate enforcement (F13, Opus for the
-threat-model + hook contract), Merkle wiring (F12), `logx` redaction (F21, Opus
-for the boundary), A2A SSE named events + `sessionId` (F16).
+| Item | Feature | Commit | Verification |
+|------|---------|--------|--------------|
+| 5 | G6 PreToolUse hook enforcement | `0e86dca` | hook script dogfooded: `rm -rf /`→deny, `git reset --hard`→ask, `ls`→proceed; shellcheck-clean |
+| 6 | `cycle verify` wires RFC 9162 Merkle | `be3d989` | unit tests over a real chain: intact+proofs pass, tamper→exit 15 |
+| 7 | `logx` log-time secret redaction | `6f14144` | slog middleware; positive + error-attr + false-positive-guard tests |
+| 8 | A2A SSE named events + `sessionId` (F16) | — | **NOT STARTED** |
+
+## Next — resume here
+
+**Immediate: F16 (A2A SSE conformance)** — `internal/broker/a2a.go` has 3 `data:`-only
+SSE emit sites (lines ~299, 329, 341). Add named `event:` lines (`TaskStatusUpdateEvent`,
+or `TaskArtifactUpdateEvent` when `Artifact != nil`) mirroring the MCP path's
+`writeSSEMessage` (`internal/broker/mcp.go:149`, `event: message\ndata: …`). Also
+populate `A2ATask.sessionId` in `mapSessionToA2ATask` (`a2a.go:396` — set
+`SessionID` = the session id). Flip F16 ◑→✅ + AC-F16.3 in feature-spec en+ko.
+
+**Then Tier 3 + feature work** (handoff §work-plan items 9–14): real-adapter
+integration test + gate/autogoal coverage (test-plan §6); CI coverage-floor; Homebrew
+tap; `lastHash` O(n) perf fix + scaling benchmarks (performance-spec §4.2/§7);
+cross-check ping-pong F22 (PRD); scratchpad wiring F20 + `strict_round_robin`/
+`last_writer_wins` routing F6.
+
+## How to resume in a new session
+
+1. Branch `fix/tier0-usability`, working tree clean; 8 commits land Tier 1 (F4/F1/F2/
+   F-install) + Tier 2 (F13/F12/F21) on top of `0e2a720`.
+2. Build env: Go is Homebrew-only — `export PATH="/opt/homebrew/bin:$PATH:$(go env GOPATH)/bin"`
+   before any `go`/`golangci-lint`. Gate: `bash scripts/check-all.sh`.
+3. Per-item loop (handoff §): read feature-spec entry → build (Sonnet) → test →
+   decorrelated review → flip maturity tag (en+ko) + manual in the SAME change → commit → next.
+4. Spec SSOT = `docs/feature-spec.md` (maturity tags reflect reality as of this session).
+   Locale rule: every spec/manual/README change mirrors into `.ko` (and README `.jp`).
