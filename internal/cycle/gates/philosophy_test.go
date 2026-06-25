@@ -1,9 +1,16 @@
 package gates
 
 import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/jazz1x/rallish/internal/cycle"
+	"github.com/jazz1x/rallish/pkg/contract"
 )
 
 // The PhilosophyGate is the harness's own verification surface — "the harness is
@@ -322,5 +329,106 @@ func TestForEachAddedLineTracksFileAndLine(t *testing.T) {
 	}
 	if len(boundaries) != 2 || boundaries[0] != "alpha.go" || boundaries[1] != "beta.go" {
 		t.Errorf("file boundaries = %v, want [alpha.go beta.go]", boundaries)
+	}
+}
+
+// TestScanSRPDetectsLongFunctions feeds a diff with a function spanning >60 added
+// lines and asserts the SRP scanner flags it.
+func TestScanSRPDetectsLongFunctions(t *testing.T) {
+	var lines []string
+	lines = append(lines, "diff --git a/main.go b/main.go")
+	lines = append(lines, "--- a/main.go")
+	lines = append(lines, "+++ b/main.go")
+	lines = append(lines, "@@ -1,0 +1,67 @@")
+	lines = append(lines, "+func longFunc() {")
+	for i := 0; i < 65; i++ {
+		lines = append(lines, "+	x++")
+	}
+	lines = append(lines, "+}")
+	// scanSRP checks length only when it sees the next function, so add one.
+	lines = append(lines, "+func shortFunc() {}")
+	diff := strings.Join(lines, "\n")
+	vs := scanSRP(diff)
+	if len(vs) == 0 {
+		t.Fatalf("expected SRP violation for long function, got none")
+	}
+	if vs[0].Type != "srp" {
+		t.Fatalf("violation type = %q, want srp", vs[0].Type)
+	}
+}
+
+// TestPhilosophyGateDetectsViolations runs PhilosophyGate end-to-end against a real
+// temp git repo with seeded ROP and hardcoded-version violations.
+func TestPhilosophyGateDetectsViolations(t *testing.T) {
+	dir := setupGitRepo(t)
+	runGit(t, dir, "checkout", "-b", "feat-phil")
+
+	baselineOut, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output() // #nosec G204 -- test helper reading baseline SHA in a temp repo
+	if err != nil {
+		t.Fatalf("git rev-parse: %v", err)
+	}
+	baseline := strings.TrimSpace(string(baselineOut))
+
+	code := `package main
+func f(x int) int {
+	if x > 0 {
+		return 1
+	} else {
+		return 2
+	}
+}
+var version = "1.2.3"
+`
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(code), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGit(t, dir, "add", "main.go")
+	runGit(t, dir, "commit", "-m", "add code")
+
+	state := cycle.State{CycleState: contract.CycleState{ID: "cyc_phil", NextCycleGoal: "feat: test", BaselineSHA: baseline}}
+	result, next := PhilosophyGate{}.Run(context.Background(), state)
+	warning, ok := result.(contract.GateWarning)
+	if !ok {
+		t.Fatalf("result = %T, want GateWarning: %#v", result, result.Report())
+	}
+	if len(warning.R.Violations) == 0 {
+		t.Fatalf("expected violations, got none")
+	}
+	if len(next.ViolationsFound) == 0 {
+		t.Fatalf("expected state.ViolationsFound to be set")
+	}
+}
+
+// TestPhilosophyGateFailsWhenViolationsGrow asserts that philosophy violations become
+// a hard failure when the count strictly exceeds the prior cycle's violation count.
+func TestPhilosophyGateFailsWhenViolationsGrow(t *testing.T) {
+	dir := setupGitRepo(t)
+	runGit(t, dir, "checkout", "-b", "feat-phil2")
+
+	baselineOut, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output() // #nosec G204 -- test helper reading baseline SHA in a temp repo
+	if err != nil {
+		t.Fatalf("git rev-parse: %v", err)
+	}
+	baseline := strings.TrimSpace(string(baselineOut))
+
+	code := `package main
+var version = "1.2.3"
+var apiVersion = "4.5.6"
+`
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(code), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGit(t, dir, "add", "main.go")
+	runGit(t, dir, "commit", "-m", "add code")
+
+	state := cycle.State{CycleState: contract.CycleState{ID: "cyc_phil2", NextCycleGoal: "feat: test", BaselineSHA: baseline}}
+	state.ViolationsFound = []contract.Violation{{Type: "hardcoded-version", Message: "existing"}}
+	result, _ := PhilosophyGate{}.Run(context.Background(), state)
+	failure, ok := result.(contract.GateFailure)
+	if !ok {
+		t.Fatalf("result = %T, want GateFailure: %#v", result, result.Report())
+	}
+	if failure.Reason != contract.HaltSelfAuditViolation {
+		t.Fatalf("reason = %q, want %q", failure.Reason, contract.HaltSelfAuditViolation)
 	}
 }

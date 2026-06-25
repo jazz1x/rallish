@@ -98,3 +98,26 @@ func TestAuditGateDefaultUnaffectedByNilOverride(t *testing.T) {
 		}
 	}
 }
+
+// TestLocalAuditGateRunsMakeCheck verifies that LocalAuditGate runs `make check`.
+// In a test environment without a Makefile the command fails; the invariant is
+// that the stderr references the expected command.
+func TestLocalAuditGateRunsMakeCheck(t *testing.T) {
+	state := newAuditState(t, "cyc_local_audit")
+
+	result, _ := LocalAuditGate{}.Run(context.Background(), state)
+	if _, ok := result.(contract.GateSuccess); ok {
+		// If a Makefile happens to exist, success is also acceptable.
+		return
+	}
+	failure, ok := result.(contract.GateFailure)
+	if !ok {
+		t.Fatalf("result = %T, want GateFailure", result)
+	}
+	if failure.Reason != contract.HaltGateFailure {
+		t.Fatalf("reason = %q, want %q", failure.Reason, contract.HaltGateFailure)
+	}
+	if !strings.Contains(result.Report().Stderr, "make check") {
+		t.Fatalf("stderr should mention 'make check', got: %q", result.Report().Stderr)
+	}
+}

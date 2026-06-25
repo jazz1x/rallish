@@ -127,7 +127,7 @@ A change is done when:
 
 - [ ] Every ✅ feature in `feature-spec.md` has the tests listed in §5.
 - [ ] At least one gated real-adapter integration test exists and is documented (§6.1).
-- [ ] Gate-pipeline packages reach their §4 floor (§6.2).
+- [x] Gate-pipeline packages reach their §4 floor (§6.2).
 - [ ] CI enforces the per-package coverage floor (§6.3).
 - [ ] Parser fuzz targets exist for `ParseLastJSONBlock` and JSON-RPC intake.
 - [ ] Pending/expected-fail tests exist for the named gaps (A2A SSE events, G6 hook enforcement, routing validate-then-fail) so closing each gap turns a red test green.
