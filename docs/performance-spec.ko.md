@@ -72,7 +72,7 @@ rallish는 **로컬 단일 호스트 브로커**이지 분산 서비스가 아�
 
 ### 4.1 기존 벤치마크(베이스라인)
 
-오늘 5개 마이크로 벤치마크 존재:
+오늘 6개 마이크로 벤치마크 존재:
 
 | 벤치마크 | 파일 | 커버 |
 |----------|------|------|
@@ -81,6 +81,7 @@ rallish는 **로컬 단일 호스트 브로커**이지 분산 서비스가 아�
 | `BenchmarkBudgeter_Remaining` | `internal/budget/budget_test.go` | 예산 산술 |
 | `BenchmarkStoreAppend` | `internal/session/session_test.go` | 세션 레저 추가 |
 | `BenchmarkTurnResponse_Compact` | `pkg/contract/types_test.go` | 턴 응답 직렬화 |
+| `BenchmarkLedgerAppend/size=*` | `internal/cycle/ledger_test.go` | 레저 추가 + tail-hash 스케일링 |
 
 이는 **바닥**이다. 직렬화·추가는 커버하나 브로커·게이트·라우터·stuck 감지기·엔드투엔드 턴 루프는 미측정.
 
@@ -93,7 +94,6 @@ rallish는 **로컬 단일 호스트 브로커**이지 분산 서비스가 아�
 - `BenchmarkParseLastJSONBlock` — 전형 출력, 후행 노이즈 출력, 균형중괄호 폴백 경로.
 - `BenchmarkChainHash` / `BenchmarkVerifyChain` — 단일 항목 및 항목당 분할상환.
 - `BenchmarkStuck/ledger=10,100,1000,10000` — **핵심 스케일링 가드**: 레저가 커져도 비용이 평탄 유지(윈도우 한정 증명).
-- `BenchmarkLedgerAppend/size=10,100,1000,10000` — **핵심 쓰기 스케일링 가드**: 추가 비용(`lastHash` 포함)이 파일 크기에 따라 증가하면 안 됨.
 
 **게이트 파이프라인:**
 - `BenchmarkStandardPipeline_NoShell` — 셸 게이트를 스텁한 파이프라인 오버헤드(`go test`/`make check-all`에서 rallish 자체 비용 분리).
@@ -143,7 +143,7 @@ rallish는 **로컬 단일 호스트 브로커**이지 분산 서비스가 아�
 
 ## 7. 알려진 성능 리스크(코드 리뷰에서)
 
-- **`LedgerFileSync.lastHash`가 파일을 재독할 수 있음.** Append는 마지막 레저 줄에서 `prev_hash`를 계산; 매 추가마다 전체 파일을 순회하면 쓰기 비용이 턴당 O(n), 세션당 O(n²). **조치:** 확인하고, 그렇다면 열린 레저별로 tail 해시를 메모리에 캐시. 최우선 성능 항목이며 `BenchmarkLedgerAppend/size=*`가 이를 잡도록 설계됨.
+- ✅ **`LedgerFileSync.lastHash` 재독이 수정됨.** Append가 이전에는 꼬리 해시를 찾기 위해 전체 파일을 순회해 쓰기 비용이 턴당 O(n), 세션당 O(n²)였다. 이제 절대 경로별 프로세스 내 `ledgerLock`(`internal/cycle/ledger.go`)에 tail 해시를 캐시하며, `BenchmarkLedgerAppend/size=*`는 레저 크기에 따른 평탄 비용을 보여준다.
 - **`forEachLedgerLine`이 무경계 `bufio.Reader` 사용.** 올바름(대형 게이트 리포트에 64 KiB `Scanner` 벽돌화 회피)이나 단일 병적 항목이 메모리를 튀게 할 수 있음. 항목 크기 한정 또는 가정 문서화.
 - **`git diff`에 대한 Philosophy 게이트 regex.** 비용이 diff 크기에 비례; 단일 사이클의 대형 diff가 느릴 수 있음. 대형 diff에서 벤치마크; diff 크기 캡 검토.
 - **`ParseLastJSONBlock` 폴백**이 출력 전체에서 균형 객체를 스캔. 병적 어댑터 출력(거대 비-JSON 텍스트)은 이를 O(output)으로 만듦. 스캔 윈도우 한정.
@@ -155,4 +155,4 @@ rallish는 **로컬 단일 호스트 브로커**이지 분산 서비스가 아�
 - [ ] `BenchmarkStuck/*`·`BenchmarkLedgerAppend/*`이 레저가 커져도 **평탄**한 턴당 비용을 입증(또는 퇴행 수정).
 - [ ] `BenchmarkSquashLoop_Fake`이 §3.1 집계 예산 내 턴당 브로커 오버헤드 보고.
 - [ ] 참조 벤치마크 보고(§6 필드 기입)가 `docs/reports/` 아래 커밋되고 릴리스마다 갱신.
-- [ ] `lastHash` O(n) 리스크(§7)가 해결 확인 또는 허용 가능으로 문서화.
+- [x] `lastHash` O(n) 리스크(§7)가 해결 확인 또는 허용 가능으로 문서화.

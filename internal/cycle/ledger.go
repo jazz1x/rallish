@@ -10,10 +10,11 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/jazz1x/rallish/internal/safepath"
 	"github.com/jazz1x/rallish/pkg/contract"
 )
 
-// ledgerLocks serializes the read-modify-write of the hash chain PER LEDGER FILE
+// ledgerLock serializes the read-modify-write of the hash chain PER LEDGER FILE
 // (keyed by absolute path), not per LedgerFileSync instance. The broker creates a
 // fresh LedgerFileSync on every appendLedger call, and an async orchestrate
 // goroutine can race a step handler writing the SAME cycle ledger; an
@@ -22,26 +23,47 @@ import (
 // the chain (VerifyChain then fails). A process-wide registry keyed by path is
 // the in-process serialization point for a given ledger.
 //
+// It also caches the tail hash so appending does not re-scan the whole file
+// (the `lastHash` O(n) risk in performance-spec.md §7).
+//
 // Scope and lifetime (intentional): the guarantee is IN-PROCESS only. The
 // registry holds one entry per distinct ledger path for the lifetime of the
 // process and never reclaims entries — a halted cycle may still be appended to
 // (revival re-reads/writes the same path), so there is no point at which a given
 // path is provably append-free and safe to Delete. Entries are tiny (one path
-// string + a *sync.Mutex) and cycle creation is low-frequency, so the resulting
-// growth is bounded by the number of cycles a daemon ever runs (kilobytes over a
-// long lifetime), not a hot path. Cross-process serialization is NOT provided:
-// an in-memory mutex cannot coordinate a daemon and a separate `cycle run --once`
-// writing the same ledger — that relies on single-active-writer-per-cycle across
-// processes, and would need an OS file lock (flock) on the path if ever required.
-var ledgerLocks sync.Map // map[string]*sync.Mutex
+// string + a *sync.Mutex + a hash string) and cycle creation is low-frequency,
+// so the resulting growth is bounded by the number of cycles a daemon ever runs
+// (kilobytes over a long lifetime), not a hot path. Cross-process serialization
+// is NOT provided: an in-memory mutex cannot coordinate a daemon and a separate
+// `cycle run --once` writing the same ledger — that relies on
+// single-active-writer-per-cycle across processes, and would need an OS file
+// lock (flock) on the path if ever required.
+type ledgerLock struct {
+	mu       sync.Mutex
+	lastHash string
+}
 
-func lockForLedger(path string) *sync.Mutex {
-	abs, err := filepath.Abs(path)
+var ledgerLocks sync.Map // map[string]*ledgerLock
+
+func lockForLedger(path string) (*ledgerLock, error) {
+	abs, err := safepath.Clean(path)
 	if err != nil {
 		abs = path // best-effort key; a relative path still locks consistently within a process
 	}
-	m, _ := ledgerLocks.LoadOrStore(abs, &sync.Mutex{})
-	return m.(*sync.Mutex)
+	if v, ok := ledgerLocks.Load(abs); ok {
+		return v.(*ledgerLock), nil
+	}
+	state := &ledgerLock{lastHash: contract.LedgerGenesisHash}
+	last, err := readLastHash(abs)
+	if err != nil {
+		return nil, err
+	}
+	state.lastHash = last
+	v, loaded := ledgerLocks.LoadOrStore(abs, state)
+	if loaded {
+		return v.(*ledgerLock), nil
+	}
+	return state, nil
 }
 
 // LedgerFileSync persists append-only harness ledger events as JSONL.
@@ -63,19 +85,19 @@ func NewLedgerFileSync(path string) *LedgerFileSync {
 func (s *LedgerFileSync) Append(entry contract.HarnessLedgerEntry) error {
 	// Serialize the whole read-modify-write against any other writer of the SAME
 	// ledger file so prev_hash → hash → append is atomic and the chain cannot fork.
-	lock := lockForLedger(s.path)
-	lock.Lock()
-	defer lock.Unlock()
+	lock, err := lockForLedger(s.path)
+	if err != nil {
+		return err
+	}
+	lock.mu.Lock()
+	defer lock.mu.Unlock()
 
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("mkdir ledger: %w", err)
 	}
 
-	prevHash, err := s.lastHash()
-	if err != nil {
-		return err
-	}
+	prevHash := lock.lastHash
 	entry.PrevHash = prevHash
 	hash, err := contract.ChainHash(entry, prevHash)
 	if err != nil {
@@ -95,14 +117,19 @@ func (s *LedgerFileSync) Append(entry contract.HarnessLedgerEntry) error {
 	if _, err := f.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("write ledger entry: %w", err)
 	}
+	lock.lastHash = hash
 	return nil
 }
 
-// lastHash returns the Hash of the final entry on disk, or LedgerGenesisHash
-// when the ledger does not exist or is empty. It is the predecessor link for the
-// next appended entry.
-func (s *LedgerFileSync) lastHash() (string, error) {
-	f, err := os.Open(s.path)
+// readLastHash returns the Hash of the final entry in the file at path, or
+// LedgerGenesisHash when the ledger does not exist or is empty. It is used once
+// per ledger path to initialize the process-wide tail-hash cache.
+func readLastHash(path string) (string, error) {
+	cleanPath, err := safepath.Clean(path)
+	if err != nil {
+		return "", fmt.Errorf("clean ledger path: %w", err)
+	}
+	f, err := os.Open(cleanPath) // #nosec G304 -- path is cleaned by safepath.Clean
 	if err != nil {
 		if os.IsNotExist(err) {
 			return contract.LedgerGenesisHash, nil

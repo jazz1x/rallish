@@ -72,7 +72,7 @@ Targets are **order-of-magnitude budgets** on the reference environment (§6), n
 
 ### 4.1 Existing benchmarks (baseline)
 
-Five micro-benchmarks exist today:
+Six micro-benchmarks exist today:
 
 | Benchmark | File | Covers |
 |-----------|------|--------|
@@ -81,6 +81,7 @@ Five micro-benchmarks exist today:
 | `BenchmarkBudgeter_Remaining` | `internal/budget/budget_test.go` | budget arithmetic |
 | `BenchmarkStoreAppend` | `internal/session/session_test.go` | session ledger append |
 | `BenchmarkTurnResponse_Compact` | `pkg/contract/types_test.go` | turn response serialization |
+| `BenchmarkLedgerAppend/size=*` | `internal/cycle/ledger_test.go` | ledger append + tail-hash scaling |
 
 These are the **floor**. They cover serialization and append but leave the broker, gates, router, stuck detector, and end-to-end turn loop unmeasured.
 
@@ -93,7 +94,6 @@ Grouped by what they protect. Each should use `b.ReportAllocs()` and, where rele
 - `BenchmarkParseLastJSONBlock` — typical output, output with trailing noise, fallback balanced-brace path.
 - `BenchmarkChainHash` / `BenchmarkVerifyChain` — single entry and per-entry amortized.
 - `BenchmarkStuck/ledger=10,100,1000,10000` — **the key scaling guard**: cost must stay flat as the ledger grows (proves the window bound).
-- `BenchmarkLedgerAppend/size=10,100,1000,10000` — **the key write-scaling guard**: append cost (incl. `lastHash`) must not grow with file size.
 
 **Gate pipeline:**
 - `BenchmarkStandardPipeline_NoShell` — pipeline overhead with stubbed shell gates (isolates rallish's own cost from `go test` / `make check-all`).
@@ -143,7 +143,7 @@ For numbers to be comparable across runs and contributors, record the environmen
 
 ## 7. Known performance risks (from code review)
 
-- **`LedgerFileSync.lastHash` may re-read the file.** Append computes `prev_hash` from the last ledger line; if that walks the whole file each append, write cost is O(n) per turn and O(n²) per session. **Action:** verify and, if so, cache the tail hash in memory per open ledger. This is the highest-priority perf item; `BenchmarkLedgerAppend/size=*` is designed to catch it.
+- ✅ **`LedgerFileSync.lastHash` re-read is fixed.** Append previously walked the whole file to find the tail hash, making write cost O(n) per turn and O(n²) per session. It now caches the tail hash in a process-wide `ledgerLock` (`internal/cycle/ledger.go`) keyed by absolute ledger path; `BenchmarkLedgerAppend/size=*` demonstrates flat cost across ledger sizes.
 - **`forEachLedgerLine` uses an unbounded `bufio.Reader`.** Correct (avoids the 64 KiB `Scanner` brick on large gate reports) but means a single pathological entry can spike memory. Bound entry size or document the assumption.
 - **Philosophy gate regex over `git diff`.** Cost scales with diff size; large diffs in a single cycle could be slow. Benchmark at large diffs; consider a diff-size cap.
 - **`ParseLastJSONBlock` fallback** scans for a balanced object across the whole output. Pathological adapter output (huge non-JSON text) makes this O(output). Bound the scanned window.
@@ -155,4 +155,4 @@ For numbers to be comparable across runs and contributors, record the environmen
 - [ ] `BenchmarkStuck/*` and `BenchmarkLedgerAppend/*` demonstrate **flat** per-turn cost as the ledger grows (or the regressions are fixed).
 - [ ] `BenchmarkSquashLoop_Fake` reports broker overhead per turn within the §3.1 aggregate budget.
 - [ ] A reference benchmark report (§6 fields filled in) is committed under `docs/reports/` and refreshed per release.
-- [ ] The `lastHash` O(n) risk (§7) is confirmed resolved or documented as acceptable.
+- [x] The `lastHash` O(n) risk (§7) is confirmed resolved or documented as acceptable.

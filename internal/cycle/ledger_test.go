@@ -1,6 +1,7 @@
 package cycle
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -134,6 +135,37 @@ func TestLedgerFileSyncConcurrentAppendKeepsChainIntact(t *testing.T) {
 	}
 }
 
+// TestLedgerFileSyncAppendResumesExistingChain guards that a fresh LedgerFileSync
+// instance appending to an existing ledger reads the tail hash once and continues
+// the chain without forking (the cache initialization path).
+func TestLedgerFileSyncAppendResumesExistingChain(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cyc-resume.jsonl")
+	ledger := NewLedgerFileSync(path)
+	first := contract.NewHarnessLedgerEntry(1, "cyc_1", contract.LedgerEventCycleCreated, "created", nil)
+	if err := ledger.Append(first); err != nil {
+		t.Fatalf("append first: %v", err)
+	}
+
+	// A new instance simulates daemon revival or a separate caller: it must read
+	// the existing tail hash and link the next entry to it.
+	ledger2 := NewLedgerFileSync(path)
+	second := contract.NewHarnessLedgerEntry(2, "cyc_1", contract.LedgerEventAgentTurn, "turn", nil)
+	if err := ledger2.Append(second); err != nil {
+		t.Fatalf("append second via new instance: %v", err)
+	}
+
+	entries, err := NewLedgerFileSync(path).ReadAll()
+	if err != nil {
+		t.Fatalf("read all: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(entries))
+	}
+	if entries[1].PrevHash != entries[0].Hash {
+		t.Fatalf("second prev_hash = %q, want first hash %q", entries[1].PrevHash, entries[0].Hash)
+	}
+}
+
 // TestLedgerFileSyncHandlesOversizedEntry is the regression guard for the 64 KiB
 // bufio.Scanner limit: an entry whose JSONL line exceeds 64 KiB must round-trip
 // through Append/lastHash/ReadAll without bricking the chain. False-positive
@@ -165,5 +197,32 @@ func TestLedgerFileSyncHandlesOversizedEntry(t *testing.T) {
 	}
 	if broken, ok := contract.VerifyChain(entries); !ok {
 		t.Fatalf("VerifyChain failed at index %d after an oversized entry", broken)
+	}
+}
+
+// BenchmarkLedgerAppend measures that ledger append cost (including the
+// predecessor-hash lookup) does not grow with ledger size. The process-wide
+// tail-hash cache makes this O(1) per append once the cache is warm.
+func BenchmarkLedgerAppend(b *testing.B) {
+	sizes := []int{10, 100, 1000, 10000}
+	for _, size := range sizes {
+		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
+			path := filepath.Join(b.TempDir(), "ledger.jsonl")
+			ledger := NewLedgerFileSync(path)
+			for i := 0; i < size; i++ {
+				entry := contract.NewHarnessLedgerEntry(int64(i), "cyc_bench", contract.LedgerEventAgentTurn, "turn", nil)
+				if err := ledger.Append(entry); err != nil {
+					b.Fatalf("warmup append: %v", err)
+				}
+			}
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				entry := contract.NewHarnessLedgerEntry(int64(size+i), "cyc_bench", contract.LedgerEventAgentTurn, "turn", nil)
+				if err := ledger.Append(entry); err != nil {
+					b.Fatalf("append: %v", err)
+				}
+			}
+		})
 	}
 }
