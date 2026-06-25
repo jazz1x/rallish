@@ -126,7 +126,7 @@ A change is done when:
 ## 9. Acceptance criteria for "quality is specified"
 
 - [ ] Every ✅ feature in `feature-spec.md` has the tests listed in §5.
-- [ ] At least one gated real-adapter integration test exists and is documented (§6.1).
+- [x] At least one gated real-adapter integration test exists and is documented (§6.1).
 - [x] Gate-pipeline packages reach their §4 floor (§6.2).
 - [x] CI enforces the per-package coverage floor (§6.3).
 - [ ] Parser fuzz targets exist for `ParseLastJSONBlock` and JSON-RPC intake.
