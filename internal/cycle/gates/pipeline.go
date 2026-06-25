@@ -17,26 +17,18 @@ import "github.com/jazz1x/rallish/internal/cycle"
 // only here can every concrete gate type be named directly without an import
 // cycle.
 func StandardPipeline(auditCmd, polishTestCmd string, localGates []string) cycle.Pipeline {
-	base := cycle.Pipeline{
+	pipeline := cycle.Pipeline{
 		PreflightGate{},
 		AuditGate{CmdOverride: auditCmd},
+	}
+	for _, rawCmd := range localGates {
+		pipeline = append(pipeline, CommandGate{RawCmd: rawCmd})
+	}
+	pipeline = append(pipeline,
+		ClaimGate{},
 		PhilosophyGate{},
 		PolishGate{TestCmdOverride: polishTestCmd},
 		CommitGate{},
-	}
-	if len(localGates) == 0 {
-		return base
-	}
-
-	pipeline := make(cycle.Pipeline, 0, len(base)+len(localGates))
-	for _, gate := range base {
-		pipeline = append(pipeline, gate)
-		if gate.Name() != "audit" {
-			continue
-		}
-		for _, rawCmd := range localGates {
-			pipeline = append(pipeline, CommandGate{RawCmd: rawCmd})
-		}
-	}
+	)
 	return pipeline
 }

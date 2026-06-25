@@ -21,6 +21,7 @@ type promptRequest struct {
 	Budget      contract.Budget    `json:"budget"`
 	LastTurn    *contract.LastTurn `json:"last_turn,omitempty"`
 	Task        contract.Task      `json:"task"`
+	Scratch     string             `json:"scratch,omitempty"`
 }
 
 // BuildPrompt creates a deterministic prompt embedding the TurnRequest.
@@ -32,6 +33,7 @@ func BuildPrompt(req contract.TurnRequest) (string, error) {
 		Budget:      req.Budget,
 		LastTurn:    req.LastTurn,
 		Task:        req.Task,
+		Scratch:     req.Scratch,
 	}
 	data, err := json.Marshal(pr)
 	if err != nil {
@@ -44,9 +46,19 @@ func BuildPrompt(req contract.TurnRequest) (string, error) {
 	if req.ModelHint != "" {
 		fmt.Fprintf(&b, "\nModel hint: use model %q for this turn.\n", req.ModelHint)
 	}
+	if req.Scratch != "" {
+		fmt.Fprintf(&b, "\n\nShared scratchpad (read-only context from prior turns):\n\n%s\n", req.Scratch)
+	}
+	if req.LastTurn != nil {
+		if req.LastTurn.Intent == contract.HandoffIntentCrossCheck {
+			fmt.Fprintf(&b, "\n\nHandoff intent: CROSS-CHECK the previous turn. Read the listed Artifacts and the original Task fresh. Do not accept the previous Summary at face value; look for mistakes, gaps, and contradictions.\n")
+		} else {
+			fmt.Fprintf(&b, "\n\nHandoff intent: CONTINUE the previous turn. Use the previous Summary as working state; Artifacts are context for your next step.\n")
+		}
+	}
 	b.WriteString("\n\nThe following JSON is your TurnRequest:\n\n```json\n")
 	b.Write(data)
-	b.WriteString("\n```\n\nRespond with a JSON object conforming to the TurnResponse schema, wrapped in a fenced code block.\n\nTurnResponse fields:\n- done (bool)\n- handoff_to (string, optional)\n- summary (string)\n- artifacts (array of strings, optional)\n- self_eval (string: confident, uncertain, blocked)\n- notes_for_human (string, optional)\n- usage (object with tokens_in, tokens_out, ms, optional)\n\nDo not include any text outside the fenced JSON block.")
+	b.WriteString("\n```\n\nRespond with a JSON object conforming to the TurnResponse schema, wrapped in a fenced code block.\n\nTurnResponse fields:\n- done (bool)\n- handoff_to (string, optional)\n- handoff_intent (string: continue or cross_check, optional)\n- summary (string)\n- artifacts (array of strings, optional)\n- self_eval (string: confident, uncertain, blocked)\n- notes_for_human (string, optional)\n- usage (object with tokens_in, tokens_out, ms, optional)\n- claims (array of violations, optional)\n\nDo not include any text outside the fenced JSON block.")
 	return b.String(), nil
 }
 

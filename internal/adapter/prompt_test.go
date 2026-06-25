@@ -45,6 +45,59 @@ func TestParseLastJSONBlock_NoJSON(t *testing.T) {
 	require.Error(t, ParseLastJSONBlock(out, &resp))
 }
 
+func TestBuildPrompt_ContinueFraming(t *testing.T) {
+	req := contract.TurnRequest{
+		Turn:        2,
+		Role:        "executor",
+		RuntimeHint: "claude",
+		Budget:      contract.Budget{TokensLeft: 8000, TurnsLeft: 10},
+		Task:        contract.Task{Title: "Add auth", Body: "Implement OAuth2 flow", RepoRoot: "/tmp/repo"},
+		LastTurn: &contract.LastTurn{
+			From:    "planner",
+			Summary: "planned the OAuth2 flow",
+			Intent:  contract.HandoffIntentContinue,
+		},
+	}
+	prompt, err := BuildPrompt(req)
+	require.NoError(t, err)
+	require.Contains(t, prompt, "Handoff intent: CONTINUE")
+}
+
+func TestBuildPrompt_CrossCheckFraming(t *testing.T) {
+	req := contract.TurnRequest{
+		Turn:        2,
+		Role:        "reviewer",
+		RuntimeHint: "claude",
+		Budget:      contract.Budget{TokensLeft: 8000, TurnsLeft: 10},
+		Task:        contract.Task{Title: "Add auth", Body: "Implement OAuth2 flow", RepoRoot: "/tmp/repo"},
+		LastTurn: &contract.LastTurn{
+			From:      "executor",
+			Summary:   "implemented login handler",
+			Artifacts: []string{"auth.go"},
+			Intent:    contract.HandoffIntentCrossCheck,
+		},
+	}
+	prompt, err := BuildPrompt(req)
+	require.NoError(t, err)
+	require.Contains(t, prompt, "Handoff intent: CROSS-CHECK")
+	require.Contains(t, prompt, "Do not accept the previous Summary")
+}
+
+func TestBuildPrompt_IncludesScratch(t *testing.T) {
+	req := contract.TurnRequest{
+		Turn:        2,
+		Role:        "planner",
+		RuntimeHint: "claude",
+		Budget:      contract.Budget{TokensLeft: 8000, TurnsLeft: 10},
+		Task:        contract.Task{Title: "Add auth", Body: "Implement OAuth2 flow", RepoRoot: "/tmp/repo"},
+		Scratch:     "- Turn 1: scaffolded login handler\n",
+	}
+	prompt, err := BuildPrompt(req)
+	require.NoError(t, err)
+	require.Contains(t, prompt, "Shared scratchpad")
+	require.Contains(t, prompt, "scaffolded login handler")
+}
+
 func BenchmarkBuildPrompt(b *testing.B) {
 	req := contract.TurnRequest{
 		Session:     "sess-123",

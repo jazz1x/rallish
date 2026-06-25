@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/jazz1x/rallish/internal/cycle"
 	"github.com/jazz1x/rallish/internal/exit"
 	"github.com/jazz1x/rallish/internal/router"
+	"github.com/jazz1x/rallish/internal/scratch"
 	"github.com/jazz1x/rallish/internal/session"
 	"github.com/jazz1x/rallish/pkg/contract"
 )
@@ -44,9 +46,12 @@ type sessionState struct {
 	lastResp       *contract.TurnResponse
 	preset         contract.Preset
 	router         *router.Router
+	scratch        *scratch.Manager
 	createdAt      time.Time
 	terminal       bool
 	terminalReason string
+	dryRounds      int
+	seenArtifacts  map[string]struct{}
 	notify         chan struct{}
 	a2aSubs        []chan contract.A2ATaskUpdateEvent
 }
@@ -123,13 +128,18 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scratchPath := filepath.Join(s.store.SessionDir(sess.ID), "scratch.md")
+	scratchMgr := scratch.NewManager(scratchPath, req.Preset.Scratch.MaxKB)
+
 	s.mu.Lock()
 	s.sessionStates[sess.ID] = sessionState{
-		turnCount: 0,
-		preset:    req.Preset,
-		router:    router.NewRouter(req.Preset),
-		createdAt: sess.CreatedAt,
-		notify:    make(chan struct{}),
+		turnCount:     0,
+		preset:        req.Preset,
+		router:        router.NewRouter(req.Preset),
+		scratch:       scratchMgr,
+		createdAt:     sess.CreatedAt,
+		seenArtifacts: make(map[string]struct{}),
+		notify:        make(chan struct{}),
 	}
 	s.mu.Unlock()
 
@@ -225,6 +235,8 @@ func (s *Server) handleNextTurn(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
+			scratchContent, _ := state.scratch.Read()
+
 			req := contract.TurnRequest{
 				Session:     id,
 				Turn:        turn,
@@ -232,6 +244,8 @@ func (s *Server) handleNextTurn(w http.ResponseWriter, r *http.Request) {
 				RuntimeHint: role.Runtime,
 				ModelHint:   role.Model,
 				Budget:      remaining,
+				ScratchPath: state.scratch.Path(),
+				Scratch:     scratchContent,
 				LastTurn:    state.lastTurn,
 				Task:        sess.Task,
 				ExitWhen:    state.preset.ExitWhen,
@@ -340,14 +354,38 @@ func (s *Server) handlePostTurn(w http.ResponseWriter, r *http.Request) {
 		Summary:   resp.Summary,
 		Artifacts: resp.Artifacts,
 		SelfEval:  resp.SelfEval,
+		Intent:    resp.HandoffIntent,
+		Claims:    resp.Claims,
 	}
 	state.lastResp = &resp
+
+	newArtifacts := 0
+	for _, a := range resp.Artifacts {
+		if _, ok := state.seenArtifacts[a]; !ok {
+			state.seenArtifacts[a] = struct{}{}
+			newArtifacts++
+		}
+	}
+	if newArtifacts == 0 && !resp.Done && resp.HandoffTo == "" {
+		state.dryRounds++
+	} else {
+		state.dryRounds = 0
+	}
+
+	_ = state.scratch.Append(resp.Compact() + "\n")
 	s.sessionStates[id] = state
 	s.mu.Unlock()
 
 	if err := s.store.Append(ctx, id, req, resp); err != nil {
 		logger.ErrorContext(ctx, "append turn", "error", err)
 		http.Error(w, fmt.Sprintf("append turn: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	records, err := s.store.Replay(ctx, id)
+	if err != nil {
+		logger.ErrorContext(ctx, "replay session", "error", err)
+		http.Error(w, fmt.Sprintf("replay session: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -371,6 +409,8 @@ func (s *Server) handlePostTurn(w http.ResponseWriter, r *http.Request) {
 		StartTime:    state.createdAt,
 		LastResponse: state.lastResp,
 		DeadlineMS:   state.preset.Budget.DeadlineMS,
+		DryRounds:    state.dryRounds,
+		Records:      records,
 	}
 	matched, reason, evalErr := exit.NewEvaluator(false).Evaluate(ctx, evalState, state.preset.ExitWhen)
 	if matched {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -415,4 +416,181 @@ func TestBroker_BudgetExhaustion_410Gone(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusGone, resp.StatusCode)
 	_ = resp.Body.Close()
+}
+
+func TestBroker_IntentForwarding(t *testing.T) {
+	dir := t.TempDir()
+	clock := &fakeClock{t: time.Now()}
+
+	store, err := session.NewStore(dir, clock)
+	require.NoError(t, err)
+
+	budgeter := budget.NewBudgeter(clock)
+	srv := NewServer(store, budgeter)
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	body := `{"preset": {"name":"test","routing":"round_robin","roles":[{"id":"planner","runtime":"claude"}],"budget":{"tokens_left":100,"turns_left":10}}, "task": {"title":"t","body":"b","repo_root":"/tmp"}}`
+	resp, err := http.Post(ts.URL+"/sessions", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	var sess session.Session
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&sess))
+	_ = resp.Body.Close()
+
+	resp, err = http.Get(ts.URL + "/sessions/" + sess.ID + "/next")
+	require.NoError(t, err)
+	_, err = parseSSEReq(resp)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+
+	turnBody := `{"done":false,"summary":"plan ready","handoff_intent":"cross_check"}`
+	resp, err = http.Post(ts.URL+"/sessions/"+sess.ID+"/turn", "application/json", strings.NewReader(turnBody))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	_ = resp.Body.Close()
+
+	resp, err = http.Get(ts.URL + "/sessions/" + sess.ID + "/next")
+	require.NoError(t, err)
+	req, err := parseSSEReq(resp)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.NotNil(t, req.LastTurn)
+	require.Equal(t, contract.HandoffIntentCrossCheck, req.LastTurn.Intent)
+}
+
+func TestBroker_DryRoundsExit(t *testing.T) {
+	dir := t.TempDir()
+	clock := &fakeClock{t: time.Now()}
+
+	store, err := session.NewStore(dir, clock)
+	require.NoError(t, err)
+
+	budgeter := budget.NewBudgeter(clock)
+	srv := NewServer(store, budgeter)
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	body := `{"preset": {"name":"test","routing":"round_robin","roles":[{"id":"planner","runtime":"claude"}],"budget":{"tokens_left":100,"turns_left":10,"dry_rounds_threshold":2},"exit_when":["dry_rounds"]}, "task": {"title":"t","body":"b","repo_root":"/tmp"}}`
+	resp, err := http.Post(ts.URL+"/sessions", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	var sess session.Session
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&sess))
+	_ = resp.Body.Close()
+
+	for i := 0; i < 2; i++ {
+		resp, err = http.Get(ts.URL + "/sessions/" + sess.ID + "/next")
+		require.NoError(t, err)
+		_, err = parseSSEReq(resp)
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+
+		turnBody := `{"done":false,"summary":"dry"}`
+		resp, err = http.Post(ts.URL+"/sessions/"+sess.ID+"/turn", "application/json", strings.NewReader(turnBody))
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		_ = resp.Body.Close()
+	}
+
+	resp, err = http.Get(ts.URL + "/sessions/" + sess.ID + "/next")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusGone, resp.StatusCode)
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	require.Contains(t, string(bodyBytes), "dry rounds")
+}
+
+func TestBroker_StuckPingPongExit(t *testing.T) {
+	dir := t.TempDir()
+	clock := &fakeClock{t: time.Now()}
+
+	store, err := session.NewStore(dir, clock)
+	require.NoError(t, err)
+
+	budgeter := budget.NewBudgeter(clock)
+	srv := NewServer(store, budgeter)
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	body := `{"preset": {"name":"test","routing":"round_robin","roles":[{"id":"alpha","runtime":"claude"},{"id":"beta","runtime":"claude"}],"budget":{"tokens_left":100,"turns_left":10},"exit_when":["stuck"]}, "task": {"title":"t","body":"b","repo_root":"/tmp"}}`
+	resp, err := http.Post(ts.URL+"/sessions", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	var sess session.Session
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&sess))
+	_ = resp.Body.Close()
+
+	roles := []string{"alpha", "beta", "alpha", "beta", "alpha", "beta"}
+	for _, role := range roles {
+		resp, err = http.Get(ts.URL + "/sessions/" + sess.ID + "/next?as=" + role)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		_, err = parseSSEReq(resp)
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+
+		turnBody := `{"done":false,"summary":"ping"}`
+		resp, err = http.Post(ts.URL+"/sessions/"+sess.ID+"/turn", "application/json", strings.NewReader(turnBody))
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		_ = resp.Body.Close()
+	}
+
+	resp, err = http.Get(ts.URL + "/sessions/" + sess.ID + "/next")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusGone, resp.StatusCode)
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	require.Contains(t, string(bodyBytes), "ping-pong")
+}
+
+func TestBroker_ScratchWired(t *testing.T) {
+	dir := t.TempDir()
+	clock := &fakeClock{t: time.Now()}
+
+	store, err := session.NewStore(dir, clock)
+	require.NoError(t, err)
+
+	budgeter := budget.NewBudgeter(clock)
+	srv := NewServer(store, budgeter)
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	body := `{"preset": {"name":"test","routing":"round_robin","roles":[{"id":"planner","runtime":"claude"}],"budget":{"tokens_left":100,"turns_left":10},"scratch":{"max_kb":64}}, "task": {"title":"t","body":"b","repo_root":"/tmp"}}`
+	resp, err := http.Post(ts.URL+"/sessions", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	var sess session.Session
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&sess))
+	_ = resp.Body.Close()
+
+	// First turn: scratch path is advertised, content is empty.
+	resp, err = http.Get(ts.URL + "/sessions/" + sess.ID + "/next")
+	require.NoError(t, err)
+	req1, err := parseSSEReq(resp)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.NotEmpty(t, req1.ScratchPath)
+	require.Contains(t, req1.ScratchPath, "scratch.md")
+	require.Empty(t, req1.Scratch)
+
+	// Post turn: summary is appended to the scratchpad file.
+	turnBody := `{"done":false,"summary":"scaffolded login handler","self_eval":"confident"}`
+	resp, err = http.Post(ts.URL+"/sessions/"+sess.ID+"/turn", "application/json", strings.NewReader(turnBody))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	_ = resp.Body.Close()
+
+	written, err := os.ReadFile(req1.ScratchPath)
+	require.NoError(t, err)
+	require.Contains(t, string(written), "scaffolded login handler")
+
+	// Second turn: scratch content is carried in the TurnRequest.
+	resp, err = http.Get(ts.URL + "/sessions/" + sess.ID + "/next")
+	require.NoError(t, err)
+	req2, err := parseSSEReq(resp)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Contains(t, req2.Scratch, "scaffolded login handler")
 }

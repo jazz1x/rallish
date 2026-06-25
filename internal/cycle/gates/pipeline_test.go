@@ -6,7 +6,7 @@ import (
 
 func TestStandardPipelineOrder(t *testing.T) {
 	p := StandardPipeline("", "", nil)
-	want := []string{"preflight", "audit", "philosophy", "polish", "commit"}
+	want := []string{"preflight", "audit", "claim", "philosophy", "polish", "commit"}
 	if len(p) != len(want) {
 		t.Fatalf("pipeline length = %d, want %d", len(p), len(want))
 	}
@@ -23,7 +23,7 @@ func TestStandardPipelineInsertsLocalGatesAfterAudit(t *testing.T) {
 	for i, g := range p {
 		names[i] = g.Name()
 	}
-	want := []string{"preflight", "audit", "cmd:go env GOMOD", "cmd:go version", "philosophy", "polish", "commit"}
+	want := []string{"preflight", "audit", "cmd:go env GOMOD", "cmd:go version", "claim", "philosophy", "polish", "commit"}
 	if len(names) != len(want) {
 		t.Fatalf("pipeline length = %d, want %d", len(names), len(want))
 	}
@@ -40,7 +40,7 @@ func TestStandardPipelineAuditOverrideDoesNotAffectOrder(t *testing.T) {
 	for i, g := range p {
 		names[i] = g.Name()
 	}
-	want := []string{"preflight", "audit", "cmd:go version", "philosophy", "polish", "commit"}
+	want := []string{"preflight", "audit", "cmd:go version", "claim", "philosophy", "polish", "commit"}
 	if len(names) != len(want) {
 		t.Fatalf("pipeline length = %d, want %d", len(names), len(want))
 	}

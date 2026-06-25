@@ -19,6 +19,17 @@ const (
 	ExitTokensExhausted     ExitCondition = "tokens_exhausted"
 	ExitDeadlinePassed      ExitCondition = "deadline_passed"
 	ExitHumanSignal         ExitCondition = "human_signal"
+	ExitDryRounds           ExitCondition = "dry_rounds"
+	ExitStuck               ExitCondition = "stuck"
+)
+
+// HandoffIntent describes how the next role should treat the previous turn.
+type HandoffIntent string
+
+// Handoff intent values.
+const (
+	HandoffIntentContinue   HandoffIntent = "continue"
+	HandoffIntentCrossCheck HandoffIntent = "cross_check"
 )
 
 // SelfEval describes an agent's own assessment of its turn quality.
@@ -31,7 +42,7 @@ const (
 	SelfEvalBlocked   SelfEval = "blocked"
 )
 
-// Budget tracks the remaining resources for a session.
+// Budget tracks the resources and policy limits for a session.
 type Budget struct {
 	// TokensLeft is the remaining token budget.
 	TokensLeft int64 `json:"tokens_left"`
@@ -39,6 +50,9 @@ type Budget struct {
 	TurnsLeft int `json:"turns_left"`
 	// DeadlineMS is the remaining wall-clock budget in milliseconds.
 	DeadlineMS int64 `json:"deadline_ms"`
+	// DryRoundsThreshold is the number of consecutive dry turns that terminates
+	// a preset session. Zero disables the dry-rounds exit condition.
+	DryRoundsThreshold int `json:"dry_rounds_threshold,omitempty"`
 }
 
 // LastTurn carries the minimal state from the previous turn.
@@ -53,6 +67,10 @@ type LastTurn struct {
 	Artifacts []string `json:"artifacts,omitempty"`
 	// SelfEval is the previous turn's self-assessment.
 	SelfEval SelfEval `json:"self_eval"`
+	// Intent hints how the next role should treat this turn.
+	Intent HandoffIntent `json:"intent,omitempty"`
+	// Claims are verifiable issues raised during this turn.
+	Claims []Violation `json:"claims,omitempty"`
 }
 
 // Task describes the work assigned to the session.
@@ -91,6 +109,8 @@ type TurnRequest struct {
 	Budget Budget `json:"budget"`
 	// ScratchPath is the path to the shared scratchpad file.
 	ScratchPath string `json:"shared_scratch_path"`
+	// Scratch is the current contents of the shared scratchpad.
+	Scratch string `json:"scratch,omitempty"`
 	// LastTurn is a pointer to the previous turn's summary state.
 	LastTurn *LastTurn `json:"last_turn,omitempty"`
 	// Task is the work description for the session.
@@ -107,6 +127,8 @@ type TurnResponse struct {
 	Done bool `json:"done"`
 	// HandoffTo optionally names the next role to act.
 	HandoffTo string `json:"handoff_to,omitempty"`
+	// HandoffIntent hints how the next role should treat this turn.
+	HandoffIntent HandoffIntent `json:"handoff_intent,omitempty"`
 	// Summary is a compact recap of this turn (≤ ~400 tokens).
 	Summary string `json:"summary"`
 	// Artifacts are file paths touched in this turn.
@@ -117,6 +139,8 @@ type TurnResponse struct {
 	NotesForHuman string `json:"notes_for_human,omitempty"`
 	// Usage reports token and timing consumption for this turn.
 	Usage *Usage `json:"usage,omitempty"`
+	// Claims are verifiable issues raised during this turn.
+	Claims []Violation `json:"claims,omitempty"`
 }
 
 // Compact returns a one-line summary of the turn suitable for scratchpad

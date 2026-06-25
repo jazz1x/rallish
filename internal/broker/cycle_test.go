@@ -560,6 +560,7 @@ func TestPipelineForStateInsertsLocalGatesAfterAudit(t *testing.T) {
 		"audit",
 		"cmd:go test ./...",
 		"cmd:go vet ./...",
+		"claim",
 		"philosophy",
 		"polish",
 		"commit",

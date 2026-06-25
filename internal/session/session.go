@@ -193,6 +193,11 @@ func (s *Store) Get(ctx context.Context, sessionID string) (Session, error) {
 	return entry.session, nil
 }
 
+// SessionDir returns the directory where the session's files are persisted.
+func (s *Store) SessionDir(sessionID string) string {
+	return filepath.Join(s.dir, sessionID)
+}
+
 // Replay replays log.jsonl into a slice of TurnRecords.
 func (s *Store) Replay(ctx context.Context, sessionID string) ([]TurnRecord, error) {
 	if err := ctx.Err(); err != nil {
