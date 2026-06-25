@@ -85,7 +85,7 @@ each installs the same binary from the same signed GitHub Release:
 | **curl** (any Unix, no toolchain) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
 | **`go install`** (Go ≥ 1.25) | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
 | **From source** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
-| **Homebrew tap** (macOS) | _coming soon_ — not yet provisioned |
+| **Homebrew tap** (macOS) | `brew tap jazz1x/rallish && brew install rallish` |
 
 The curl script fetches the latest cross-platform release (cosign-signed, with
 SBOM) into `/usr/local/bin` (or `~/.local/bin` if that is not writable).

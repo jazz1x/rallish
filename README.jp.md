@@ -88,7 +88,7 @@ which claude      # $PATH 上のサポート対象アダプターバイナリ
 | **curl** (Unix 全般, ツールチェーン不要) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
 | **`go install`** (Go ≥ 1.25) | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
 | **ソースビルド** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
-| **Homebrew tap** (macOS) | _準備中_ — まだ提供されていません |
+| **Homebrew tap** (macOS) | `brew tap jazz1x/rallish && brew install rallish` |
 
 curl スクリプトは最新のクロスプラットフォームリリース (cosign 署名 + SBOM) を
 `/usr/local/bin` (書き込み不可なら `~/.local/bin`) に取得します。
