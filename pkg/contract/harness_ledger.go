@@ -58,6 +58,13 @@ const (
 	// or blocked the command. Only blocking verdicts (deny / needs-hitl) are
 	// recorded; an allowed (safe) command is not noise-recorded.
 	LedgerEventToolUseDecision LedgerEventType = "tooluse_decision"
+	// LedgerEventClaimRegistered records that a turn raised one or more verifiable
+	// claims. The broker appends this; it does not verify the claim.
+	LedgerEventClaimRegistered LedgerEventType = "claim_registered"
+	// LedgerEventClaimVerified records that an oracle check confirmed a claim.
+	LedgerEventClaimVerified LedgerEventType = "claim_verified"
+	// LedgerEventClaimFalsified records that an oracle check rejected a claim.
+	LedgerEventClaimFalsified LedgerEventType = "claim_falsified"
 )
 
 // LedgerSchemaVersion is stamped on every ledger entry so the append-only JSONL

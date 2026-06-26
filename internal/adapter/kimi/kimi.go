@@ -18,6 +18,12 @@ type Adapter struct {
 	binary string
 }
 
+// envAllowlist is the single source of truth for the environment keys/prefixes
+// passed through to the kimi subprocess (shared by buildCmd and Probe).
+var envAllowlist = []string{
+	"PATH", "HOME", "LANG", "TERM", "USER", "LOGNAME", "SHELL", "TMPDIR", "XDG_CONFIG_HOME", "KIMI_",
+}
+
 // New resolves the kimi binary and returns an Adapter.
 func New() (*Adapter, error) {
 	path, err := exec.LookPath("kimi")
@@ -61,7 +67,7 @@ func (a *Adapter) buildCmd(ctx context.Context, req contract.TurnRequest) (*exec
 
 	//nolint:gosec // G204 — args are built from controlled inputs
 	cmd := exec.CommandContext(ctx, a.binary, "-p", prompt)
-	cmd.Env = adapter.BuildEnv("PATH", "HOME", "LANG", "TERM", "USER", "LOGNAME", "SHELL", "TMPDIR", "XDG_CONFIG_HOME", "KIMI_")
+	cmd.Env = adapter.BuildEnv(envAllowlist...)
 	if req.Task.RepoRoot != "" {
 		cmd.Dir = req.Task.RepoRoot
 	}
@@ -79,6 +85,9 @@ func (a *Adapter) Run(ctx context.Context, req contract.TurnRequest) (contract.T
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
+			if hint, _, ok := adapter.DiagnoseOutput("kimi", string(out)+"\n"+string(exitErr.Stderr)); ok {
+				return contract.TurnResponse{}, fmt.Errorf("%s\nstderr: %s", hint, string(exitErr.Stderr))
+			}
 			return contract.TurnResponse{}, fmt.Errorf("kimi exited with error: %w\nstderr: %s", err, string(exitErr.Stderr))
 		}
 		return contract.TurnResponse{}, fmt.Errorf("running kimi: %w", err)
@@ -86,7 +95,34 @@ func (a *Adapter) Run(ctx context.Context, req contract.TurnRequest) (contract.T
 
 	var resp contract.TurnResponse
 	if err := adapter.ParseLastJSONBlock(out, &resp); err != nil {
-		return contract.TurnResponse{}, fmt.Errorf("parsing response: %w", err)
+		if hint, _, ok := adapter.DiagnoseOutput("kimi", string(out)); ok {
+			return contract.TurnResponse{}, errors.New(hint)
+		}
+		return contract.TurnResponse{}, fmt.Errorf("parsing response: %w\noutput: %s", err, adapter.Snippet(out, 2000))
 	}
 	return resp, nil
+}
+
+// Probe runs a minimal real turn to verify the kimi CLI is reachable and
+// authenticated. Used by `doctor --probe` (opt-in, spends one cheap turn).
+func (a *Adapter) Probe(ctx context.Context) error {
+	//nolint:gosec // G204 — fixed args, no user input
+	cmd := exec.CommandContext(ctx, a.binary, "-p", "respond with the single word: ok")
+	cmd.Env = adapter.BuildEnv(envAllowlist...)
+	out, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		var stderr string
+		if errors.As(err, &exitErr) {
+			stderr = string(exitErr.Stderr)
+		}
+		if hint, _, ok := adapter.DiagnoseOutput("kimi", string(out)+"\n"+stderr); ok {
+			return errors.New(hint)
+		}
+		return fmt.Errorf("kimi probe failed: %w", err)
+	}
+	if hint, _, ok := adapter.DiagnoseOutput("kimi", string(out)); ok {
+		return errors.New(hint)
+	}
+	return nil
 }

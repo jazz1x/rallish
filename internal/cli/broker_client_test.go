@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -92,5 +93,35 @@ func TestResolveBrokerClientLivePortFile(t *testing.T) {
 	}
 	if _, statErr := os.Stat(portFile); statErr != nil {
 		t.Fatalf("live port file must NOT be removed, stat err = %v", statErr)
+	}
+}
+
+// TestResolveBrokerClientSentinel guards the typed-error contract that
+// ensureBrokerClient relies on (errors.Is, not string matching) to decide
+// whether a missing daemon warrants an auto-spawn. A home with no socket/port
+// file is the canonical "not running" case.
+func TestResolveBrokerClientSentinel(t *testing.T) {
+	homeDir := t.TempDir() // no ~/.rallish at all
+
+	_, err := resolveBrokerClient(homeDir, time.Second)
+	if err == nil {
+		t.Fatal("expected error for missing daemon, got nil")
+	}
+	if !errors.Is(err, errBrokerNotRunning) {
+		t.Fatalf("error must wrap errBrokerNotRunning sentinel, got: %v", err)
+	}
+
+	// The stale-port path must wrap the same sentinel so ensureBrokerClient
+	// auto-spawns on it too.
+	dir := filepath.Join(homeDir, ".rallish")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "port"), []byte(freeDeadPort(t)), 0o600); err != nil {
+		t.Fatalf("write port file: %v", err)
+	}
+	_, err = resolveBrokerClient(homeDir, time.Second)
+	if !errors.Is(err, errBrokerNotRunning) {
+		t.Fatalf("stale-port error must wrap errBrokerNotRunning, got: %v", err)
 	}
 }

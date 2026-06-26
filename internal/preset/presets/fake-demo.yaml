@@ -1,0 +1,19 @@
+name: fake-demo
+description: Zero-credential smoke test. Runs the in-process `fake` runtime so you can verify an install end-to-end without any agent CLI or API key.
+
+roles:
+  - id: demo
+    runtime: fake
+    model: none
+
+routing: round_robin
+
+budget:
+  max_turns: 5
+  max_tokens: 100000
+  deadline_minutes: 5
+
+exit_when:
+  - turns_exhausted
+  - reviewer_approved
+  - deadline_passed

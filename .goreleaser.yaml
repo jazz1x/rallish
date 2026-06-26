@@ -70,13 +70,8 @@ signs:
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
-# Homebrew tap publish is temporarily disabled — the `jazz1x/homebrew-rallish`
-# tap repo + TAP_GITHUB_TOKEN secret have not been provisioned yet. v0.1.0
-# attempted release failed at this step. Re-enable in a follow-up once the
-# tap repo and PAT are in place; until then users install via:
-#   - curl install.sh                   (fetches GH Release binary)
-#   - npx skills add jazz1x/rallish     (skill bundle, agent self-installs binary)
-#   - git clone + make build            (developers)
+# Homebrew tap publish. Disabled until the `jazz1x/homebrew-rallish` tap repo
+# and TAP_GITHUB_TOKEN repository secret are provisioned.
 # brews:
 #   - name: rallish
 #     repository:

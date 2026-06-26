@@ -26,9 +26,10 @@ func NewBudgeter(clock Clock) *Budgeter {
 func (b *Budgeter) Remaining(initial contract.Budget, used contract.Usage, turnsUsed int) contract.Budget {
 	tokensUsed := used.TokensIn + used.TokensOut
 	return contract.Budget{
-		TokensLeft: initial.TokensLeft - tokensUsed,
-		TurnsLeft:  initial.TurnsLeft - turnsUsed,
-		DeadlineMS: initial.DeadlineMS,
+		TokensLeft:         initial.TokensLeft - tokensUsed,
+		TurnsLeft:          initial.TurnsLeft - turnsUsed,
+		DeadlineMS:         initial.DeadlineMS,
+		DryRoundsThreshold: initial.DryRoundsThreshold,
 	}
 }
 

@@ -3,6 +3,7 @@ package skills_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jazz1x/rallish/internal/skills"
@@ -14,6 +15,7 @@ var embeddedFiles = []string{
 	"SKILL.md",
 	"SKILL.ko.md",
 	"scripts/install-binary.sh",
+	"scripts/gate-pretooluse.sh",
 }
 
 func TestInstall_EmptyDir(t *testing.T) {
@@ -133,6 +135,24 @@ func TestInstallBundlesScripts(t *testing.T) {
 	}
 	if len(data) == 0 {
 		t.Fatal("install-binary.sh is empty")
+	}
+
+	// The G6 PreToolUse hook wrapper must also install executable so a user can
+	// wire it directly from ~/.claude/skills/rallish/scripts/ (F13 enforcement).
+	hookPath := filepath.Join(dir, "scripts", "gate-pretooluse.sh")
+	hookInfo, hookErr := os.Stat(hookPath)
+	if hookErr != nil {
+		t.Fatalf("scripts/gate-pretooluse.sh not found after install: %v", hookErr)
+	}
+	if hookInfo.Mode().Perm()&0o111 == 0 {
+		t.Errorf("scripts/gate-pretooluse.sh is not executable: mode=%v", hookInfo.Mode().Perm())
+	}
+	hookData, hookReadErr := os.ReadFile(hookPath) //nolint:gosec // test temp path
+	if hookReadErr != nil {
+		t.Fatalf("read gate-pretooluse.sh: %v", hookReadErr)
+	}
+	if !strings.Contains(string(hookData), "gate tooluse") {
+		t.Error("gate-pretooluse.sh should invoke `rallish gate tooluse`")
 	}
 }
 

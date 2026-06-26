@@ -5,7 +5,9 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)를 기반으로 하며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 준수합니다.
 
-## [미발표]
+## [Unreleased]
+
+## [0.4.0] - 2026-06-24
 
 ### 추가됨
 
@@ -88,6 +90,18 @@
   도구(`rally_create`, `rally_join`, `rally_done`, `rally_status`,
   `rally_interrupt`)로 `/mcp/sse` SSE 전송을 통해 노출합니다. 기존 HTTP/SSE
   rally 엔드포인트와 `rallish rally` CLI는 그대로 유지됩니다.
+- **턴 라우팅 전략.** `strict_round_robin`은 명시적 핸드오프를 무시하고;
+  `last_writer_wins`는 핸드오프 요청 전까지 동일한 작가를 유지한다.
+- **공유 스크래치패드 배선.** 세션별 롤링 스크래치패드를 `TurnRequest.Scratch`로
+  읽고 매 턴 `TurnResponse.Compact()`를 추가한다; 어댑터는 읽기 전용 문맥으로
+  렌더링한다.
+- **Cross-check ping-pong 가드레일.** `HandoffIntent`(`continue` /
+  `cross_check`)가 브로커를 통해 전달되며 어댑터 프레이밍을 바꾼다; 프리셋
+  `dry_rounds_threshold` / `exit_when: [dry_rounds]`가 공전 세션을 멈추고;
+  `exit_when: [stuck]`은 ping-pong, 무진보, 반복 지문을 감지한다; 재현 가능한
+  `Check` 명령을 가진 검증 가능한 `Claims`는 `ClaimGate`에 의해 평가되고
+  `claim_verified` / `claim_falsified` 레저 이벤트를 방출한다.
+
 
 ## [0.3.0] - 2026-05-20
 

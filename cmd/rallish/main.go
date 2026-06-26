@@ -13,6 +13,7 @@ import (
 
 	"github.com/jazz1x/rallish/internal/buildinfo"
 	"github.com/jazz1x/rallish/internal/cli"
+	"github.com/jazz1x/rallish/internal/logx"
 	"github.com/jazz1x/rallish/internal/skills"
 	"github.com/jazz1x/rallish/internal/ui"
 	"github.com/jazz1x/rallish/pkg/contract"
@@ -36,7 +37,9 @@ For natural-language usage inside a coding-CLI, install the skill
 "let's serve" in any project.`
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	// Wrap the base handler so every log record is secret-redacted at the one
+	// log-time boundary (F21) — no call site has to remember to scrub.
+	logger := slog.New(logx.NewRedactingHandler(slog.NewTextHandler(os.Stderr, nil)))
 	slog.SetDefault(logger)
 
 	shutdown := make(chan struct{})
@@ -270,7 +273,6 @@ func squashCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.PresetName, "preset", "solo-ralph", "Preset to use")
 	cmd.Flags().StringVar(&opts.Task, "task", "", "Task description")
 	cmd.Flags().StringVar(&opts.SessionID, "session-id", "", "Optional session ID")
-	cmd.Flags().BoolVar(&opts.AllowShellExit, "allow-shell-exit", false, "Allow shell exit predicates")
 	cmd.Flags().StringVar(&opts.Repo, "repo", "", "Repository root for the session. Defaults to current working directory.")
 	return cmd
 }

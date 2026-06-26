@@ -29,6 +29,7 @@ func CycleCmd() *cobra.Command {
 		CycleRunCmd(),
 		CycleStatusCmd(),
 		CycleLedgerCmd(),
+		CycleVerifyCmd(),
 		CycleNextCmd(),
 		CycleHaltCmd(),
 		CycleWatchCmd(),

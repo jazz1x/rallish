@@ -129,17 +129,56 @@ func TestRouter_Next_HandoffThenRoundRobin(t *testing.T) {
 	require.Equal(t, "executor", got)
 }
 
-func TestRouter_Next_UnsupportedRouting(t *testing.T) {
+func TestRouter_Next_StrictRoundRobin(t *testing.T) {
+	ctx := context.Background()
+	preset := contract.Preset{
+		Routing: "strict_round_robin",
+		Roles: []contract.Role{
+			{ID: "a", Runtime: "x"},
+			{ID: "b", Runtime: "y"},
+			{ID: "c", Runtime: "z"},
+		},
+	}
+	r := NewRouter(preset)
+
+	// Without a handoff the behaviour is identical to round_robin.
+	got, err := r.Next(ctx, nil, 1)
+	require.NoError(t, err)
+	require.Equal(t, "a", got)
+
+	// A handoff request is ignored; the turn index still decides.
+	prev := &contract.TurnResponse{HandoffTo: "c"}
+	got, err = r.Next(ctx, prev, 2)
+	require.NoError(t, err)
+	require.Equal(t, "b", got)
+}
+
+func TestRouter_Next_LastWriterWins(t *testing.T) {
 	ctx := context.Background()
 	preset := contract.Preset{
 		Routing: "last_writer_wins",
 		Roles: []contract.Role{
 			{ID: "a", Runtime: "x"},
+			{ID: "b", Runtime: "y"},
+			{ID: "c", Runtime: "z"},
 		},
 	}
 	r := NewRouter(preset)
 
-	_, err := r.Next(ctx, nil, 1)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "not supported")
+	// First turn starts at roles[0].
+	got, err := r.Next(ctx, nil, 1)
+	require.NoError(t, err)
+	require.Equal(t, "a", got)
+
+	// No handoff: the last writer (turn 1 -> role a) keeps the baton.
+	prev := &contract.TurnResponse{}
+	got, err = r.Next(ctx, prev, 2)
+	require.NoError(t, err)
+	require.Equal(t, "a", got)
+
+	// A handoff request is still honoured.
+	prev = &contract.TurnResponse{HandoffTo: "c"}
+	got, err = r.Next(ctx, prev, 3)
+	require.NoError(t, err)
+	require.Equal(t, "c", got)
 }

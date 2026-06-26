@@ -1,0 +1,491 @@
+# rallish — 기능명세서
+
+> 통합 기능명세. 광고된 모든 기능을 **실제 코드에 연결된 상태(wired state)**와 매핑하고, 동작 계약과 수용 기준을 함께 정의한다.
+> **버전:** `VERSION`(0.3.0) 추종 · **최종 수정:** 2026-06-24 · [English](./feature-spec.md)
+
+## 이 문서를 읽는 법
+
+이 명세는 *"rallish가 오늘 실제로 무엇을 하는가, 그리고 무엇이 선언만 되어 있는가?"*에 답하는 단일 창구다. README와 north-star가 광고하는 표면은 의도적으로 실제 연결된 표면보다 넓다. 그 위에 무언가를 구현하려는 사람은 그 차이를 먼저 알아야 한다.
+
+**성숙도 범례** (`north-star.md`와 동일):
+
+| 태그 | 의미 |
+|------|------|
+| ✅ **연결됨(Wired)** | 프로덕션 호출 지점 있음, 런타임에 동작함, 테스트로 커버됨 |
+| ◑ **부분(Partial)** | 연결되어 있으나 불완전·비대칭·경고만 함 |
+| ○ **선언만(Declared-only)** | 코드/정책은 있으나 프로덕션 호출 지점이 0이거나, 파싱만 되고 소비되지 않음 |
+| ▷ **계획됨(Planned)** | 명세(PRD)는 있으나 아직 미구현 |
+
+각 기능 행은 근거 파일을 인용한다. 코드와 대조 검증한 항목은 file:line을 표기한다.
+
+---
+
+## 1. 기능 지도 (한눈에)
+
+| # | 기능 | 성숙도 | 근거 |
+|---|------|--------|------|
+| F1 | Squash (헤드리스 프리셋 세션) | ✅ | `internal/cli/squash.go`, `internal/preset` |
+| F2 | Rally (대화형 바톤 패싱) | ✅ | `internal/cli/rally.go`, `internal/broker/rally.go` |
+| F3 | 자율 사이클 + 참조 드라이버(`cycle run --once`) | ✅ | `internal/cli/cycle_run.go`, `internal/cycle` |
+| F4 | 어댑터 포트 (claude / kimi / fake) | ✅ | `internal/adapter` |
+| F5 | 프리셋 시스템 (YAML 템플릿) | ✅ | `internal/preset` |
+| F6 | 턴 라우팅 | ✅ | `internal/router/router.go` |
+| F7 | 토큰 / 턴 / 벽시계 예산 | ✅ | `internal/budget`, `internal/exit` |
+| F8 | 종료 조건 | ◑ | `internal/exit/exit.go` |
+| F9 | 게이트 파이프라인 (preflight→audit→claim→philosophy→polish→commit) | ✅ | `internal/cycle/gates/pipeline.go` |
+| F10 | 안티스핀 stuck 브레이커 + 수명 한도 | ✅ | `internal/cycle/stuck.go`, `internal/budget` |
+| F11 | 해시체인 append-only 레저 (G4 감사) | ✅ | `pkg/contract/harness_ledger.go`, `internal/cycle/ledger.go` |
+| F12 | Merkle(RFC 9162) 포함/일관성 증명 | ✅ | `pkg/contract/merkle.go`, `internal/cli/cycle_verify.go` |
+| F13 | 액션게이트(G6) 결정 + 기록 + PreToolUse 훅 | ✅ | `pkg/contract/action_gate.go`, `internal/cli/gate.go`, `internal/skills/rallish/scripts/gate-pretooluse.sh` |
+| F14 | 시크릿 격리 분류기 | ◑ | `pkg/contract/tooluse_gate.go` |
+| F15 | Unix 소켓 IPC + TCP 루프백 폴백 | ✅ | `internal/ipc/socket.go`, `internal/cli/broker_client.go` |
+| F16 | A2A v1.0 와이어 형태 (agent-card, JSON-RPC, SSE) | ✅ | `internal/broker/a2a.go` |
+| F17 | MCP 서버 (rally 도구를 SSE로) | ✅ | `internal/broker/mcp.go` |
+| F18 | 데몬 자동 기동 | ✅ | `internal/cli/broker_client.go` (`ensureBrokerClient`: squash + `rally new`) |
+| F19 | `doctor` 진단 | ◑ | `internal/doctor/doctor.go` |
+| F20 | 공유 스크래치패드 + 압축 | ✅ | `internal/scratch`, `internal/broker/broker.go`, `internal/adapter/prompt.go` |
+| F21 | 로그 시점 시크릿 마스킹 | ✅ | `internal/logx` (`Redact` + `RedactingHandler`) |
+| F22 | Cross-check ping-pong (의도 인지 핸드오프, dry-round 브레이커, claim 오라클) | ✅ | `docs/prd-cross-check-ping-pong.md`, `internal/broker/broker.go`, `internal/session/stuck.go`, `internal/cycle/gates/claim.go`, `internal/adapter/prompt.go` |
+
+이하 각 기능을 상세히 명세한다.
+
+---
+
+## 2. 핵심 개념
+
+**브로커 / 데몬.** `127.0.0.1:0`(동적 포트)에 바인딩된 단일 로컬 HTTP 서버(`rallish daemon`). 대화/세션 상태를 소유하고 누구 차례인지 결정한다. Unix 도메인 소켓(`~/.rallish/rallish.sock`, 모드 `0600`)으로 접근하며 TCP 루프백 폴백이 있다. 브로커는 **턴과 상태의 운반자**이지 품질의 심판이 아니다.
+
+**어댑터.** 에이전트 런타임 CLI를 감싸는 얇은 래퍼. 포트는 두 메서드: `Name() string`, `Run(ctx, TurnRequest) (TurnResponse, error)` (`internal/adapter/adapter.go`). 구현체: `claude`, `kimi`, `fake`.
+
+**턴 계약.** 브로커가 `TurnRequest`(턴 번호, 역할, 예산, 직전 턴 요약, 과업)를 보내면 어댑터가 `TurnResponse`(`done`, `handoff_to`, `summary`, `artifacts`, `self_eval`, 선택적 `usage`)를 반환한다. `pkg/contract/types.go`.
+
+**프리셋.** 역할(런타임+모델), 라우팅 전략, 예산, 종료 조건, 스크래치패드 한도를 정의하는 YAML 템플릿. 기본 프리셋은 `go:embed`로 바이너리에 컴파일된다.
+
+**사이클.** 게이트 파이프라인을 통과하는, 경계가 있는 자율 저장소 작업 단위. append-only 해시체인 레저를 가진다. 사이클을 구동하는 오케스트레이터는 *참조 드라이버*이지 제품이 아니다 — 제품은 하네스 계층(게이트/상태/감사/브레이커)이다.
+
+---
+
+## 3. 기능 상세 명세
+
+### F1 — Squash (헤드리스 프리셋 세션) ✅
+
+**정의.** `rallish squash`는 헤드리스 프리셋 세션을 끝까지 실행한다. 브로커가 설정된 어댑터를 자동 기동하고 ping-pong을 완료까지 돌린다.
+
+**동작.**
+- 프리셋을 이름으로 해석한다: 빌트인 먼저, 그다음 `~/.rallish/presets/<name>.yaml`. `squash`는 프로젝트 로컬 `./.rallish/presets/`를 읽지 **않음**(squash.go:174는 사용자 홈 디렉터리만 사용). 기본 프리셋은 config `default_preset`(출시 기본값 `solo-ralph`).
+- 데몬이 없으면 자동 기동한다(공유 `ensureBrokerClient` 경유; `rally new`도 동일 — F18 참조).
+- 종료 조건이 발화할 때까지 턴을 구동한다.
+
+**수용 기준.**
+- AC-F1.1: PATH에 `claude` 어댑터가 있을 때 `rallish squash --preset solo-ralph`가 세션을 완료하고 0으로 종료.
+- AC-F1.2: 데몬이 없을 때 `squash`가 데몬을 기동하고 Unix 소켓으로 접속.
+- AC-F1.3 ✅: 무자격증명 스모크 경로를 빌트인 `fake-demo` 프리셋(`internal/preset/presets/fake-demo.yaml`)으로 제공: 인프로세스 `fake` 런타임 단일 역할, 5턴 후 `turns_exhausted`. `rallish squash --preset fake-demo`는 데몬을 자동 기동하고 완료까지 실행하며 원장을 기록 — 어댑터 CLI/API 키 없이 엔드투엔드 검증됨.
+
+**알려진 갭.**
+- ✅ G-F1 (해결): 빌트인 `fake-demo` 프리셋이 무자격증명 설치 점검을 제공; YAML 직접 작성 불필요.
+
+---
+
+### F2 — Rally (대화형 바톤 패싱) ✅
+
+**정의.** `rallish rally`는 둘 이상의 코딩 CLI 세션 사이에서 라이브 바톤 패싱을 제공한다. 배타적 보유자 강제는 SSE로 전달되고, 에이전트는 턴마다 사용자 트리거 없이 스스로 ping-pong을 돈다.
+
+**명령 표면.**
+
+| 명령 | 목적 | 필수 플래그 |
+|------|------|-------------|
+| `rally new` | 세션 생성 | `--participants` (≥2, 콤마 구분) |
+| `rally join` | 합류 후 바톤 대기(SSE) | `--session-id`, `--as` |
+| `rally done` | 바톤 넘기기 | `--session-id`, `--as` |
+| `rally status` | 세션 상태 표시 | `--session-id` |
+| `rally mcp-agent` | 원샷 MCP 클라이언트(create/join/done/status/interrupt) | `--mode` |
+
+**동작 계약.**
+- `rally new`는 참가자 이름 ≥2와 선택적 repo 경로(존재해야 함)를 검증. `--first`는 바톤을 선배정; 생략 시 첫 참가자가 `join`해야 시작.
+- `rally join`은 `/rally/sessions/{id}/baton?as={participant}`로 SSE 스트림을 열고 턴 번호+지시를 출력. `--once`는 첫 바톤 후 종료; `--timeout`은 윈도우 내 바톤 미수신 시 **종료코드 2**. `--timeout 0`은 무한 블록.
+- `rally done`은 **HTTP 409**를 비치명적 "당신 차례 아님" / "세션 중단" 조건으로 반환(종료코드 1).
+
+**수용 기준.**
+- AC-F2.1: A가 넘긴 바톤이 B의 열린 `join` 스트림에 전달.
+- AC-F2.2: 비보유자의 `rally done`은 409와 명확한 메시지로 거부.
+- AC-F2.3: 들어오는 바톤이 없는 세션에 대한 `rally join --timeout 5s`는 코드 2로 종료.
+
+**알려진 갭.**
+- ✅ G-F2.1 (해결): `rally new`가 이제 공유 `ensureBrokerClient` 헬퍼(`internal/cli/broker_client.go`)로 데몬을 자동 기동 — `squash`와 동일. 처음 쓰는 사람이 `rallish daemon`을 먼저 돌릴 필요 없음. (`join`/`done`/`status`/`cycle`은 기존 세션을 다루므로 계속 `resolveBrokerClient`를 직접 사용 — 데몬 부재는 도중 깜짝 기동이 아니라 명확한 선행 에러로 남음.)
+- ✅ G-F2.2 (근본 해결): 오타난 `--as`는 블록하지 않음 — 브로커가 바톤 스트림에서 참가자 멤버십을 검증해 즉시 **403 "participant … is not in this session"**을 반환(`internal/broker/rally.go`)하고, CLI가 이를 명확한 에러로 표면화. `--timeout`은 정당한 경우(아직 바톤을 넘기지 않은 피어를 기다림)를 위해 옵트인으로 유지; 정당한 긴 대기를 잘라버리므로 무딘 기본 타임아웃은 의도적으로 추가하지 않음.
+
+---
+
+### F3 — 자율 사이클 + 참조 드라이버 ✅
+
+**정의.** 경계가 있고 재개 가능한 자율 저장소 작업 단위. cron/CI의 정규 진입점은 `rallish cycle run --once`: **단일 경계 패스를 돌고 종료**하며, 종료코드가 정지 사유를 담는다. 감시 루프가 **아니다**.
+
+**명령 표면.** `cycle new`, `cycle start`(원샷 생성+감시), `cycle run --once`(참조 드라이버), `cycle status`, `cycle ledger`, `cycle next`, `cycle halt`, `cycle watch`.
+
+**종료코드 계약** (`internal/cli/cycle_run.go`, `exitCodeForHalt`):
+
+| 코드 | 정지 사유 |
+|------|-----------|
+| 0 | 성공 / 정상 패스(전진함) |
+| 10 | stuck |
+| 11 | 예산 초과 |
+| 12 | preflight 실패 |
+| 13 | 게이트 실패 |
+| 14 | 파싱 불가 턴 |
+| 15 | 사용자 요청 |
+| 16 | 셀프 감사 위반 |
+| 17 | SSH 인증 실패 |
+| 18 | 최대 사이클 도달 |
+| 19 | 알 수 없는 사유(전방호환) |
+| 1 | 운영 오류(상태 읽기 실패, 어댑터 없음) |
+
+**`cycle run --once`의 두 모드.**
+- **순수 게이트 파이프라인**(`--agents` 없음): 디스크에서 상태 로드, 부활(reviver) 안티스핀 가드·stuck 브레이커·수명 예산 한도 실행 후, 표준 게이트 파이프라인을 통한 `cycle.Driver.Step()` 1회.
+- **에이전트 오케스트레이션**(`--agents claude,kimi`): 같은 전처리 후 멀티에이전트 오케스트레이터에 위임 — 에이전트 턴 1회 + 게이트 스텝 1회.
+
+**재개성.** 상태 파일(`~/.rallish/cycles/cycle-<id>.json`)은 `.bak` 복구와 함께 원자적으로 기록(G1). 정지는 **끈끈하다(sticky)**: 레저에 봉인되어, cron이 부활시킨 스피닝 런이 스스로 정지하고 되살아나지 않는다(안티스핀 부활 가드).
+
+**수용 기준.**
+- AC-F3.1: 깨끗하고 전진 가능한 사이클에서 `cycle run --once`는 0 종료, 완료 사이클 수 증가.
+- AC-F3.2: stuck 사이클은 10 종료, 레저에 `cycle_halted` 봉인.
+- AC-F3.3: 봉인 정지 사이클에 `cycle run --once` 재호출 시 부활하지 않음.
+
+---
+
+### F4 — 어댑터 포트 ✅
+
+**정의.** 임의의 에이전트 런타임 CLI를 꽂게 해주는 최소 2-메서드 포트.
+
+```go
+type Adapter interface {
+    Name() string
+    Run(ctx context.Context, req contract.TurnRequest) (contract.TurnResponse, error)
+}
+```
+
+**출시 어댑터.**
+
+| 어댑터 | 호출 | 환경변수 허용목록 |
+|--------|------|-------------------|
+| `claude` | `claude -p <prompt> --max-turns=1` | `PATH, HOME, LANG, TERM, USER, LOGNAME, SHELL, TMPDIR, XDG_CONFIG_HOME, ANTHROPIC_` |
+| `kimi` | `kimi -p <prompt>` | …동일 기본… `+ KIMI_` |
+
+> 허용목록 항목은 **정확한 키 또는 접두사**로 매칭됨(`internal/adapter/env.go`, `strings.HasPrefix`). `ANTHROPIC_` / `KIMI_`는 접두사 — 그 이름으로 시작하는 모든 환경변수가 통과. 글롭(`*`)이 아니라 리터럴 접두사다.
+| `fake` | 인프로세스 캔드 응답(테스트/데모) | 해당 없음 |
+
+**프롬프트 + 파싱 계약** (`internal/adapter/prompt.go`):
+- `BuildPrompt`은 슬림화한 `TurnRequest`를 펜스 JSON으로 임베드하고 `TurnResponse` 스키마를 설명하는 머리말을 붙임.
+- `ParseLastJSONBlock`은 **마지막** 펜스 JSON 블록을 추출; 실패 시 균형중괄호 스캔으로 폴백. 둘 다 없으면 `no JSON TurnResponse found in output` 반환.
+- 서브프로세스 `cmd.Dir`은 `req.Task.RepoRoot`가 있으면 그것으로 설정. 환경은 허용목록으로 제한(광범위 토큰 유출 없음).
+
+**수용 기준.**
+- AC-F4.1: 형식이 올바른 펜스 JSON `TurnResponse`는 `Run`을 통해 변형 없이 왕복.
+- AC-F4.2 ✅: 미인증/레이트리밋 런타임 CLI는 실행 가능한 에러를 표면화. 공유 분류기(`internal/adapter/diagnose.go`, `DiagnoseOutput`)가 서브프로세스 stdout/stderr에서 인증·레이트리밋 시그니처를 검사하고, `claude`·`kimi` `Run`은 일치 시 `no JSON TurnResponse found in output` 대신 명확한 메시지("…runtime is not authenticated — run `claude` once interactively to log in…")로 매핑.
+
+**알려진 갭.**
+- ✅ G-F4 (해결): 인증/레이트리밋 실패가 어댑터 경계에서 실행 가능한 메시지로 분류되고, `doctor --probe`가 어댑터당 최소 라이브 턴 1회로 인증을 검증(PATH 존재만이 아님). 프로브는 턴을 소비하므로 옵트인이며, 멈춘 로그인 프롬프트가 진단을 막지 못하도록 시간 제한(`probeTimeout`).
+- 참고: 어댑터 코드는 `claude`·`kimi`만 출시. Cursor/Codex는 *2-메서드 포트로 추가 가능*하나 미출시.
+
+---
+
+### F5 — 프리셋 시스템 ✅
+
+**스키마** (`internal/preset/preset.go`, `DisallowUnknownField`로 검증):
+
+```yaml
+name: <문자열, 필수>
+description: <문자열>
+roles:                      # ≥1 필수
+  - id: <문자열>
+    runtime: <claude|kimi|fake>
+    model: <모델 힌트 문자열>
+routing: <round_robin | handoff_then_round_robin | strict_round_robin | last_writer_wins>
+budget:
+  max_turns: <int > 0, 필수>
+  max_tokens: <int64 > 0, 필수>
+  deadline_minutes: <int>
+exit_when: [<종료 조건>, ...]
+scratch:
+  max_kb: <int64>
+  summarize_with: <문자열>
+```
+
+**출시 프리셋.**
+
+| 프리셋 | 역할 | 라우팅 | 예산 | 종료 조건 |
+|--------|------|--------|------|-----------|
+| `solo-ralph` | ralph (claude/sonnet) | round_robin | 30턴 · 600k토큰 · 90분 | tests_pass, turns_exhausted, deadline_passed |
+| `pair-review` | planner (claude/opus), executor (kimi/k2), reviewer (claude/sonnet) | handoff_then_round_robin | 20턴 · 400k토큰 · 60분 | tests_pass, reviewer_approved, turns_exhausted |
+
+두 출시 프리셋 모두 `scratch: { max_kb: 64, summarize_with: claude-haiku }`도 선언한다. 단 이는 파싱되나 런타임에 **아직 소비되지 않음** — F20 참조.
+
+**검증 규칙.** `name` 필수; 역할 ≥1; `max_turns > 0`; `max_tokens > 0`; routing은 네 이름 중 하나; 미지의 YAML 키 거부(엄격 파싱).
+
+**수용 기준.**
+- AC-F5.1: 미지의 최상위 키를 가진 프리셋은 로드 시 거부.
+- AC-F5.2: `max_turns: 0` 프리셋은 거부.
+
+---
+
+### F6 — 턴 라우팅 ✅
+
+**결정 우선순위** (`internal/router/router.go`, `Next`):
+1. **블록 에스컬레이션** — `prev.SelfEval == "blocked"`이면 `reviewer` 역할이 있으면 그리로; 없으면 에러. 이 안전 오버라이드는 라우팅 전략과 무관하게 적용.
+2. **전략별 라우팅:**
+   - `round_robin` — `(turn-1) mod len(roles)`로 순환. 유효한 `handoff_to`가 있으면 순환을 덮어씀.
+   - `handoff_then_round_robin` — 코드상 `round_robin`과 동일; 명시적 핸드오프를 따름.
+   - `strict_round_robin` — `(turn-1) mod len(roles)`로 순환하고 **명시적 `handoff_to`를 무시**하여 한 역할이 영원히 배턴을 붙잡지 못함.
+   - `last_writer_wins` — 유효한 `handoff_to`가 요청할 때까지 동일한 작가를 유지(`(turn-1) mod len(roles)`). "마지막으로 작업한 에이전트가 핸드오프를 받기 전까지 계속 작업"을 모델링.
+
+**왜 ✅인가.** 스키마에서 허용하는 네 가지 라우팅 전략 모두 구현되었으며 `internal/router/router_test.go`로 커버됨.
+
+**수용 기준.**
+- AC-F6.1 ✅: `round_robin`에서 역할 배정은 `(turn-1) mod len(roles)`로 순환.
+- AC-F6.2 ✅: 유효 역할을 가리키는 `handoff_to`는 라운드로빈을 덮어씀.
+- AC-F6.3 ✅: `strict_round_robin`은 핸드오프를 무시하고 런타임 실패 없음; `last_writer_wins`는 핸드오프 요청 전까지 작가를 유지.
+
+---
+
+### F7 — 예산 ✅ / F8 — 종료 조건 ◑
+
+**예산 추적** (`internal/budget/budget.go`). 턴마다: `tokens_left -= tokens_in + tokens_out`; `turns_left -= 1`. 벽시계 데드라인은 저장 후 경과시간과 비교; 감소하지 않음. `IsExhausted` = `turns_left ≤ 0 || tokens_left ≤ 0`.
+
+**수명 한도.** `LifetimeTurns`는 append-only 로그 전체의 `agent_turn` 이벤트를 카운트(부활 넘어 유지); `ExceedsLifetimeCeiling`은 **stuck 브레이커와 구별되는 하드 비용 한도** — stuck 감지기가 절대 못 잡는 *생산적인* 폭주를 멈춘다.
+
+**종료 조건** (`internal/exit/exit.go`):
+
+| 조건 | 평가 |
+|------|------|
+| `turns_exhausted` | `turns_left ≤ 0` |
+| `tokens_exhausted` | `tokens_left ≤ 0` |
+| `deadline_passed` | 현재 > 시작 + 데드라인 |
+| `reviewer_approved` | 직전 응답 `self_eval == confident` **그리고** `done` |
+| `tests_pass` | `go test ./...` 실행(셸 술어) |
+| `all_artifacts_compile` | `go vet ./...` 실행(셸 술어) |
+
+**왜 F8이 ◑인가.** 셸 술어(`tests_pass`, `all_artifacts_compile`)는 `allowShell=true`가 필요하나, 브로커는 `allowShell=false`로 평가기를 만들고 의도적으로 `exit_predicate_shell_skipped`를 로깅한다 — 전역 데몬에서 셸을 돌리면 세션 repo가 아닌 데몬 CWD에서 실행되기에, 의도된 보안 자세 선택이다. **결과:** 프리셋 `exit_when: [tests_pass]`는 오늘 squash/브로커 경로에서 발화하지 않음; 수렴은 `reviewer_approved`·`turns_exhausted`·`deadline_passed`에 의존. 셸 술어는 올바른 `cmd.Dir`을 설정하는 사이클 게이트 파이프라인(audit/polish 게이트) 안에서는 *실행됨*.
+
+**수용 기준.**
+- AC-F7.1: N토큰 소비 턴은 `tokens_left`를 정확히 N만큼 감소.
+- AC-F8.1: `turns_exhausted` 도달 세션은 그 사유로 종료.
+- AC-F8.2(문서화된 동작): 프리셋의 `tests_pass`는 브로커 구동 squash를 종료시키지 않음 — 놀라지 않도록 명확히 문서화.
+
+---
+
+### F9 — 게이트 파이프라인 ✅
+
+**단일 진실 출처:** `internal/cycle/gates/pipeline.go`의 `StandardPipeline(auditCmd, polishTestCmd, localGates)`. 브로커와 CLI 원샷이 모두 여기에 위임하므로 순서가 어긋날 수 없다.
+
+**순서:** `Preflight → Audit → [repo-로컬 명령 게이트] → Philosophy → Polish → Commit`.
+
+| 게이트 | 검사 | 실패 의미 |
+|--------|------|-----------|
+| **Preflight** | 브랜치 ∉ {main, master}; 워킹트리 클린; 베이스라인 SHA 캡처; `next_cycle_goal` 비어있지 않음 | 이 네 검사 중 하나라도 실패 시 정지(종료 12); **SSH 인증은 별도 베스트에포트 검사로 경고만 하고 계속 — 결코 정지하지 않음** |
+| **Audit** | `--audit-cmd` 실행(기본 `make check-all`); 공백뿐인 오버라이드는 큰소리로 실패 | 정지(종료 13) |
+| **Local 게이트** | 각 `--local-gate` 명령, 순서대로 | 정지(종료 13) |
+| **Philosophy** | `git diff <baseline>`에서 ROP / SSOT / SRP / 하드코딩 버전 위반 스캔 | 위반을 처음 발견한 사이클에선 항상 **경고**; 이전 사이클에서 위반이 이미 기록돼 있고 **그리고** 새 위반 수가 그 이전 수를 엄격히 초과할 때만 실패. 이때 정지 사유는 `self-audit-violation` → **종료 16**(13 아님) |
+| **Polish** | `--polish-test-cmd` 실행(기본 `go test -race ./...`) | 정지(종료 13) |
+| **Commit** | `git add -A` 후 `git commit -m <goal>`; **`--amend`·`--no-verify` 절대 안 씀** | "nothing to commit"은 허용 |
+
+**보증.** main 브랜치 금지와 `--no-verify` 금지는 구조적으로 강제됨(플래그가 코드에 결코 추가되지 않음). 게이트 실행은 첫 실패에서 단락(short-circuit).
+
+**수용 기준.**
+- AC-F9.1: `main`에서 실행 시 Preflight에서 종료 12로 정지.
+- AC-F9.2: audit 명령 실패 시 Commit 도달 전 종료 13으로 정지.
+- AC-F9.3: commit 게이트는 결코 `--no-verify`를 넘기지 않음.
+
+---
+
+### F10 — 안티스핀(stuck 브레이커 + 수명 한도) ✅
+
+**stuck 술어** (`internal/cycle/stuck.go`, 레저에 대한 순수 O(window)):
+
+| 신호 | 임계값 |
+|------|--------|
+| 반복 턴(동일 summary+files 지문) | ≥ 4 |
+| 반복 게이트 실패(동일 gate+summary) | ≥ 3 |
+| ping-pong(A,B,A,B 교대, 새 산출물 없음) | ≥ 6 |
+| 무진전(최근 K턴이 새 파일 없음 **그리고** `validation_green` 없음) | 윈도우 = 5 |
+
+`orchestrator.RunOnce`에서 호출; 매치 시 `cycle_halted` 기록 후 상태 영속. 수명 예산 한도(F7)도 함께 점검.
+
+**설계 원칙.** *"진전"을 정의하지 말고 "stuck"을 감지하라.* 프론티어-성장-대-사이클은 셀프리포트보다 게이밍이 어렵지만, **게이밍 불가는 아니다**(에이전트가 새 노드를 양산할 수 있음). 유일한 게이밍 불가 신호는 워커가 쓸 수 없는 검증자 산출 그린 게이트(F9)다.
+
+**수용 기준.**
+- AC-F10.1: 동일 턴 4회는 반복-턴 브레이커 발동 → 정지 10.
+- AC-F10.2: 새 산출물 없는 6턴 ping-pong 발동 → 정지 10.
+
+---
+
+### F11 — 해시체인 레저(G4 감사) ✅
+
+**형식.** append-only JSONL, 줄당 `HarnessLedgerEntry` 하나(`pkg/contract/harness_ledger.go`). 모든 항목은 `schema_version`(현재 `"1"`), `prev_hash`, `hash`를 가진다. `hash` = (canonical 항목에서 `hash`를 0으로 비운 것) ∥ `prev_hash` 에 대한 SHA-256. 제네시스 해시는 64개 0(hex).
+
+**이벤트 타입.** `cycle_created`, `agent_turn`, `gate_passed`, `gate_failed`, `handoff_created`, `cycle_halted`, `cycle_completed`, `validation_green`, `action_denied`, `secret_flagged`, `gates_pinned`, `gate_tampered`, `tooluse_decision`.
+
+**무결성.** `VerifyChain`(순수 리더)은 항목을 순회하며 각 `prev_hash` 링크를 검사하고 각 `hash`를 재계산해 내용 변조를 탐지, 첫 깨진 인덱스 또는 −1 반환.
+
+**라이터.** `LedgerFileSync.Append`(`internal/cycle/ledger.go`)는 경로별 인프로세스 뮤텍스 사용; 파일은 `0600`으로 생성; 줄은 무경계 `bufio.Reader`로 읽음(과대 게이트 리포트에 벽돌이 되는 64 KiB `Scanner` 아님).
+
+**알려진 갭.** 프로세스 간 쓰기 조율은 제공되지 **않음**(`flock` 없음); 사이클당 단일 활성 라이터를 가정. 한 사이클 파일에 두 드라이버를 돌릴 수 있는 구성이라면 이를 문서화하라.
+
+**수용 기준.**
+- AC-F11.1: 어떤 항목 내용을 변조하면 `VerifyChain`이 그 인덱스를 반환.
+- AC-F11.2: 추가된 모든 항목의 `prev_hash`가 직전 항목 `hash`와 같음.
+
+---
+
+### F12 — Merkle 증명(RFC 9162) ✅
+
+**상태: 연결됨.** `MerkleRoot`, `InclusionProof`, `VerifyInclusion`, `ConsistencyProof`, `VerifyConsistency`(RFC 6962/9162 준수, leaf/node 도메인 분리)가 이제 실제 프로덕션 호출자를 가진다: **`rallish cycle verify --cycle-id <id>`**(`internal/cli/cycle_verify.go`). 사이클 레저에 대해 해시체인 무결성(`VerifyChain`)과 Merkle 트리 헤드를 보고하고, `--inclusion <i>` / `--consistency <N>`로 포함/일관성 증명을 생성·검증한다. 판결은 데몬이 반환한 엔트리에 대해 클라이언트 측에서 계산되며(데몬의 자기증명을 신뢰하지 않음), 변조된 체인이나 검증 불가 증명에서 비제로(15) 종료해 cron/CI 감사가 게이트할 수 있다.
+
+**수용 기준.**
+- AC-F12.1: 정상 레저에 대한 `cycle verify`는 체인 정상과 안정적 Merkle 루트를 보고.
+- AC-F12.2: 내용 변조된 엔트리는 `cycle verify`가 깨진 인덱스를 보고하고 15로 종료하게 함.
+- AC-F12.3: `--inclusion i`와 `--consistency N`은 계산된 루트에 대해 `VerifyInclusion`/`VerifyConsistency`가 수용하는 증명을 생성.
+
+---
+
+### F13 — 액션게이트(G6) ✅ / F14 — 시크릿 격리 ◑
+
+**정의.** 런타임 PreToolUse 훅을 위한 사전 실행 정책 분류기. `rallish gate tooluse --command "<cmd>"`가 결정하고 기록한다; **훅이 종료코드로 강제**한다.
+
+**결정 모델** (`DecideToolUse`, 액션 + 시크릿 중 최고 심각도): `deny` > `needs-hitl` > `allow`. 종료코드: `0` allow, `13` deny, `14` needs-hitl.
+
+**액션 거부목록** (`pkg/contract/action_gate.go`, 정규화 명령에 대한 순수 O(len) 매처):
+
+| 규칙 | 판정 |
+|------|------|
+| `/`, `/*`, `~`, `$HOME` 대상 `rm -rf` | deny |
+| 포크밤 `:(){ :\|:& };:` | deny |
+| `dd of=/dev/…`, `mkfs /dev/…`, `/dev/sd*` 또는 `/dev/nvme*` 리디렉션 | deny |
+| main/master/release로 `git push --force` / `--force-with-lease` | deny |
+| `git reset --hard origin/…` | needs-hitl |
+| `DROP TABLE` / `DROP DATABASE` / `TRUNCATE TABLE` | needs-hitl |
+
+**기록.** `--cycle-id`와 함께한 차단 결정(deny/needs-hitl)은 그 사이클 레저에 `tooluse_decision`으로 추가; **안전(allow) 결정은 결코 기록 안 함**(오탐 가드).
+
+**강제(✅, 감사 Tier 2 9번 — 완료).** 바로 연결 가능한 Claude Code PreToolUse 훅을
+스킬 번들에 출시: `internal/skills/rallish/scripts/gate-pretooluse.sh`
+(`~/.claude/skills/rallish/scripts/`에 설치). PreToolUse JSON을 읽어 Bash 명령에
+`gate tooluse`를 돌리고 판결을 Claude Code의 `permissionDecision` 계약으로 매핑한다 —
+`deny` → 거부, `needs-hitl` → `ask`, `allow` → 진행. `jq`/`rallish`가 없거나 게이트가
+에러를 내면 **안전 우선**(`ask`로 에스컬레이션). 배선 + 검증: `docs/runbook-action-gate.ko.md`.
+경계는 유지된다 — rallish는 여전히 결정+기록만, 강제는 *훅*이 — 그러나 강제 경로가
+이제 존재하고 문서화되어 G6는 더 이상 선언-전용이 아니다.
+
+**수용 기준.**
+- AC-F13.1: `gate tooluse --command "rm -rf /"`는 deny 결정을 출력하고 13 종료.
+- AC-F13.2: 안전 명령은 0 종료, 레저에 아무것도 안 씀.
+- AC-F13.3 ✅: 번들 훅을 배선하면 거부된 명령이 실제로 거부됨 — 엔드투엔드 검증: `rm -rf /` → `permissionDecision: deny`, `git reset --hard origin/main` → `ask`, `ls -la` → 진행.
+
+---
+
+### F15 — IPC ✅
+
+`~/.rallish/rallish.sock`(모드 `0600`)의 Unix 도메인 소켓 우선. CLI는 `~/.rallish/socket` 포인터로 브로커를 해석(`~/.rallish` 하위인지 검증), 300ms 다이얼로 생존 확인, 죽은 포인터 제거, `~/.rallish/port`의 `127.0.0.1:<port>` TCP로 폴백. 루프백 전용 — `0.0.0.0` 절대 안 씀.
+
+**수용 기준.**
+- AC-F15.1: 살아있는 소켓이 있으면 CLI는 그것을 사용(TCP 아님).
+- AC-F15.2: 죽은 소켓 포인터는 정리되고 TCP 폴백 성공.
+
+---
+
+### F16 — A2A v1.0 와이어 형태 ✅ / F17 — MCP 서버 ✅
+
+**A2A.** `GET /.well-known/agent-card.json`(+ 레거시 `agent.json`) 제공, `protocolVersion`·역량(`streaming: true`)·스킬을 담은 `AgentCard` 반환. JSON-RPC 인테이크는 엄격(`DisallowUnknownFields`). 메서드: send-message, subscribe-to-task, get-task, cancel-task(+ 레거시 `tasks/*` 별칭).
+
+**SSE 이벤트.** A2A SSE 경로는 이제 MCP 경로를 미러링하는 명명된 `event:` 줄을 방출한다: 상태 업데이트는 `event: TaskStatusUpdateEvent`, 아티팩트를 포함한 업데이트는 `event: TaskArtifactUpdateEvent`(`internal/broker/a2a.go`). `mapSessionToA2ATask`에서 `A2ATask.sessionId`에 세션 id를 채운다. 서명 카드와 상호 인증은 계속 보류.
+
+**MCP (F17, ✅).** `GET /mcp/sse` + `POST /mcp/message?session_id=…`, MCP 2025-03-26 핸드셰이크, rally 도구(`rally_create/join/done/status/interrupt`). `rally mcp-agent`는 번들된 원샷 클라이언트.
+
+**수용 기준.**
+- AC-F16.1: `GET /.well-known/agent-card.json`은 실제 `protocolVersion`을 가진 카드 반환.
+- AC-F16.2: 미지 필드가 있는 JSON-RPC는 거부.
+- AC-F16.3 ✅: A2A SSE가 명명된 `event:` 줄을 방출하고 `sessionId`를 채움.
+
+---
+
+### F18 — 데몬 자동 기동 ✅ / F19 — doctor ◑
+
+- **F18:** `squash` **와 `rally new`** 가 브로커를 자동 기동(공유 `ensureBrokerClient` 경유); `rally join`/`done`/`status`와 `cycle`은 실행 중 데몬이 필요(기존 세션을 다룸). `doctor`/`bootstrap`의 "daemon not running — will auto-spawn on `rally new`" 메시지는 이제 **정확함**(`squash`만 자동 기동하던 시절엔 거짓이었음).
+- **F19:** `doctor`는 데몬 도달성, PATH의 어댑터 존재, config/skill 경로를 보고. `--probe` 사용 시 어댑터당 시간 제한된 라이브 턴 1회로 **인증**도 검증(G-F4 해결). PATH에 없는 어댑터는 실패가 아닌 정보로 보고.
+
+---
+
+### F20 — 공유 스크래치패드 ✅
+
+**무엇인가.** 턴을 넘어 세션 전체에서 문맥을 운송하는 롤링 스크래치패드. 브로커가 파일을 소유하고, 어댑터는 프롬프트로 현재 내용을 받는다.
+
+**배선.** `internal/broker/broker.go`가 세션마다 하나의 `scratch.Manager`를 생성한다(`<sessionDir>/scratch.md`, 프리셋의 `scratch.max_kb` 사용). 모든 `/sessions/{id}/next`에서 파일을 읽어 `TurnRequest`의 `ScratchPath`와 `Scratch`를 주입하고, 모든 `/sessions/{id}/turn`에서 `TurnResponse.Compact()`를 파일에 추가한다. `internal/adapter/prompt.go`는 스크래치 내용을 TurnRequest JSON 앞의 읽기 전용 "Shared scratchpad" 섹션으로 렌더링하고, 모델이 볼 수 있도록 슬림 `promptRequest`에도 포함한다.
+
+**압축.** `scratch.Manager.compactIfNeeded`는 파일 크기가 `max_kb`의 80%에 도달하면 절반으로 줄이며 최신 내용을 보존한다. `scratch.summarize_with` 필드는 파싱되지만 **아직 소비되지 않는다** — LLM 기반 요약은 미래 작업이고, 현재 압축 전략은 반으로 자르는 것이다.
+
+**왜 ✅인가.** 읽기 → 프롬프트 → 응답 → 추가 루프가 배선되었고 테스트로 커버된다. `internal/scratch`는 더 이상 선언만 한 패키지가 아니다.
+
+**수용 기준.**
+- AC-F20.1 ✅: `scratch.max_kb`를 가진 세션은 첫 `/next`에서 `scratch.md`로 끝나는 `ScratchPath`를 알린다.
+- AC-F20.2 ✅: 턴을 POST하면 스크래치패드 파일에 요약이 추가된다.
+- AC-F20.3 ✅: 다음 턴의 `TurnRequest.Scratch`에 이전에 추가된 내용이 담긴다.
+- AC-F20.4 ✅: `BuildPrompt`는 스크래치 내용이 비어있지 않을 때 생성된 프롬프트에 포함한다.
+
+**남은 갭.**
+- `scratch.summarize_with`는 파싱되지만 LLM 압축에는 사용되지 않는다.
+
+---
+
+### F21 — 로그 마스킹 ✅
+
+**무엇인가.** `internal/logx`가 이제 `Redact(string)`(고정밀 값-형태 시크릿 매처 — 프로바이더 키 접두사 `sk-ant-`/`sk-`/`ghp_`/`xox*`/`AKIA`/`AIza`, `Bearer <token>`, 민감 `KEY=value` 할당, PEM 개인키 블록)와 `RedactingHandler`(모든 레코드의 메시지와 문자열/에러 속성을 — 그룹과 `With` 바인딩 속성까지 재귀 — `Redact`에 통과시키는 `slog.Handler` 미들웨어)를 제공. `cmd/rallish/main.go`가 베이스 핸들러를 한 번 감싸므로, 마스킹은 호출 지점마다가 아니라 단일 로그 시점 경계다. 매처는 접두사/구조 앵커링이라 평범한 산문("the token bucket", "secret sauce")은 절대 바뀌지 않음 — 진단을 망치느니 미탐을 택함. 주요 누출 경로(`"error", err`가 어댑터 stderr를 품는 경우)를 커버.
+
+**수용 기준.**
+- AC-F21.1 ✅: 로그 메시지/속성의 프로바이더 키, bearer 토큰, 민감 `KEY=value`, PEM 블록은 `[REDACTED]`로 치환됨.
+- AC-F21.2 ✅: "token"/"secret"/"password" 같은 단어를 포함한 평범한 산문은 바이트 그대로 보존듦.
+- AC-F21.3 ✅: `"error", err`로 로깅된 에러 값 안의 시크릿이 마스킹됨.
+
+---
+
+### F22 — Cross-check ping-pong ✅
+
+**무엇인가.** 프리셋 세션/사이클 하네스 경로에 의도 인지 핸드오프, dry-round 종료, stuck 패턴 감지, 검증 가능한 claim을 추가한다. 브로커는 여전히 운송자이며 모든 정책은 프리셋에 선언된다.
+
+**P0′ 의도 인지 carryover.** `TurnResponse.HandoffIntent`(`continue` / `cross_check`)가 브로커를 거쳐 `TurnRequest.LastTurn.Intent`로 전달된다. `internal/adapter/prompt.go`는 프레이밍을 선택한다: `continue`는 이전 `Summary`를 작업 상태로 사용하고, `cross_check`는 다음 역할에게 산출물과 원래 `Task`를 새로 읽고 요약을 맹신하지 말라고 지시한다.
+
+**P1′ loop-until-dry + stuck-breaker.** 프리셋이 `budget.dry_rounds_threshold`와 `exit_when: [dry_rounds]`를 선언할 수 있다. 브로커는 연속 dry 턴(새 산출물 없음, done 아님, 명시적 `handoff_to` 없음)을 세고 임계치 도달 시 종료한다. `exit_when: [stuck]`은 세션의 `TurnRecord`를 대상으로 `internal/session.Stuck`을 평가하여 6턴 무진보, 교대 역할 ping-pong, 또는 반복된 `(Summary, Artifacts)` 지문 ≥4회를 멈춘다.
+
+**P2′ 검증가능 발견.** `TurnResponse.Claims`는 `contract.Violation` 슬라이스다. 각 위반은 재현 가능한 셸 명령과 예상 부분 문자열을 담은 `Check`를 가질 수 있다. 브로커는 `LastTurn`으로 claim을 전달하고, 사이클 하네스에서는 `CycleState.ViolationsFound`에 누적한다.
+
+**P3′ 외부 오라클 앵커.** `ClaimGate`는 표준 파이프라인에서 audit(과 로컬 게이트) 직후 실행된다. `Check`가 있는 claim마다 명령을 실행하고 결합 출력을 `Check.Expected`와 비교한다. 통과한 claim은 `claim_verified` 레저 이벤트를, 실패한 claim은 `claim_falsified` 레저 이벤트를 방출하고 사이클을 정지한다.
+
+**프리셋 옵트인.** `pair-review.yaml`은 기존 조건 외에 `budget.dry_rounds_threshold: 3`과 `exit_when: [dry_rounds]`를 설정한다.
+
+**수용 기준.**
+- AC-F22.1 ✅: `handoff_intent: cross_check`를 가진 `TurnResponse`가 다음 `TurnRequest.LastTurn.Intent`로 전달된다.
+- AC-F22.2 ✅: `cross_check` 어댑터 프롬프트는 이전 요약을 신뢰하지 말고 산출물/태스크를 새로 검사하라고 안내한다.
+- AC-F22.3 ✅: 3회 연속 dry 라운드가 `dry rounds` 사유로 세션을 종료한다.
+- AC-F22.4 ✅: 6턴 교대 역할 dry ping-pong이 `ping-pong` 사유로 종료한다.
+- AC-F22.5 ✅: 통과하는 `Check`를 가진 claim은 `claim_verified` 레저 이벤트를, 실패는 `claim_falsified`를 방출하고 사이클을 정지한다.
+
+**보존한 가드레일.** 브로커는 품질을 판단하지 않는다; 라우팅은 역할 기반으로 유지된다; 임계치는 프리셋에 있다; claim은 선택적이고 레저 바운드다; 의도가 주어지지 않으면 `continue`가 기본이다.
+
+---
+
+## 4. 횡단 요구사항
+
+*모든* 기능에 적용되며 설계 리뷰 게이트 역할도 한다:
+
+- 모든 경계에서 **parse-don't-validate**; 파싱 불가 입력은 오류(예: 엄격 JSON-RPC 인테이크).
+- 인터페이스에서 **관대하지 말고 엄격하게**(RFC 9413 / Postel 비판).
+- 공개 표면을 **버전화**(`schema_version` / `protocolVersion`).
+- **정직한, 역량 게이트된 명명** — 해시체인 전엔 "audit" 아님, 엄격 파싱 전엔 "conformant" 아님. 이 명세의 성숙도 태그가 그 정직함을 지킨다.
+- **셀프리포트가 아닌 구조적 사실을 신뢰**(Goodhart) — 게이밍 불가 신호는 검증자 게이트.
+- **무음 폴백 없음 / 전반에 ROP.**
+
+## 5. 구현자가 인계받는 미결 항목
+
+감사 티어링 순서(`docs/reports/2026-06-23-production-readiness-gaps.md`):
+
+1. **Tier 1(첫 실행 UX):** ✅ 어댑터 인증 사전점검(G-F4 — 완료); ✅ `fake-demo` 프리셋(G-F1 — 완료); ✅ `rally new` 자동 기동 + 오타 조인 즉시 실패(G-F2 — 완료); ✅ 정직한 설치 안내(README가 검증된 curl / `go install` 경로를 앞세우고, `npx skills add`는 주의를 단 skills.sh 대안으로 강등 — 완료). **Tier 1 완료.**
+2. **Tier 2(하네스 주장을 참으로):** ✅ G6 훅 배선(F13 — 완료); ✅ `cycle verify`로 Merkle 연결(F12 — 완료); ✅ `logx` 마스킹 구현(F21 — 완료); ✅ A2A SSE 명명 이벤트 + `sessionId`(F16 — 완료).
+3. **Tier 3(신뢰):** ✅ 실제 어댑터 통합 테스트 + 게이트/autogoal 커버리지; ✅ CI 커버리지 하한 강제; ✅ Homebrew tap; ✅ `lastHash` O(n) 성능 수정 + 스케일 벤치마크.
+4. **기능 작업:** ✅ 스크래치패드 연결(F20 — 완료); ✅ `strict_round_robin` / `last_writer_wins` 라우팅(F6 — 완료); ✅ cross-check ping-pong(F22 — 완료).

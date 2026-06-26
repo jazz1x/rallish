@@ -18,11 +18,13 @@ budget:
   max_turns: 20
   max_tokens: 400000
   deadline_minutes: 60
+  dry_rounds_threshold: 3
 
 exit_when:
   - tests_pass
   - reviewer_approved
   - turns_exhausted
+  - dry_rounds
 
 scratch:
   max_kb: 64

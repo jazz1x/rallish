@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jazz1x/rallish/internal/session"
 	"github.com/jazz1x/rallish/pkg/contract"
 	"github.com/stretchr/testify/require"
 )
@@ -118,4 +119,37 @@ func TestEvaluator_NoMatch(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.False(t, matched)
+}
+
+func TestEvaluator_DryRounds(t *testing.T) {
+	e := NewEvaluator(false)
+	state := State{Budget: contract.Budget{DryRoundsThreshold: 2}, DryRounds: 2}
+	matched, reason, err := e.Evaluate(context.Background(), state, []contract.ExitCondition{contract.ExitDryRounds})
+	require.NoError(t, err)
+	require.True(t, matched)
+	require.Equal(t, "dry rounds", reason)
+}
+
+func TestEvaluator_DryRounds_Disabled(t *testing.T) {
+	e := NewEvaluator(false)
+	state := State{DryRounds: 5}
+	matched, _, err := e.Evaluate(context.Background(), state, []contract.ExitCondition{contract.ExitDryRounds})
+	require.NoError(t, err)
+	require.False(t, matched)
+}
+
+func TestEvaluator_Stuck(t *testing.T) {
+	e := NewEvaluator(false)
+	records := make([]session.TurnRecord, 6)
+	for i := range records {
+		records[i] = session.TurnRecord{
+			Req:  contract.TurnRequest{Role: "a"},
+			Resp: contract.TurnResponse{Summary: "stuck"},
+		}
+	}
+	state := State{Records: records}
+	matched, reason, err := e.Evaluate(context.Background(), state, []contract.ExitCondition{contract.ExitStuck})
+	require.NoError(t, err)
+	require.True(t, matched)
+	require.Equal(t, "no progress", reason)
 }

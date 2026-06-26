@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-24
+
 ### Added
 
 - **`rallish cycle` — autonomous-cycle subsystem.** One-shot `cycle start`
@@ -97,6 +99,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MCP 2025-03-26 tools (`rally_create`, `rally_join`, `rally_done`,
   `rally_status`, `rally_interrupt`) over an SSE transport at `/mcp/sse`.
   HTTP/SSE rally endpoints and the `rallish rally` CLI remain unchanged.
+- **Turn routing strategies.** `strict_round_robin` ignores explicit handoffs;
+  `last_writer_wins` keeps the same writer until a handoff is requested.
+- **Shared scratchpad wiring.** Per-session rolling scratchpad is read into
+  `TurnRequest.Scratch` and appended from `TurnResponse.Compact()` after each
+  turn; adapters render it as read-only context.
+- **Cross-check ping-pong guardrails.** `HandoffIntent` (`continue` /
+  `cross_check`) is forwarded by the broker and changes adapter framing; preset
+  `dry_rounds_threshold` / `exit_when: [dry_rounds]` halts spinning sessions;
+  `exit_when: [stuck]` detects ping-pong, no-progress, and repeated
+  fingerprints; verifiable `Claims` with reproducible `Check` commands are
+  evaluated by `ClaimGate` and emit `claim_verified` / `claim_falsified` ledger
+  events.
 
 ## [0.3.0] - 2026-05-20
 

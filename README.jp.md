@@ -9,7 +9,7 @@
 
 > **注:** `main` ブランチは最新タグより多くの機能を含んでいます. 最新の変更は
 > [CHANGELOG.md](CHANGELOG.md) の `[Unreleased]` セクションを参照してください.
-**rallish** は複数のエージェントランタイム間に配置される小さなローカルブローカープロセスです。各ランタイムはアダプタさえあれば、どのコーディング CLI（Claude, Kimi, Cursor, Codex など、同種でも異なるコンテキストで実行する場合も含む）も使用できます。ブローカーは会話状態を管理し、誰のターンかを決定し、エージェント間で簡潔なターンのペイロードを中継します。
+**rallish** は複数のエージェントランタイム間に配置される小さなローカルブローカープロセスです。現在は Claude と Kimi のアダプターが同梱されており、最小限の 2 メソッドアダプターポートを実装することで他の CLI（Cursor、Codex など）も追加できます。同種でも異なるコンテキストで実行する場合も対応しています。ブローカーは会話状態を管理し、誰のターンかを決定し、エージェント間で簡潔なターンのペイロードを中継します。
 
 すべてローカルで実行されます。クラウドブローカーや外部調整サービスはありません。ワイヤフォーマットは合理的な範囲で **A2A（Agent2Agent）プロトコル** に準拠しており、アダプターを介して A2A 対応エージェントを接続できます。
 
@@ -23,7 +23,7 @@
 | **Rally（インタラクティブ）** | `rallish rally` で 2 つのコーディング CLI セッション間のライブバトン受け渡し; エージェントがピンポンを自律ループ (ターンごとのユーザートリガー不要); SSE による排他的ホルダー強制 |
 | **A2A プロトコル** | A2A v1.0 ワイヤ形状: `/.well-known/agent-card.json`, `protocolVersion`, PascalCase JSON-RPC タスク, SSE ストリーミング. 署名済みカードと相互認証は未実装（先送り）. |
 | **トークン予算** | セッションごとのトークン、ターン数、時間の上限を強制 |
-| **スクラッチパッド** | 自動圧縮(compaction)が適用されたローリング共有スクラッチ |
+| **スクラッチパッド** _(計画中)_ | 自動圧縮(compaction)が適用されたローリング共有スクラッチ; プリセット設定は解析されるが、まだターンループには組み込まれていない |
 | **プリセット** | 役割、ルーティング、終了条件を定義した YAML テンプレート |
 | **Unix ソケット IPC** | CLI↔Daemon が `~/.rallish/rallish.sock`(`0600`) 経由。A2A 外部クライアントと Windows フォールバック用に TCP ループバックを保持 |
 | **自動デーモン** | `rallish squash` がブローカー未起動時に自動スポーン。`rallish doctor` がソケット到達性を報告 |
@@ -38,7 +38,7 @@ rallish はベンダー中立・リポローカルの**作業ハーネス**で�
 - **Interop** — A2A v1.0 ワイヤ形状 (`/.well-known/agent-card.json` の Agent Card、実際の `protocolVersion`、厳格な型付きインテーク). 署名済みカードと相互認証は未実装（先送り）.
 - **Audit** — `schema_version` スタンプ、ハッシュチェーン、再生可能な台帳 + RFC 9162 Merkle 包含/一貫性証明。
 - **Anti-spin** — スタック/予算サーキットブレーカー + スティッキーホルト復活防止ガード (cron が再起動したスピニング実行は自己停止し、復活しない)。
-- **Action-gate** — 実行前の破壊的コマンド拒否リスト + シークレット封じ込め; rallish が決定を宣言・記録し、ランタイムフックが強制します。
+- **Action-gate** — 実行前の破壊的コマンド拒否リスト + シークレット封じ込め; rallish が決定を宣言・記録し、ランタイムフックが強制します。すぐ接続できる Claude Code PreToolUse フックがスキルバンドルに同梱されています — [docs/runbook-action-gate.md](docs/runbook-action-gate.md) を参照。
 
 全体の方針と根拠: `docs/north-star.md`.
 
@@ -80,34 +80,42 @@ which claude      # $PATH 上のサポート対象アダプターバイナリ
 
 ## インストール
 
-コマンド 1 つ:
+`rallish` バイナリが唯一の依存です。マシンに合う方法を選んでください —
+いずれも同じ署名済み GitHub Release から同じバイナリをインストールします:
+
+| 方法 | コマンド |
+|---|---|
+| **curl** (Unix 全般, ツールチェーン不要) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
+| **`go install`** (Go ≥ 1.25) | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
+| **ソースビルド** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
+| **Homebrew tap** (macOS) | `brew tap jazz1x/rallish && brew install rallish` |
+
+curl スクリプトは最新のクロスプラットフォームリリース (cosign 署名 + SBOM) を
+`/usr/local/bin` (書き込み不可なら `~/.local/bin`) に取得します。
+
+続いてスキルバンドルとデーモンを一度だけ接続:
+
+```bash
+rallish bootstrap   # 冪等: スキルを ~/.claude/skills/rallish/ に設置しデーモンを点検
+```
+
+任意のプロジェクトで Claude Code (またはスキル対応の他のコーディング CLI)
+を開き、`랠리보낼 준비해` / `let's serve` と入力。
+
+<details>
+<summary><b>スキルレジストリ経由 (skills.sh)</b></summary>
+
+[skills.sh](https://www.skills.sh) レジストリを使うなら、スキルバンドルを直接取得できます:
 
 ```bash
 npx skills add jazz1x/rallish
 ```
 
-スキルバンドル (SKILL.md + バイナリインストーラ) を
-`~/.claude/skills/rallish/` に配置します。
-[skills.sh](https://www.skills.sh) 経由で解決。
-
-任意のプロジェクトで Claude Code (またはスキル対応の他のコーディング CLI)
-を開き、`랠리보낼 준비해` / `let's serve` と入力。初回使用時にバンドル済み
-のプラットフォーム検出スクリプト (`scripts/install-binary.sh`) で `rallish`
-バイナリを自動インストール (最新 GitHub Release → `/usr/local/bin` または
-`~/.local/bin`)。
-
-<details>
-<summary><b>パワーユーザー向け (バンドルをバイパス)</b></summary>
-
-| 方法 | コマンド |
-|---|---|
-| **curl** (Unix 全般) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
-| **Homebrew tap** (macOS) | _準備中_ — リポジトリ issue で追跡中; まだ提供されていません |
-| **ソースビルド** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
-| **`go install`** | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
-
-バイナリが `$PATH` にあれば `rallish bootstrap` (冪等) がスキルバンドル
-インストールとデーモン検証を行います。
+これはコミュニティレジストリ経由で解決され、最新 GitHub Release より遅れることが
+あります; 上の curl / `go install` がリポジトリ管理下の正式インストールです。
+スキル設置後、バンドルの `install-binary.sh` が初回使用時に対応する `rallish`
+バイナリを自動インストールします。
+</details>
 </details>
 
 > ✓ rallish はプロジェクトごとではなくユーザーごとに一度だけ実行されます。
@@ -182,7 +190,7 @@ SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-u
 rallish cycle run --once --cycle-id <id>
 # ランタイム PreToolUse フックが呼び出す実行前ポリシーゲート (宣言 + 記録; フックが強制)
 rallish gate tooluse --command 'rm -rf /'    # -> {"verdict":"deny",...}  exit 13
-# ゲート終了コード: 0=許可, 13=拒否, 14=エラー; --cycle-id で判決を記録できます。
+# ゲート終了コード: 0=許可, 13=拒否, 14=要人間確認; --cycle-id で判決を記録できます。
 
 # MCP 経由の rally (デーモンの MCP 2025-03-26 表面を使うワンショットクライアント)
 rallish rally mcp-agent --mode create --participants alice,bob --task "refactor auth"

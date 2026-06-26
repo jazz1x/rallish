@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/jazz1x/rallish/internal/session"
 	"github.com/jazz1x/rallish/pkg/contract"
 )
 
@@ -52,6 +53,8 @@ type State struct {
 	StartTime    time.Time
 	LastResponse *contract.TurnResponse
 	DeadlineMS   int64
+	DryRounds    int
+	Records      []session.TurnRecord
 }
 
 // Evaluate iterates conditions in order and returns true if any match.
@@ -89,6 +92,16 @@ func (e *Evaluator) evaluateOne(ctx context.Context, state State, cond contract.
 	case contract.ExitReviewerApproved:
 		if state.LastResponse != nil && state.LastResponse.SelfEval == contract.SelfEvalConfident && state.LastResponse.Done {
 			return true, "reviewer approved", nil
+		}
+	case contract.ExitDryRounds:
+		if state.Budget.DryRoundsThreshold > 0 && state.DryRounds >= state.Budget.DryRoundsThreshold {
+			return true, "dry rounds", nil
+		}
+	case contract.ExitStuck:
+		if len(state.Records) >= 6 {
+			if reason, ok := session.Stuck(state.Records); ok {
+				return true, reason, nil
+			}
 		}
 	case contract.ExitTestsPass, contract.ExitAllArtifactsCompile:
 		if !e.allowShell {

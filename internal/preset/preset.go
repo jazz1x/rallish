@@ -33,9 +33,10 @@ type yamlRole struct {
 }
 
 type yamlBudget struct {
-	MaxTurns        int   `yaml:"max_turns"`
-	MaxTokens       int64 `yaml:"max_tokens"`
-	DeadlineMinutes int   `yaml:"deadline_minutes"`
+	MaxTurns           int   `yaml:"max_turns"`
+	MaxTokens          int64 `yaml:"max_tokens"`
+	DeadlineMinutes    int   `yaml:"deadline_minutes"`
+	DryRoundsThreshold int   `yaml:"dry_rounds_threshold"`
 }
 
 type yamlScratch struct {
@@ -72,9 +73,10 @@ func Load(r io.Reader) (contract.Preset, error) {
 		Description: yp.Description,
 		Routing:     yp.Routing,
 		Budget: contract.Budget{
-			TokensLeft: yp.Budget.MaxTokens,
-			TurnsLeft:  yp.Budget.MaxTurns,
-			DeadlineMS: int64(yp.Budget.DeadlineMinutes) * 60000,
+			TokensLeft:         yp.Budget.MaxTokens,
+			TurnsLeft:          yp.Budget.MaxTurns,
+			DeadlineMS:         int64(yp.Budget.DeadlineMinutes) * 60000,
+			DryRoundsThreshold: yp.Budget.DryRoundsThreshold,
 		},
 		Scratch: contract.ScratchConfig{
 			MaxKB:         yp.Scratch.MaxKB,

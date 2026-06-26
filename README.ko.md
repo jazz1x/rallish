@@ -9,7 +9,7 @@
 
 > **참고:** `main` 브랜치는 최신 태그보다 많은 기능을 포함합니다. 최신 변경 내용은
 > [CHANGELOG.md](CHANGELOG.md)의 `[Unreleased]` 섹션을 참조하세요.
-**rallish**는 여러 에이전트 런타임 사이에 위치하는 작은 로컬 브로커 프로세스입니다. 각 런타임은 어댑터만 있으면 어떤 코딩 CLI(Claude, Kimi, Cursor, Codex 등, 또는 동일 종류라도 서로 다른 컨텍스트에서 실행되는 경우)도 사용할 수 있습니다. 브로커는 대화 상태를 관리하고, 누구의 차례인지 결정하며, 에이전트 간에 간결한 턴 페이로드를 중계합니다.
+**rallish**는 여러 에이전트 런타임 사이에 위치하는 작은 로컬 브로커 프로세스입니다. 현재 Claude 및 Kimi 어댑터가 기본 제공되며, 최소한의 두 메서드 어댑터 포트를 구현하면 다른 CLI(Cursor, Codex 등)도 추가할 수 있습니다. 동일 종류라도 서로 다른 컨텍스트에서 실행되는 경우도 지원합니다. 브로커는 대화 상태를 관리하고, 누구의 차례인지 결정하며, 에이전트 간에 간결한 턴 페이로드를 중계합니다.
 
 모든 것은 로컬에서 실행됩니다. 클라우드 브로커나 외부 조정 서비스가 없습니다. 와이어 포맷은 합리적인 범위 내에서 **A2A(Agent2Agent) 프로토콜**을 따륯므로, 어댑터를 통해 A2A 호환 에이전트를 연결할 수 있습니다.
 
@@ -23,7 +23,7 @@
 | **Rally (인터랙티브)** | `rallish rally`로 두 코딩 CLI 세션 간 라이브 바톤 전달; 에이전트가 핑퐁을 자율 루프 (턴마다 사용자 트리거 불필요); SSE를 통한 독점 홀더 강제 |
 | **A2A 프로토콜** | A2A v1.0 와이어 형상: `/.well-known/agent-card.json`, `protocolVersion`, PascalCase JSON-RPC 태스크, SSE 스트리밍. 서명된 카드와 상호 인증은 미구현(연기). |
 | **토큰 예산** | 세션당 토큰, 턴 수, 시간의 상한선을 강제 |
-| **스크래치패드** | 자동 압축(compaction)이 적용된 롤링 공유 스크래치 |
+| **스크래치패드** _(계획됨)_ | 자동 압축(compaction)이 적용된 롤링 공유 스크래치; 프리셋 설정은 파싱되지만 아직 턴 루프에 연결되지 않음 |
 | **프리셋** | 역할, 라우팅, 종료 조건을 정의한 YAML 템플릿 |
 | **Unix 소켓 IPC** | CLI↔Daemon이 `~/.rallish/rallish.sock`(`0600`) 경유. A2A 외부 클라이언트와 Windows 폴백용으로 TCP 루프백 유지 |
 | **자동 데몬** | `rallish squash`가 브로커 미실행 시 자동 스폰. `rallish doctor`가 소켓 도달성 보고 |
@@ -38,7 +38,7 @@ rallish는 벤더 중립, 리포 로컬 **작업 하네스**입니다. 에이전
 - **Interop** — A2A v1.0 와이어 형상 (`/.well-known/agent-card.json`의 Agent Card, 실제 `protocolVersion`, 엄격한 타입 인테이크). 서명된 카드와 상호 인증은 미구현(연기).
 - **Audit** — `schema_version` 스탬프, 해시 체인, 재생 가능한 원장 + RFC 9162 Merkle 포함/일관성 증명.
 - **Anti-spin** — 스턱/예산 회로 차단기 + 고착 중단 부활 방지 가드 (cron이 재가동한 스피닝 실행은 스스로 중단되며 재부활하지 않음).
-- **Action-gate** — 실행 전 파괴적 명령 거부 목록 + 시크릿 격리; rallish가 결정을 선언·기록하고, 런타임 훅이 강제합니다.
+- **Action-gate** — 실행 전 파괴적 명령 거부 목록 + 시크릿 격리; rallish가 결정을 선언·기록하고, 런타임 훅이 강제합니다. 바로 연결 가능한 Claude Code PreToolUse 훅이 스킬 번들에 포함됩니다 — [docs/runbook-action-gate.ko.md](docs/runbook-action-gate.ko.md) 참조.
 
 전체 방향 및 근거: `docs/north-star.md`.
 
@@ -80,32 +80,41 @@ which claude      # $PATH에 있는 지원 어댑터 바이너리
 
 ## 설치
 
-명령 하나:
+`rallish` 바이너리가 유일한 의존성입니다. 머신에 맞는 방법을 고르세요 —
+모두 같은 서명된 GitHub Release에서 같은 바이너리를 설치합니다:
+
+| 방법 | 명령 |
+|---|---|
+| **curl** (Unix 전반, 툴체인 불필요) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
+| **`go install`** (Go ≥ 1.25) | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
+| **소스 빌드** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
+| **Homebrew tap** (macOS) | `brew tap jazz1x/rallish && brew install rallish` |
+
+curl 스크립트는 최신 크로스플랫폼 릴리스(cosign 서명 + SBOM)를
+`/usr/local/bin`(쓰기 불가 시 `~/.local/bin`)에 받습니다.
+
+그다음 스킬 번들과 데몬을 한 번 연결:
+
+```bash
+rallish bootstrap   # 멱등: 스킬을 ~/.claude/skills/rallish/에 설치하고 데몬을 점검
+```
+
+어떤 프로젝트든 Claude Code (또는 다른 스킬 인식 코딩 CLI)를 열고
+`랠리보낼 준비해` / `let's serve`.
+
+<details>
+<summary><b>스킬 레지스트리 설치 (skills.sh)</b></summary>
+
+[skills.sh](https://www.skills.sh) 레지스트리를 쓴다면 스킬 번들을 바로 받을 수 있습니다:
 
 ```bash
 npx skills add jazz1x/rallish
 ```
 
-스킬 번들(SKILL.md + 바이너리 인스톨러)을 `~/.claude/skills/rallish/`
-에 깔아둡니다. [skills.sh](https://www.skills.sh) 경유로 해석.
-
-어떤 프로젝트든 Claude Code (또는 다른 스킬 인식 코딩 CLI) 열고
-`랠리보낼 준비해` / `let's serve`. 첫 사용 시 스킬이 번들된 플랫폼 감지
-스크립트(`scripts/install-binary.sh`)로 `rallish` 바이너리를 자동 설치
-(최신 GitHub Release → `/usr/local/bin` 또는 `~/.local/bin`).
-
-<details>
-<summary><b>파워 유저용 (번들 우회)</b></summary>
-
-| 방법 | 명령 |
-|---|---|
-| **curl** (Unix 전반) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
-| **Homebrew tap** (macOS) | _준비 중_ — 저장소 이슈에서 추적 중; 아직 제공되지 않음 |
-| **소스 빌드** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
-| **`go install`** | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
-
-바이너리가 `$PATH`에 있으면 `rallish bootstrap` (멱등)이 스킬 번들 설치 +
-데몬 검증을 수행.
+이는 커뮤니티 레지스트리 경유로 해석되어 최신 GitHub Release보다 뒤처질 수
+있습니다; 위의 curl / `go install` 경로가 저장소가 제어하는 정식 설치입니다.
+스킬이 깔리면 번들된 `install-binary.sh`가 첫 사용 시 맞는 `rallish` 바이너리를
+자동 설치합니다.
 </details>
 
 > ✓ rallish는 프로젝트별이 아닌 사용자별로 한 번만 실행됩니다. 최초 설치 후
@@ -179,7 +188,7 @@ SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-u
 rallish cycle run --once --cycle-id <id>
 # 런타임 PreToolUse 훅이 호출하는 실행 전 정책 게이트 (선언 + 기록; 훅이 강제)
 rallish gate tooluse --command 'rm -rf /'    # -> {"verdict":"deny",...}  exit 13
-# 게이트 종료 코드: 0=허용, 13=거부, 14=오류; --cycle-id 로 판결을 기록할 수 있습니다.
+# 게이트 종료 코드: 0=허용, 13=거부, 14=사람-검토-필요; --cycle-id 로 판결을 기록할 수 있습니다.
 
 # MCP를 통한 rally (데몬의 MCP 2025-03-26 표면을 사용하는 원샷 클라이언트)
 rallish rally mcp-agent --mode create --participants alice,bob --task "refactor auth"

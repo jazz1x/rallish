@@ -6,7 +6,7 @@
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![go](https://img.shields.io/badge/go-1.25+-blue)
 
-**rallish** is a small local broker process that sits between N agent runtimes — any coding CLI with an adapter (Claude, Kimi, Cursor, Codex, etc., or even the same kind running in different contexts). The broker owns the conversation state, decides whose turn it is, and shuttles compact turn payloads between them.
+**rallish** is a small local broker process that sits between N agent runtimes — Claude and Kimi adapters ship today; other CLIs (Cursor, Codex, …) can be added via the minimal two-method adapter port, and even the same kind running in different contexts is supported. The broker owns the conversation state, decides whose turn it is, and shuttles compact turn payloads between them.
 
 Everything runs locally. No cloud broker, no external coordination service. The wire format follows the **A2A (Agent2Agent) protocol** where reasonable, so any A2A-compliant agent can be plugged in via an adapter.
 
@@ -20,7 +20,7 @@ Everything runs locally. No cloud broker, no external coordination service. The 
 | **Rally (interactive)** | `rallish rally` provides live baton-passing between two coding-CLI sessions; agents self-loop the ping-pong (no per-turn user trigger needed); exclusive holder enforcement via SSE |
 | **A2A Protocol** | A2A v1.0 wire shape: `/.well-known/agent-card.json`, `protocolVersion`, PascalCase JSON-RPC tasks, SSE streaming. Signed cards and mutual auth are deferred. |
 | **Token Budgets** | Hard caps on tokens, turns, and wall-clock time per session |
-| **Scratchpad** | Rolling shared scratch with automatic compaction |
+| **Scratchpad** _(planned)_ | Rolling shared scratch with automatic compaction; preset config is parsed but not yet wired into the turn loop |
 | **Presets** | YAML templates for roles, routing, and exit conditions |
 | **Unix socket IPC** | CLI↔Daemon over `~/.rallish/rallish.sock` (mode `0600`); TCP loopback retained for A2A clients and Windows fallback |
 | **Auto-daemon** | `rallish squash` spawns the broker if none is running; `rallish doctor` reports socket reachability |
@@ -35,7 +35,7 @@ rallish is a vendor-neutral, repo-local **work harness**: it makes any agent run
 - **Interop** — A2A v1.0 wire shape (Agent Card at `/.well-known/agent-card.json`, real `protocolVersion`, strict typed intake). Signed cards and mutual auth are deferred.
 - **Audit** — `schema_version`-stamped, hash-chained, replayable ledger with RFC 9162 Merkle inclusion/consistency proofs.
 - **Anti-spin** — stuck/budget circuit-breakers + a sticky-halt reviver guard (a cron-revived spinning run self-halts and is not resurrected).
-- **Action-gate** — pre-execution destructive-command deny-list + secret containment; rallish declares + records the decision, the runtime hook enforces.
+- **Action-gate** — pre-execution destructive-command deny-list + secret containment; rallish declares + records the decision, the runtime hook enforces. A ready-to-wire Claude Code PreToolUse hook ships in the skill bundle — see [docs/runbook-action-gate.md](docs/runbook-action-gate.md).
 
 Full direction + rationale: `docs/north-star.md`.
 
@@ -77,33 +77,42 @@ which claude      # any supported adapter binary on $PATH
 
 ## Install
 
-One command:
+The `rallish` binary is the only dependency. Pick whichever fits your machine —
+each installs the same binary from the same signed GitHub Release:
+
+| Method | Command |
+|---|---|
+| **curl** (any Unix, no toolchain) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
+| **`go install`** (Go ≥ 1.25) | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
+| **From source** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
+| **Homebrew tap** (macOS) | `brew tap jazz1x/rallish && brew install rallish` |
+
+The curl script fetches the latest cross-platform release (cosign-signed, with
+SBOM) into `/usr/local/bin` (or `~/.local/bin` if that is not writable).
+
+Then wire up the skill bundle and daemon once:
+
+```bash
+rallish bootstrap   # idempotent: installs the skill to ~/.claude/skills/rallish/ and checks the daemon
+```
+
+Open any project in Claude Code (or another skill-aware coding CLI) and say
+`랠리보낼 준비해` / `let's serve`.
+
+<details>
+<summary><b>Skill-registry install (skills.sh)</b></summary>
+
+If you use the [skills.sh](https://www.skills.sh) registry, you can pull the skill
+bundle directly:
 
 ```bash
 npx skills add jazz1x/rallish
 ```
 
-That delivers the skill bundle (SKILL.md + bundled binary installer) to
-`~/.claude/skills/rallish/`. Resolves via [skills.sh](https://www.skills.sh).
-
-Open any project in Claude Code (or another skill-aware coding CLI) and say
-`랠리보낼 준비해` / `let's serve`. On first use the skill self-installs the
-`rallish` binary via the bundled platform-detecting script
-(`scripts/install-binary.sh` → fetches the latest GitHub Release into
-`/usr/local/bin` or `~/.local/bin`).
-
-<details>
-<summary><b>Power-user alternatives (skip the bundle)</b></summary>
-
-| Method | Command |
-|---|---|
-| **curl** (any Unix) | `curl -fsSL https://raw.githubusercontent.com/jazz1x/rallish/main/install.sh \| sh` |
-| **Homebrew tap** (macOS) | _coming soon_ — tracked in repo issues; not yet provisioned |
-| **From source** | `git clone https://github.com/jazz1x/rallish && cd rallish && make build` |
-| **`go install`** | `go install github.com/jazz1x/rallish/cmd/rallish@latest` |
-
-After the binary is on `$PATH`, `rallish bootstrap` (idempotent) installs the
-skill bundle and verifies the daemon.
+This resolves through the community registry and can lag the latest GitHub
+Release; the curl / `go install` paths above are the canonical, repo-controlled
+installs. After the skill lands, its bundled `install-binary.sh` self-installs the
+matching `rallish` binary on first use.
 </details>
 
 > ✓ rallish runs once per user (not per project). After the one-time
@@ -177,7 +186,7 @@ SESSION=$(./dist/rallish rally new --participants server,returner --task "warm-u
 rallish cycle run --once --cycle-id <id>
 # Pre-execution policy gate a runtime PreToolUse hook calls (declare + record; the hook enforces)
 rallish gate tooluse --command 'rm -rf /'    # -> {"verdict":"deny",...}  exit 13
-# Gate exit codes: 0=allow, 13=deny, 14=error; use --cycle-id to record the verdict.
+# Gate exit codes: 0=allow, 13=deny, 14=needs-human; use --cycle-id to record the verdict.
 
 # Rally via MCP (one-shot client over the daemon's MCP 2025-03-26 surface)
 rallish rally mcp-agent --mode create --participants alice,bob --task "refactor auth"

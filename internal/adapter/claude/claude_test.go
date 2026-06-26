@@ -2,47 +2,50 @@ package claude
 
 import (
 	"context"
-	"strings"
+	"os"
+	"path/filepath"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/jazz1x/rallish/pkg/contract"
 	"github.com/stretchr/testify/require"
 )
 
-func TestSnippet(t *testing.T) {
-	// Short input is returned trimmed, verbatim.
-	if got := snippet([]byte("  hello  "), 2000); got != "hello" {
-		t.Fatalf("snippet short = %q, want %q", got, "hello")
-	}
-	// Empty stays empty (no spurious ellipsis on a parse failure with no output).
-	if got := snippet([]byte("   "), 2000); got != "" {
-		t.Fatalf("snippet empty = %q, want empty", got)
-	}
-	// Oversized input is capped to the TRAILING max bytes (the tail usually holds
-	// the actual error/notice) with a leading ellipsis, so it never bloats an error.
-	big := strings.Repeat("x", 5000)
-	got := snippet([]byte(big), 2000)
-	// "…" is 3 bytes in UTF-8, so the cap yields 2000 tail bytes + the ellipsis.
-	if len(got) != 2000+len("…") {
-		t.Fatalf("snippet cap len = %d, want %d (2000 tail + ellipsis)", len(got), 2000+len("…"))
-	}
-	if !strings.HasPrefix(got, "…") {
-		t.Fatalf("oversized snippet must start with an ellipsis")
-	}
-	if !strings.HasSuffix(got, "x") {
-		t.Fatalf("oversized snippet must keep the trailing bytes")
-	}
-	// A byte-offset cap landing inside a multibyte rune must not emit invalid
-	// UTF-8: "한" is 3 bytes, so cap 4 cuts mid-rune. The dangling leading byte is
-	// dropped, leaving a clean rune-boundary tail (no U+FFFD replacement char).
-	multibyte := snippet([]byte("한한한한"), 4)
-	if !utf8.ValidString(multibyte) {
-		t.Fatalf("multibyte snippet = % x, must be valid UTF-8", []byte(multibyte))
-	}
-	if r, _ := utf8.DecodeRuneInString(strings.TrimPrefix(multibyte, "…")); r == utf8.RuneError {
-		t.Fatalf("multibyte snippet = %q, must not start with a replacement rune", multibyte)
-	}
+// stubBinary writes an executable shell script that prints the given stdout and
+// exits 0, then returns its path. Lets us exercise Run without a real claude CLI.
+func stubBinary(t *testing.T, stdout string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "claude-stub.sh")
+	script := "#!/bin/sh\ncat <<'EOF'\n" + stdout + "\nEOF\n"
+	//nolint:gosec // G306 — a test stub binary must carry the executable bit to run
+	require.NoError(t, os.WriteFile(path, []byte(script), 0o700))
+	return path
+}
+
+// An exit-0 CLI that prints an auth notice instead of JSON must yield an
+// actionable "not authenticated" error, not the cryptic parse failure (AC-F4.2).
+func TestRunUnauthenticatedActionable(t *testing.T) {
+	a := &Adapter{binary: stubBinary(t, "Error: Invalid API key provided")}
+	_, err := a.Run(context.Background(), contract.TurnRequest{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not authenticated")
+	require.NotContains(t, err.Error(), "no JSON TurnResponse")
+}
+
+// A rate-limit notice classifies as a limit, not auth.
+func TestRunRateLimitedActionable(t *testing.T) {
+	a := &Adapter{binary: stubBinary(t, "Claude usage limit reached for this period")}
+	_, err := a.Run(context.Background(), contract.TurnRequest{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "rate or usage limit")
+}
+
+// Unrecognized non-JSON output keeps the diagnostic snippet path.
+func TestRunUnknownKeepsSnippet(t *testing.T) {
+	a := &Adapter{binary: stubBinary(t, "some unexpected banner text")}
+	_, err := a.Run(context.Background(), contract.TurnRequest{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "parsing response")
 }
 
 func TestAdapterCheckMissingBinary(t *testing.T) {

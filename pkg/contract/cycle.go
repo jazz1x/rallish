@@ -128,6 +128,15 @@ func ParseTurnPayload(summary string) (TurnPayload, bool) {
 	return p, true
 }
 
+// ViolationCheck is a reproducible shell check for a verifiable claim.
+type ViolationCheck struct {
+	// Command is the shell command to run.
+	Command string `json:"command,omitempty"`
+	// Expected is the substring that must appear in combined output for the claim
+	// to be considered verified.
+	Expected string `json:"expected,omitempty"`
+}
+
 // Violation records a single issue discovered by a gate or philosophy sweep.
 type Violation struct {
 	// File is the path to the file containing the violation.
@@ -138,6 +147,16 @@ type Violation struct {
 	Type string `json:"type"`
 	// Message is a human-readable description.
 	Message string `json:"message"`
+	// Check is an optional reproducible verification command.
+	Check *ViolationCheck `json:"check,omitempty"`
+}
+
+// ClaimCheck records the result of verifying a single claim.
+type ClaimCheck struct {
+	// Violation is the claim that was checked.
+	Violation Violation `json:"violation"`
+	// Verified is true when the check command produced the expected output.
+	Verified bool `json:"verified"`
 }
 
 // GateReport carries the output of a single gate execution.
@@ -154,6 +173,8 @@ type GateReport struct {
 	Stderr string `json:"stderr,omitempty"`
 	// Violations lists issues found by this gate.
 	Violations []Violation `json:"violations,omitempty"`
+	// ClaimChecks records the per-claim verification results from ClaimGate.
+	ClaimChecks []ClaimCheck `json:"claim_checks,omitempty"`
 }
 
 // GateResult is the sealed sum type returned by a gate.

@@ -365,6 +365,21 @@ func (s *Server) handleStepCycle(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, report := range result.Reports() {
 		s.appendLedger(ctx, id, contract.NewGateLedgerEntry(time.Now().UnixMilli(), id, report))
+		if report.Gate == "claim" {
+			for _, cc := range report.ClaimChecks {
+				at := time.Now().UnixMilli()
+				var typ contract.LedgerEventType
+				summary := cc.Violation.Message
+				if cc.Verified {
+					typ = contract.LedgerEventClaimVerified
+					summary = "verified: " + summary
+				} else {
+					typ = contract.LedgerEventClaimFalsified
+					summary = "falsified: " + summary
+				}
+				s.appendLedger(ctx, id, contract.NewHarnessLedgerEntry(at, id, typ, summary, []string{cc.Violation.File}))
+			}
+		}
 	}
 
 	if sync, ok := s.cycleStore.getSync(id); ok {

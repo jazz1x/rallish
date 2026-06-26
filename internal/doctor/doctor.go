@@ -47,11 +47,42 @@ type Report struct {
 	Checks []Check
 }
 
+// Option configures an [Inspect] run.
+type Option func(*config)
+
+type config struct {
+	probe bool
+}
+
+// WithProbe enables a live auth probe: each adapter present on PATH is asked to
+// answer one minimal real turn so doctor can verify the runtime is actually
+// authenticated, not merely installed. It spends one cheap turn per adapter, so
+// it is opt-in (`doctor --probe`).
+func WithProbe() Option {
+	return func(c *config) { c.probe = true }
+}
+
+// prober is implemented by adapters that can run a live auth probe.
+type prober interface {
+	Probe(context.Context) error
+}
+
+// probeTimeout bounds a single live auth probe. Root cause for the bound: the
+// probe shells out to an external runtime CLI that may block indefinitely (e.g.
+// waiting on an interactive login prompt). We cannot fix that external CLI, and
+// a diagnostic command must always return — so a bound is the SSOT here.
+const probeTimeout = 90 * time.Second
+
 // Inspect runs all doctor probes and returns a structured report.
 // Errors per-probe are surfaced as Status fields on individual checks;
 // only a totally fatal condition (e.g. impossible home directory)
 // surfaces as the returned error.
-func Inspect(ctx context.Context, homeDir string) (Report, error) {
+func Inspect(ctx context.Context, homeDir string, opts ...Option) (Report, error) {
+	var cfg config
+	for _, o := range opts {
+		o(&cfg)
+	}
+
 	rep := Report{}
 	if homeDir == "" {
 		if h, err := os.UserHomeDir(); err == nil {
@@ -73,6 +104,9 @@ func Inspect(ctx context.Context, homeDir string) (Report, error) {
 		})
 	} else {
 		rep.Checks = append(rep.Checks, adapterCheck("adapter:claude", c))
+		if cfg.probe {
+			rep.Checks = append(rep.Checks, probeCheck(ctx, "adapter:claude:auth", c))
+		}
 	}
 	if k, err := kimi.New(); err != nil {
 		rep.Checks = append(rep.Checks, Check{
@@ -81,9 +115,22 @@ func Inspect(ctx context.Context, homeDir string) (Report, error) {
 		})
 	} else {
 		rep.Checks = append(rep.Checks, adapterCheck("adapter:kimi", k))
+		if cfg.probe {
+			rep.Checks = append(rep.Checks, probeCheck(ctx, "adapter:kimi:auth", k))
+		}
 	}
 
 	return rep, nil
+}
+
+// probeCheck runs a bounded live auth probe and maps the result to a Check.
+func probeCheck(ctx context.Context, name string, p prober) Check {
+	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	if err := p.Probe(probeCtx); err != nil {
+		return Check{Name: name, Status: StatusFail, Detail: err.Error()}
+	}
+	return Check{Name: name, Status: StatusOK, Detail: "authenticated (live probe answered)"}
 }
 
 type adapterIface interface {

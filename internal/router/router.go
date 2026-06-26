@@ -24,14 +24,8 @@ func (r *Router) Next(ctx context.Context, prev *contract.TurnResponse, turn int
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	// 1. Handoff takes priority.
-	if prev != nil && prev.HandoffTo != "" {
-		if r.isValidRole(prev.HandoffTo) {
-			return prev.HandoffTo, nil
-		}
-	}
 
-	// 2. Blocked escalation.
+	// Blocked escalation is a safety override for every routing strategy.
 	if prev != nil && prev.SelfEval == contract.SelfEvalBlocked {
 		reviewerID := r.findReviewer()
 		if reviewerID != "" {
@@ -40,12 +34,29 @@ func (r *Router) Next(ctx context.Context, prev *contract.TurnResponse, turn int
 		return "", errors.New("role blocked and no reviewer defined")
 	}
 
-	// 3. Apply routing rule.
 	switch r.preset.Routing {
 	case "round_robin", "handoff_then_round_robin":
+		if prev != nil && prev.HandoffTo != "" && r.isValidRole(prev.HandoffTo) {
+			return prev.HandoffTo, nil
+		}
+		return r.roundRobin(turn), nil
+	case "strict_round_robin":
+		// Strict round-robin ignores explicit handoffs and always advances in order.
+		return r.roundRobin(turn), nil
+	case "last_writer_wins":
+		// A handoff request is still honoured as an explicit signal. Otherwise the
+		// role that just wrote continues to hold the baton, inferred from the
+		// previous turn's round-robin slot. This keeps the same writer active
+		// until it explicitly hands off.
+		if prev != nil && prev.HandoffTo != "" && r.isValidRole(prev.HandoffTo) {
+			return prev.HandoffTo, nil
+		}
+		if prev != nil {
+			return r.roundRobin(turn - 1), nil
+		}
 		return r.roundRobin(turn), nil
 	default:
-		return "", fmt.Errorf("routing rule %q not supported in phase 1", r.preset.Routing)
+		return "", fmt.Errorf("routing rule %q not supported", r.preset.Routing)
 	}
 }
 

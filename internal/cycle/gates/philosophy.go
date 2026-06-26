@@ -222,18 +222,21 @@ func scanSRP(diff string) []contract.Violation {
 	// Per-file: look for func declarations and count subsequent added lines.
 	var funcStart, funcLine, braceDepth int
 	inFunc := false
+	checkLength := func(a addedLine) {
+		length := a.no - funcStart + 1
+		if length > 60 {
+			vs = append(vs, contract.Violation{
+				File:    a.file,
+				Line:    funcLine,
+				Type:    "srp",
+				Message: fmt.Sprintf("function spans ~%d added lines; consider decomposition", length),
+			})
+		}
+	}
 	forEachAddedLine(diff, func(string) { inFunc = false }, func(a addedLine) {
 		if funcDeclRe.MatchString(a.text) {
 			if inFunc {
-				length := funcStart - braceDepth // rough estimate
-				if length > 60 {
-					vs = append(vs, contract.Violation{
-						File:    a.file,
-						Line:    funcLine,
-						Type:    "srp",
-						Message: fmt.Sprintf("function spans ~%d added lines; consider decomposition", length),
-					})
-				}
+				checkLength(a)
 			}
 			funcStart = a.no
 			funcLine = a.no
@@ -244,6 +247,7 @@ func scanSRP(diff string) []contract.Violation {
 			braceDepth += strings.Count(a.text, "{")
 			braceDepth -= strings.Count(a.text, "}")
 			if braceDepth <= 0 && strings.Contains(a.text, "}") {
+				checkLength(a)
 				inFunc = false
 			}
 		}
