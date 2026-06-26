@@ -70,26 +70,25 @@ signs:
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
-# Homebrew tap publish. Requires the `jazz1x/homebrew-rallish` tap repo and the
-# TAP_GITHUB_TOKEN repository secret. The release workflow passes the secret;
-# if either is missing the release step will fail until they are provisioned.
-brews:
-  - name: rallish
-    repository:
-      owner: jazz1x
-      name: homebrew-rallish
-      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
-    folder: Formula
-    goarm: ""
-    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
-    homepage: https://github.com/jazz1x/rallish
-    description: A local broker for multi-agent turn-taking
-    license: MIT
-    test: |
-      system "#{bin}/rallish version"
-    dependencies:
-      - name: go
-        type: optional
+# Homebrew tap publish. Disabled until the `jazz1x/homebrew-rallish` tap repo
+# and TAP_GITHUB_TOKEN repository secret are provisioned.
+# brews:
+#   - name: rallish
+#     repository:
+#       owner: jazz1x
+#       name: homebrew-rallish
+#       token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+#     folder: Formula
+#     goarm: ""
+#     commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+#     homepage: https://github.com/jazz1x/rallish
+#     description: A local broker for multi-agent turn-taking
+#     license: MIT
+#     test: |
+#       system "#{bin}/rallish version"
+#     dependencies:
+#       - name: go
+#         type: optional
 
 changelog:
   use: github
