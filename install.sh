@@ -81,12 +81,45 @@ install -m 0755 "$TMPDIR/rallish" "$TARGET/rallish"
 
 echo
 echo "✓ installed: $TARGET/rallish"
+
+# Guess the user's shell profile so we can print an exact copy-paste command.
+RC_FILE=""
+SHELL_NAME=""
+if [ -n "${SHELL:-}" ]; then
+  SHELL_NAME="$(basename "$SHELL")"
+fi
+if [ -z "$SHELL_NAME" ]; then
+  SHELL_NAME="$(basename "$(ps -p "${PPID:-}" -o comm= 2>/dev/null || echo sh)")"
+fi
+
+case "$SHELL_NAME" in
+  zsh)  RC_FILE="$HOME/.zshrc" ;;
+  bash) RC_FILE="$HOME/.bashrc" ;;
+  fish) RC_FILE="$HOME/.config/fish/config.fish" ;;
+  *)    RC_FILE="$HOME/.profile" ;;
+esac
+
 case ":$PATH:" in
-  *":$TARGET:"*) ;;
+  *":$TARGET:"*)
+    echo
+    echo "✓ $TARGET is already on your PATH."
+    ;;
   *)
-    echo "  Add $TARGET to your PATH (e.g. in ~/.zshrc or ~/.bashrc):"
-    echo "    export PATH=\"$TARGET:\$PATH\""
+    echo
+    echo "⚠ $TARGET is not on your PATH yet."
+    echo "  Add it by running this command (copy-paste into your terminal):"
+    echo
+    echo "    echo 'export PATH=\"$TARGET:\$PATH\"' >> $RC_FILE"
+    echo
+    echo "  Then reload your shell config:"
+    echo
+    echo "    source $RC_FILE"
     ;;
 esac
+
 echo
-echo "Next: run 'rallish bootstrap' once to install the rallish skill."
+echo "Next steps:"
+echo "  1. Run 'rallish bootstrap' once to install the rallish skill."
+echo "  2. Start the broker:   rallish daemon"
+echo "  3. Start a session:    rallish squash --preset pair-review --task \"...\""
+echo
